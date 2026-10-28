@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.overlay-background",
+	"name": "Overlay Background",
+	"description": "See-through overlay screens.",
+	"author": "Yumistra",
+	"icon": "ImageIcon",
+	"version": "1.0.1",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

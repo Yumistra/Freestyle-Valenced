@@ -1,0 +1,26 @@
+name: Native build check
+
+# main 이 아닌 브랜치에서 네이티브(Kotlin) 부분이 컴파일되는지만 확인한다 (배포 안 함)
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - name: Android SDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          for p in "platforms;android-36" "platforms;android-37" "build-tools;36.0.0"; do "$SDKM" --install "$p" > /dev/null || echo "skip $p"; done
+      - run: bash scripts/build-native.sh

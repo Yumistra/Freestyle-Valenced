@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.toast-fix",
+	"name": "Toast Fix",
+	"description": "Fixes crashes from old-style toasts.",
+	"author": "Yumistra",
+	"icon": "CircleInformationIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

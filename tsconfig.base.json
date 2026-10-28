@@ -1,0 +1,12 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"jsx": "react-jsx",
+		"strict": false,
+		"skipLibCheck": true,
+		"noEmit": true
+	},
+	"include": ["${configDir}/**/*", "types"]
+}

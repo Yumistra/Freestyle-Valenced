@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.better-animations",
+	"name": "Better Animations",
+	"description": "Animations everywhere.",
+	"author": "Yumistra",
+	"icon": "MagicWandIcon",
+	"version": "1.0.18",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.betteranimations.BetterAnimationsPlugin"
+		}
+	}
+}

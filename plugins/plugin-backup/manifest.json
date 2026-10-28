@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.plugin-backup",
+	"name": "Plugin Backup",
+	"description": "Back up and restore your plugins.",
+	"author": "Yumistra",
+	"icon": "DownloadIcon",
+	"version": "1.0.1",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
