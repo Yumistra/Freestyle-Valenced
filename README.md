@@ -5,6 +5,7 @@ Plugins for Valenced.
 | Plugin | ID |
 | --- | --- |
 | Better Animations | `yumistra.better-animations` |
+| Commands | `yumistra.commands` |
 | Message Actions | `yumistra.message-actions` |
 | Overlay Background | `yumistra.overlay-background` |
 | Plugin Backup | `yumistra.plugin-backup` |

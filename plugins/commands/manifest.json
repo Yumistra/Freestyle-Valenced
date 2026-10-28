@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.commands",
+	"name": "Commands",
+	"description": "/plugins, /eval and /debug.",
+	"author": "Yumistra",
+	"icon": "SlashBoxIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
