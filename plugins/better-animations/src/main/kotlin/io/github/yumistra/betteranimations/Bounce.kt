@@ -234,6 +234,12 @@ internal class Bounce(private val recycler: Recycler?, private val enabled: (Vie
                 if (d == 0f) return
                 // 목록이 실제로 끌기를 시작한 뒤에만 (그전엔 눌림·길게 누르기가 그대로 가게)
                 if (s.pull == 0f && !startedDragging(list, s, ev)) return
+                // 끝에서 늘이는 중에 그쪽으로 내용이 더 생겼다 (예: 위로 계속 올리다 옛 메시지가 로드됨).
+                // 계속 늘이고 있으면 손가락이 고무줄에만 쓰여 목록이 막힌 것처럼 된다 → 목록에 넘겨준다
+                if (s.pull != 0f && canScroll(list, s.axis, if (s.pull > 0f) -1 else 1)) {
+                    handOff(list, s)
+                    return
+                }
                 var used: Float
                 if (s.pull == 0f) {
                     // 손가락이 앞쪽으로(+) 가면 앞쪽 끝, 뒤쪽으로(−) 가면 뒤쪽 끝
@@ -263,6 +269,55 @@ internal class Bounce(private val recycler: Recycler?, private val enabled: (Vie
                 }
             }
         }
+    }
+
+    /**
+     * 늘어난 만큼을 실제 스크롤로 바꾼다: 그림 위치를 0 으로 하고 목록을 같은 거리만큼 그 끝 쪽으로 스크롤해서
+     * 화면의 내용은 제자리에 있고, 이어지는 손가락 이동은 목록이 스크롤한다.
+     * 새로 생긴 내용이 늘어난 거리보다 짧으면 남은 만큼만 스프링으로 돌아온다.
+     */
+    private fun handOff(list: ViewGroup, s: State) {
+        val offset = s.offset
+        s.pull = 0f
+        stop(s)
+        if (offset == 0f) return
+        var moved = 0f
+        try {
+            moved = scrollKeeping(list, s.axis, offset)
+        } catch (t: Throwable) {
+        }
+        // 남은 거리 (넘치거나 반대로 가면 0, 하나도 못 움직였으면 그대로)
+        val left = (offset - moved).let { if (sign(it) != sign(offset) || abs(it) < 0.5f) 0f else it }
+        draw(list, s, left)
+        if (left != 0f) spring(list, s, left, 0f, OMEGA_RELEASE)
+    }
+
+    /** 목록을 offset 만큼 그 끝 쪽으로 스크롤하고, 내용이 실제로 움직인 거리 (+ = 아래·오른쪽으로) */
+    private fun scrollKeeping(list: ViewGroup, axis: Int, offset: Float): Float {
+        val amount = -offset.toInt()
+        if (amount == 0) return 0f
+        val vertical = axis != 2
+        if (!isRecycler(list)) {
+            val before = if (vertical) list.scrollY else list.scrollX
+            if (vertical) list.scrollBy(0, amount) else list.scrollBy(amount, 0)
+            return -((if (vertical) list.scrollY else list.scrollX) - before).toFloat()
+        }
+        // RecyclerView 는 scrollY 가 늘 0 이라 끝 쪽 줄의 위치로 잰다 (안쪽으로 움직이니 떨어져 나가지 않는다)
+        var edge: View? = null
+        for (i in 0 until list.childCount) {
+            val c = list.getChildAt(i)
+            val start = if (vertical) c.top else c.left
+            if (edge == null) {
+                edge = c
+                continue
+            }
+            val best = if (vertical) edge.top else edge.left
+            if (if (offset > 0f) start < best else start > best) edge = c
+        }
+        val before = edge?.let { if (vertical) it.top else it.left }
+        if (vertical) list.scrollBy(0, amount) else list.scrollBy(amount, 0)
+        if (edge == null || before == null || edge.parent !== list) return offset
+        return ((if (vertical) edge.top else edge.left) - before).toFloat()
     }
 
     // ── 끝에 부딪힘 (EdgeEffect) ───────────────────────────────────────
