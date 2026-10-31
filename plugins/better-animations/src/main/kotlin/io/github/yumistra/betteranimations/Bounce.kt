@@ -221,6 +221,9 @@ internal class Bounce(private val recycler: Recycler?, private val enabled: (Vie
                 if (s.anim != null || s.offset != 0f) {
                     stop(s)
                     s.pull = unrubber(s.offset, lengthOf(list, s.axis))
+                    // 늘어난 그림(animationMatrix)은 터치 위치 계산에 안 들어간다. 그대로 두면 튕기는 중에 누른 줄이 아니라
+                    // 그 자리에 원래 있던 줄이 눌린다 → 그린 만큼 터치 좌표를 옮겨서 보이는 줄이 눌리게
+                    s.shift = s.offset
                 } else {
                     s.pull = 0f
                 }

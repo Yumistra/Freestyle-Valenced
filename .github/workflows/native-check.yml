@@ -1,16 +1,17 @@
 name: Native build check
 
-# main 이 아닌 브랜치에서 네이티브(Kotlin) 부분이 컴파일되는지만 확인한다 (배포 안 함)
+# (임시 브랜치) 네이티브 부분을 빌드해서 plugin.jar 를 이 브랜치에 올린다
 on:
   push:
     branches-ignore: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   native:
+    if: "!contains(github.event.head_commit.message, '[jar]')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +25,8 @@ jobs:
           yes | "$SDKM" --licenses > /dev/null || true
           for p in "platforms;android-36" "platforms;android-37" "build-tools;36.0.0"; do "$SDKM" --install "$p" > /dev/null || echo "skip $p"; done
       - run: bash scripts/build-native.sh
+      - name: Commit plugin.jar
+        run: |
+          mkdir -p jar && cp plugins/better-animations/build/plugin.jar jar/
+          git config user.name ci && git config user.email ci@users.noreply.github.com
+          git add -f jar/plugin.jar && git commit -m "plugin.jar [jar]" && git push

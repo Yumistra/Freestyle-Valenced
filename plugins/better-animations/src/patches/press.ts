@@ -1,6 +1,6 @@
 import { instead } from '@valenced/patcher'
 import { createElement, forwardRef, useMemo, useRef, useState } from 'react'
-import { Animated, Easing, Pressable, StyleSheet } from 'react-native'
+import { Animated, Dimensions, Easing, Pressable, StyleSheet } from 'react-native'
 import { easingFrom, effectOf, normalize, springFor } from '../effects'
 import { active, report, status, version } from '../settings'
 
@@ -15,6 +15,9 @@ import { active, report, status, version } from '../settings'
  * 바꿔치기는 그리는 순간(Pressable 안쪽 forwardRef 의 render)에 한다. 요소 종류(element.type)는 그대로 Pressable 이라서
  * 다른 플러그인이 "이게 Pressable 인지" 확인하거나 그 children 을 고쳐도 그대로 된다 (예: File Size on Picker).
  */
+
+/** 이 비율 이상 넓은 버튼은 누르기 효과 없음 (화면 폭 기준) */
+const WIDE = 0.7
 
 /** Animated 로 감싼 쪽에서 원래 Pressable 을 그릴 때 붙이는 표시 */
 const MARK = '__baPressInner'
@@ -47,8 +50,11 @@ const PressAnim = forwardRef(function BetterAnimationsPressable(props: any, ref:
 
     const anim = useMemo(() => {
         const h = poseFor(effect)
-        // 큰 버튼은 덜 (가로·세로 중 긴 쪽 120px 넘으면 그만큼 줄여서)
-        const k = size > 0 ? Math.min(1, 120 / size) : 1
+        // 큰 버튼은 덜 (가로·세로 중 긴 쪽 120px 넘으면 그만큼 줄여서).
+        // 화면 폭에 가까운 줄(채널 목록 한 줄 등)은 움직이지 않는다: 누르는 동안 줄이 변형되면
+        // 디스코드가 눌린 자리를 다시 재고, 패널 열기 제스처와 겹친다
+        const k = size <= 0 ? 1 : size >= Dimensions.get('window').width * WIDE ? 0 : Math.min(1, 120 / size)
+        if (k === 0) return { t: [] as any[], o: undefined }
         const ip = (to: number) => p.current.interpolate({ inputRange: [0, 1], outputRange: [0, to] })
         const t: any[] = []
         if (h.rx) t.push({ perspective: 600 })

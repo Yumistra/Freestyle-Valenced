@@ -20,6 +20,24 @@ import { active, report, status } from '../settings'
 
 const IndexContext = createContext(-1)
 
+/**
+ * 화면 안에 또 있는 스택인지 (0 = 맨 바깥 스택).
+ * 메인 탭(서버·DM·나 탭 스택, 채팅 패널 스택)은 맨 바깥 화면 안에 들어 있는 스택이다.
+ * 거기서 채널을 고르면 디스코드가 패널을 미끄러뜨리면서 패널 안 화면을 바꾸는데,
+ * 그 화면 전환까지 우리가 바꾸면 패널이 안 열리거나 열렸다가 되돌아간다. 그래서 안쪽 스택은 건드리지 않는다.
+ */
+const NestContext = createContext(0)
+
+/** 지금 만드는 요소가 화면 안 스택에 속하는지. 렌더 중이 아니면(읽을 수 없으면) 바깥으로 본다 */
+function nested(): boolean {
+    try {
+        // useContext 는 훅 목록에 자리를 차지하지 않아서(readContext) 조건부로 불러도 순서가 어긋나지 않는다
+        return useContext(NestContext) > 0
+    } catch {
+        return false
+    }
+}
+
 const one = new Animated.Value(1)
 
 /** 꽉 찬 모달 (설정 화면 등). 투명 모달·폼 시트는 창/시트라 빼 둔다 */
@@ -141,8 +159,12 @@ function Enter({ children, presentation, screenId }: { children?: any; presentat
             if (i >= 0) mounted.splice(i, 1)
         }
     }, [])
-    // 움직이는 동안만 GPU 텍스처로 그려서 버벅임을 줄인다
-    return createElement(Animated.View, { style: anim ? [{ flex: 1 }, anim.style] : { flex: 1 }, collapsable: false, renderToHardwareTextureAndroid: busy }, children)
+    // 움직이는 동안만 GPU 텍스처로 그려서 버벅임을 줄인다. 이 화면 안에 들어 있는 스택은 "안쪽"
+    return createElement(
+        Animated.View,
+        { style: anim ? [{ flex: 1 }, anim.style] : { flex: 1 }, collapsable: false, renderToHardwareTextureAndroid: busy },
+        createElement(NestContext.Provider, { value: 1 }, children),
+    )
 }
 
 function animate(p: Animated.Value, to: number, m: { duration: number; easing: string }, speed = 1) {
@@ -236,7 +258,7 @@ export function patchNativeScreens(cleanup: (...fns: Array<() => unknown>) => vo
         beforeJSX('RNSScreen' as any, (args: any[]) => {
             try {
                 const props = args[1]
-                if (!props || props.stackAnimation === 'none') return args as any
+                if (!props || props.stackAnimation === 'none' || nested()) return args as any
                 const next = nativeAnimationFor(props)
                 if (!next || next === props.stackAnimation) return args as any
                 status.nativeScreens++
@@ -250,7 +272,7 @@ export function patchNativeScreens(cleanup: (...fns: Array<() => unknown>) => vo
         beforeJSX('RNSScreenStack' as any, (args: any[]) => {
             try {
                 const props = args[1]
-                if (!props?.children) return args as any
+                if (!props?.children || nested()) return args as any
                 return [args[0], { ...props, children: wrapStackChildren(props.children) }, ...args.slice(2)] as any
             } catch (e) {
                 report('screenStack', e)
@@ -268,7 +290,7 @@ export function patchNativeScreens(cleanup: (...fns: Array<() => unknown>) => vo
                 beforeJSX(Item, (args: any[]) => {
                     try {
                         const props = args[1]
-                        if (!props || props.children === undefined) return args as any
+                        if (!props || props.children === undefined || nested()) return args as any
                         const next: any = { ...props, children: createElement(Enter, { presentation: props.stackPresentation, screenId: props.screenId }, props.children) }
                         // 네이티브 전환도 여기서 바꾼다 (RNSScreen 요소까지 안 내려오는 경우가 있어서)
                         if (props.stackAnimation !== 'none') {
