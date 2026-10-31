@@ -1,4 +1,4 @@
-import { beforeJSX } from '@valenced/react/jsx-runtime'
+import { instead } from '@valenced/patcher'
 import { createElement, forwardRef, useMemo, useRef, useState } from 'react'
 import { Animated, Easing, Pressable, StyleSheet } from 'react-native'
 import { easingFrom, effectOf, normalize, springFor } from '../effects'
@@ -11,7 +11,13 @@ import { active, report, status, version } from '../settings'
  * 그 버튼도 속은 Pressable 이지만 Reanimated 가 collapsable: false 를 붙여 넘기므로 그건 건너뛴다.
  * 나머지 Pressable 은 같은 Pressable(안쪽 forwardRef) 을 Animated 로 감싼 것으로 바꿔 그린다.
  * 큰 버튼(목록 한 줄 등)은 크기에 맞춰 덜 움직인다.
+ *
+ * 바꿔치기는 그리는 순간(Pressable 안쪽 forwardRef 의 render)에 한다. 요소 종류(element.type)는 그대로 Pressable 이라서
+ * 다른 플러그인이 "이게 Pressable 인지" 확인하거나 그 children 을 고쳐도 그대로 된다 (예: File Size on Picker).
  */
+
+/** Animated 로 감싼 쪽에서 원래 Pressable 을 그릴 때 붙이는 표시 */
+const MARK = '__baPressInner'
 
 const inner: any = (Pressable as any)?.type ?? Pressable
 const AnimatedPressable: any = inner && inner !== Pressable ? Animated.createAnimatedComponent(inner) : undefined
@@ -67,6 +73,7 @@ const PressAnim = forwardRef(function BetterAnimationsPressable(props: any, ref:
 
     return createElement(AnimatedPressable, {
         ...props,
+        [MARK]: true,
         ref,
         style,
         onLayout(e: any) {
@@ -92,21 +99,31 @@ const PressAnim = forwardRef(function BetterAnimationsPressable(props: any, ref:
 })
 
 export function patchPress() {
-    if (!AnimatedPressable) {
+    if (!AnimatedPressable || typeof inner?.render !== 'function') {
         report('press', 'Pressable not found')
         return
     }
     status.found.press = true
-    return beforeJSX(Pressable as any, (args: any[]) => {
-        try {
-            const props = args[1]
-            // 이미 Reanimated 로 움직이는 버튼(디스코드 기본 버튼 등)은 그대로
-            const m = active('press')
-            if (!props || props.collapsable === false || !m || m.effect === 'none') return args as any
-            return [PressAnim, ...args.slice(1)] as any
-        } catch (e) {
-            report('press', e)
-            return args as any
+    return instead(inner, 'render', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+        const [props, ref] = args
+        // Animated 로 감싼 쪽 안의 원래 Pressable
+        if (props?.[MARK]) {
+            const { [MARK]: _, ...rest } = props
+            return orig.apply(this, [rest, ...args.slice(1)])
         }
+        // 버튼마다 처음 그릴 때 한 번 정한다 (그다음에 바뀌면 훅 순서가 어긋난다)
+        const decided = useRef<boolean | null>(null)
+        if (decided.current === null) {
+            try {
+                const m = active('press')
+                // 이미 Reanimated 로 움직이는 버튼(디스코드 기본 버튼 등)은 그대로
+                decided.current = !!props && props.collapsable !== false && !!m && m.effect !== 'none'
+            } catch (e) {
+                report('press', e)
+                decided.current = false
+            }
+        }
+        if (!decided.current) return orig.apply(this, args)
+        return createElement(PressAnim, { ...props, ref })
     })
 }
