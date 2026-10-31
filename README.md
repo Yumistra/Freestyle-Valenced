@@ -9,6 +9,7 @@ Plugins for Valenced.
 | Message Actions | `yumistra.message-actions` |
 | Overlay Background | `yumistra.overlay-background` |
 | Plugin Backup | `yumistra.plugin-backup` |
+| Silent Messages | `yumistra.silent-messages` |
 | Silent Leave | `yumistra.silent-leave` |
 | Toast Fix | `yumistra.toast-fix` |
 
