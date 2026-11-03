@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.no-compression",
+	"name": "No Compression",
+	"description": "Uploads images and videos in their original quality instead of letting Discord compress them. Ported from MSMA's NoCompression.",
+	"author": "Yumistra",
+	"icon": "ImageIcon",
+	"version": "1.0.2",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
