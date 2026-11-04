@@ -52,6 +52,24 @@ private object Hooks {
         } catch (t: Throwable) {
             Diag.error = t.toString()
         }
+        // 새 디스코드에는 NotificationClient 가 없다 → 푸시를 받는 서비스(onMessageReceived)에서 직접
+        if (pushUnhooks.isEmpty()) {
+            try {
+                val svc = scope.classLoader.loadClass("com.discord.notifications.service.NotificationService")
+                val ms = svc.declaredMethods
+                var k = 0
+                while (k < ms.size) {
+                    val m = ms[k++]
+                    if (m.name == "onMessageReceived" && m.parameterTypes.size == 1) {
+                        pushUnhooks.add(XposedBridge.hookMethod(m, OnPush(0)))
+                        Diag.hooked = "NotificationService.onMessageReceived"
+                        Diag.error = ""
+                    }
+                }
+            } catch (t: Throwable) {
+                Diag.error = t.toString()
+            }
+        }
         val view = scope.classLoader.loadClass("com.facebook.drawee.span.SimpleDraweeSpanTextView")
         val methods = view.declaredMethods
         var set: java.lang.reflect.Method? = null

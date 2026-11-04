@@ -110,7 +110,9 @@ internal class OnPush(private val mapAt: Int) : XC_MethodHook() {
     override fun beforeHookedMethod(param: MethodHookParam) {
         try {
             Diag.calls++
-            val data = param.args[mapAt] as? Map<*, *> ?: return
+            val arg = param.args[mapAt] ?: return
+            // 예전: Map 그대로. 새 디스코드: FirebaseMessagingService.onMessageReceived(RemoteMessage) → getData()
+            val data = (arg as? Map<*, *>) ?: (arg.javaClass.getMethod("getData").invoke(arg) as? Map<*, *>) ?: return
             Pushes.record(data)
         } catch (t: Throwable) {
             Diag.error = t.toString()
