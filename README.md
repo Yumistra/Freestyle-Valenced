@@ -7,6 +7,7 @@ Plugins for Valenced.
 | Better Animations | `yumistra.better-animations` |
 | Commands | `yumistra.commands` |
 | Message Actions | `yumistra.message-actions` |
+| Message Logger | `yumistra.message-logger` |
 | No Compression | `yumistra.no-compression` |
 | Overlay Background | `yumistra.overlay-background` |
 | Plugin Backup | `yumistra.plugin-backup` |
