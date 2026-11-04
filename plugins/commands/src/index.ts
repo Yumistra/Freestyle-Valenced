@@ -138,12 +138,12 @@ function debugText() {
     const lines = [
         `**${MOD} Debug Info**`,
         `> **${MOD}:** ${bridge ? `${bridge.name} (${bridge.version})` : 'unknown'}`,
-        `> **Discord:** ${client.Version ?? '?'} (${client.Build ?? '?'})${client.ReleaseChannel ? ` · ${client.ReleaseChannel}` : ''}`,
+        `> **Discord:** ${client.Version ?? '?'} (${client.Build ?? '?'})${client.ReleaseChannel ? `, ${client.ReleaseChannel}` : ''}`,
         `> **React:** ${(React as any).version ?? '?'}`,
         `> **React Native:** ${rn ? `${rn.major}.${rn.minor}.${rn.patch}${rn.prerelease ? `-${rn.prerelease}` : ''}` : '?'}`,
         `> **Hermes:** ${hermes['OSS Release Version'] ?? hermes.Build ?? '?'} (bytecode ${hermes['Bytecode Version'] ?? '?'})`,
         `> **System:** ${os} ${P.Release ?? device.systemVersion ?? ReactNative.Platform.Version}${os === 'Android' ? ` (SDK ${ReactNative.Platform.Version})` : ''}`,
-        `> **Device:** ${P.Model ?? device.deviceModel ?? '?'}${P.Manufacturer ? ` (${P.Manufacturer})` : ''}${device.deviceCodename ? ` · ${device.deviceCodename}` : ''}`,
+        `> **Device:** ${P.Model ?? device.deviceModel ?? '?'}${P.Manufacturer ? ` (${P.Manufacturer})` : ''}${device.deviceCodename ? `, ${device.deviceCodename}` : ''}`,
     ]
     return lines.join('\n')
 }
@@ -223,7 +223,7 @@ async function evaluate(code: string, ctx: any, awaitResult: boolean) {
     }
     const ms = Date.now() - started
     const body = fence(clip(inspect(result), MAX - 80))
-    return `${failed ? '**Error**' : '**Result**'} · ${ms}ms\n\`\`\`js\n${body}\n\`\`\``
+    return `${failed ? '**Error**' : '**Result**'}, ${ms}ms\n\`\`\`js\n${body}\n\`\`\``
 }
 
 // ── 명령어 ────────────────────────────────────────────────────

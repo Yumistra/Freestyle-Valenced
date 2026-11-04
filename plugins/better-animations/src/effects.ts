@@ -310,7 +310,7 @@ export const PRESS_EFFECTS: Effect[] = [
     { id: 'none', label: 'None' },
 ]
 
-MESSAGE_EFFECTS.splice(MESSAGE_EFFECTS.length - 1, 0, ...caskEffects('Cask · '))
+MESSAGE_EFFECTS.splice(MESSAGE_EFFECTS.length - 1, 0, ...caskEffects('Cask, '))
 
 export const EFFECTS: Record<ModuleKey, Effect[]> = {
     messages: MESSAGE_EFFECTS,
@@ -571,11 +571,11 @@ export function easingLabel(key: EasingKey) {
     const preset = EASINGS.find(e => e.id === key)
     if (preset) return preset.label
     const c = decodeEasing(key)
-    if (c.type === 'linear') return 'Custom · Linear'
-    if (c.type === 'steps') return `Custom · Steps ${c.amount}`
+    if (c.type === 'linear') return 'Custom, Linear'
+    if (c.type === 'steps') return `Custom, Steps ${c.amount}`
     const bez = c.bezier === 'inOut' ? 'In Out' : c.bezier === 'in' ? 'In' : 'Out'
     const name = c.type === 'ease' ? EASING_STYLES.find(s => s.id === c.style)?.label : c.type === 'back' ? 'Back' : 'Elastic'
-    return `Custom · ${name} ${bez}`
+    return `Custom, ${name} ${bez}`
 }
 
 /** 스프링만 쓸 수 있는 곳에서 고른 움직임을 감쇠비로 바꾼다 (작을수록 출렁임) */

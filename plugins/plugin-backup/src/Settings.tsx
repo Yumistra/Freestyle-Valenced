@@ -72,7 +72,7 @@ function confirm(title: string, body: string, actionText: string, action: () => 
 
 function describeResult(r: RestoreResult) {
     const lines = [
-        `Installed ${r.installed.length} · Settings ${r.storage} · Files ${r.files} · Toggled ${r.toggled}`,
+        `Installed ${r.installed.length}, Settings ${r.storage}, Files ${r.files}, Toggled ${r.toggled}`,
         ...r.failed.map(f => `Failed: ${f.id} (${f.reason})`),
         ...r.skipped.map(s => `Skipped: ${s.id} (${s.reason})`),
     ]
@@ -240,12 +240,12 @@ export default function SettingsPage({ api }: { api: any }) {
                                 })
                                 .map(p => {
                                     const d = dataCountOf(current, p.id)
-                                    const extra = [d.settings && `${d.settings} settings`, d.files && `${d.files} files`].filter(Boolean).join(' · ')
+                                    const extra = [d.settings && `${d.settings} settings`, d.files && `${d.files} files`].filter(Boolean).join(', ')
                                     return (
                                         <TableRow
                                             key={p.id}
                                             label={`${p.enabled ? '' : '(off) '}${p.name} ${p.version}`}
-                                            subLabel={`${extra ? `${extra} · ` : ''}${p.internal ? 'Built-in' : p.source?.repo ?? 'From file'}`}
+                                            subLabel={`${extra ? `${extra}, ` : ''}${p.internal ? 'Built-in' : p.source?.repo ?? 'From file'}`}
                                             subLabelLineClamp={1}
                                         />
                                     )

@@ -319,7 +319,7 @@ export function summaryOf(b: Backup) {
     const installed = b.plugins.filter(p => !p.internal).length
     const settings = Object.keys(b.storage).length + Object.keys(b.data ?? {}).length
     const files = fileCountOf(b)
-    return `${installed} plugins · ${b.repos.length} repos · ${settings} settings${files ? ` · ${files} files (${formatBytes(fileBytesOf(b))})` : ''}`
+    return `${installed} plugins, ${b.repos.length} repos, ${settings} settings${files ? `, ${files} files (${formatBytes(fileBytesOf(b))})` : ''}`
 }
 
 /** 플러그인 하나가 백업에 가진 데이터 개수 (설정 파일 + 데이터 파일) */

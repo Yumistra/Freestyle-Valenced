@@ -430,11 +430,11 @@ function StatusRows() {
     const rows: Array<[string, string]> = [
         ['Channel screen', status.screenPatched ? 'patched' : 'not found'],
         ['Gradients hidden', `${status.gradientsHidden}`],
-        ['Surfaces', `${status.contextPatched ? 'patched' : 'not found'} · ${status.surfacesCleared}`],
+        ['Surfaces', `${status.contextPatched ? 'patched' : 'not found'}, ${status.surfacesCleared}`],
         ['Revealed', `${status.revealed}`],
-        ['Styles', `${status.stylesPatched ? 'patched' : 'not found'} · ${status.coveredCleared}`],
-        ['Freeze', `${status.freezePatched} · ${status.unfrozen}`],
-        ['Overlays', `${status.overlays} · ${status.stripped}`],
+        ['Styles', `${status.stylesPatched ? 'patched' : 'not found'}, ${status.coveredCleared}`],
+        ['Freeze', `${status.freezePatched}, ${status.unfrozen}`],
+        ['Overlays', `${status.overlays}, ${status.stripped}`],
     ]
     if (status.lastError) rows.push(['Last error', status.lastError])
     return [

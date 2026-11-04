@@ -343,10 +343,10 @@ function nativeNotice(): string | undefined {
 function summaryOf(key: ModuleKey, m: ModuleSettings) {
     const effect = EFFECTS[key].find(e => e.id === m.effect)?.label ?? m.effect
     if (m.effect === 'default') return 'Default'
-    if (key === 'lists' && m.effect !== 'default') return `${effect} · ${m.duration}ms`
-    if (key === 'backdrop') return m.effect === 'solid' ? `Solid · ${Math.round((m.amount ?? 0.6) * 100)}%` : effect
+    if (key === 'lists' && m.effect !== 'default') return `${effect}, ${m.duration}ms`
+    if (key === 'backdrop') return m.effect === 'solid' ? `Solid, ${Math.round((m.amount ?? 0.6) * 100)}%` : effect
     if (MODULES[key].native || m.effect === 'none') return effect
-    return `${effect} · ${m.duration}ms · ${easingLabel(m.easing)}`
+    return `${effect}, ${m.duration}ms, ${easingLabel(m.easing)}`
 }
 
 function ModuleCard({ id, value, open, onToggle, onChange, enabled }: { id: ModuleKey; value: ModuleSettings; open: boolean; onToggle(): void; onChange(next: ModuleSettings): void; enabled: boolean }) {
@@ -515,23 +515,23 @@ function StatusRows() {
     const f = status.found
     const ok = (b: unknown) => (b ? 'ok' : 'missing')
     const rows: Array<[string, string]> = [
-        ['Native', status.native === null ? '…' : status.native ? `loaded${status.nativeVersion ? ` · ${status.nativeVersion}` : ''}` : 'not loaded'],
+        ['Native', status.native === null ? '…' : status.native ? `loaded${status.nativeVersion ? `, ${status.nativeVersion}` : ''}` : 'not loaded'],
         ['Native screens', status.nativeScreenHook ? `${status.nativePlayed}` : 'JS'],
         ['Chat list', status.nativeChat === null ? '…' : status.nativeChat ? 'ok' : 'missing'],
-        ['Screens', `${status.screens} · ${status.screenExits} · ${status.nativeScreens}`],
-        ['Stack', `${ok(f.stack)} · ${status.stack}`],
-        ['Sheets', `${ok(f.sheets)} · ${status.sheets}`],
-        ['Reanimated', `${ok(f.worklets)} · ${f.reanimated ? 'ready' : 'waiting'}`],
+        ['Screens', `${status.screens}, ${status.screenExits}, ${status.nativeScreens}`],
+        ['Stack', `${ok(f.stack)}, ${status.stack}`],
+        ['Sheets', `${ok(f.sheets)}, ${status.sheets}`],
+        ['Reanimated', `${ok(f.worklets)}, ${f.reanimated ? 'ready' : 'waiting'}`],
         ['Menus', `${status.menus}`],
         ['Alerts', `${status.alerts}`],
         ['Backdrops', `${status.backdrops}`],
         ['Toasts', `${status.toasts}`],
         ['Notifications', `${status.notices}`],
-        ['Media', `${ok(f.media)} · ${status.media}`],
+        ['Media', `${ok(f.media)}, ${status.media}`],
         ['Folders', `${status.folders}`],
-        ['Buttons', `${ok(f.press)} · ${status.presses}`],
-        ['Lists', `${Object.keys(f).filter(k => k.startsWith('list:')).map(k => k.slice(5)).join(', ') || 'missing'} · ${status.listCells}`],
-        ['Channel list', `${ok(f.layout)} · ${ok(f.channelRows)} · ${ok(f.servers)} · ${status.layouts}`],
+        ['Buttons', `${ok(f.press)}, ${status.presses}`],
+        ['Lists', `${Object.keys(f).filter(k => k.startsWith('list:')).map(k => k.slice(5)).join(', ') || 'missing'}, ${status.listCells}`],
+        ['Channel list', `${ok(f.layout)}, ${ok(f.channelRows)}, ${ok(f.servers)}, ${status.layouts}`],
         ['Constants', status.constants.length ? status.constants.join(', ') : 'missing'],
     ]
     if (status.nativeProblems) rows.push(['Native problems', status.nativeProblems])
