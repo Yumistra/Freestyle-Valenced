@@ -553,11 +553,14 @@ private class Rows(private val config: () -> Config, private val holderOf: (View
         if (layingOut !== parent) return
         layingOut = null
         val c = config()
+        // 맨 아래(가장 최근)에 줄이 새로 붙었고 목록이 끝까지 내려가 있으면 = 새 메시지가 들어온 것.
+        // 이때는 디스코드가 스스로 목록을 맨 아래로 맞추므로 위 줄들을 따로 밀어 올리면 두 번 움직여 "튀어" 보인다
+        val appended = appendedAtBottom(parent)
         val replaced = matchReplaced(parent)
         val changes = attachedInPass + removedInPass - replaced * 2
         // 메시지 몇 개가 추가·삭제됐을 때만 (채널을 열거나 크게 새로 그릴 땐 그대로)
         val small = changes in 1..4
-        if (c.shiftOn && small && tops.isNotEmpty()) {
+        if (c.shiftOn && small && !appended && tops.isNotEmpty()) {
             for (i in 0 until parent.childCount) {
                 val child = parent.getChildAt(i)
                 val old = tops[child] ?: continue
@@ -580,6 +583,27 @@ private class Rows(private val config: () -> Config, private val holderOf: (View
                 } else snap.discard()
             }
             snapshots.clear()
+        }
+    }
+
+    /** 이번 배치에서 붙은 줄이 목록 맨 아래 줄이고, 목록이 끝까지 내려가 있는지 */
+    private fun appendedAtBottom(parent: ViewGroup): Boolean {
+        if (attachedNow.isEmpty()) return false
+        if (parent.canScrollVertically(1)) return false
+        var bottom = Int.MIN_VALUE
+        var last: View? = null
+        for (i in 0 until parent.childCount) {
+            val v = parent.getChildAt(i)
+            if (v.bottom > bottom) {
+                bottom = v.bottom
+                last = v
+            }
+        }
+        val l = last ?: return false
+        val tol = (24 * parent.resources.displayMetrics.density).toInt()
+        return attachedNow.any { ref ->
+            val v = ref.get()
+            v != null && v.parent === parent && (v === l || v.bottom >= bottom - tol)
         }
     }
 
