@@ -536,12 +536,15 @@ private class Rows(private val config: () -> Config, private val holderOf: (View
 
     // ── 레이아웃 전후 (삭제된 줄, 밀리는 줄) ─────────────────────────────
 
+    private var atBottomBefore = false
+
     fun beforeLayout(parent: ViewGroup) {
         layingOut = parent
         attachedInPass = 0
         removedInPass = 0
         attachedNow.clear()
         tops.clear()
+        atBottomBefore = !parent.canScrollVertically(1)
         if (!config().shiftOn) return
         for (i in 0 until parent.childCount) {
             val child = parent.getChildAt(i)
@@ -560,7 +563,19 @@ private class Rows(private val config: () -> Config, private val holderOf: (View
         val changes = attachedInPass + removedInPass - replaced * 2
         // 메시지 몇 개가 추가·삭제됐을 때만 (채널을 열거나 크게 새로 그릴 땐 그대로)
         val small = changes in 1..4
-        if (c.shiftOn && small && !appended && tops.isNotEmpty()) {
+        // 맨 아래에 있었는데 줄들이 모두 위로만 밀렸다 = 아래에 새 메시지가 붙어 디스코드가 끝으로 맞춘 것 → 밀기 효과 없음
+        var allUp = true
+        if (atBottomBefore) {
+            for (i in 0 until parent.childCount) {
+                val child = parent.getChildAt(i)
+                val old = tops[child] ?: continue
+                if (old - child.top < 0) {
+                    allUp = false
+                    break
+                }
+            }
+        }
+        if (c.shiftOn && small && !appended && !(atBottomBefore && allUp) && tops.isNotEmpty()) {
             for (i in 0 until parent.childCount) {
                 val child = parent.getChildAt(i)
                 val old = tops[child] ?: continue
