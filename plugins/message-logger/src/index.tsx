@@ -10,6 +10,7 @@ import { trim } from './away'
 import { bindNotes, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
 import { bindNavigation, LogsView } from './logs'
+import { patchSheet } from './sheet'
 import { styleRow } from './rows'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
 
@@ -124,6 +125,7 @@ export default plugin({
         }
         bindNotes(notes)
         bindNavigation(cleanup)
+        patchSheet(cleanup)
         const pull = () => {
             importPushes(me()).catch(() => {})
             readTray().catch(() => {})

@@ -109,7 +109,7 @@ function keepDeleted(channelId: string, id: string, guildId?: string): 'store' |
     const remembered = record ? undefined : seen()[id]?.m
     if (!record && !remembered) return false
     // 내가 지운 건 게이트웨이가 확인하면서 한 번 더 온다
-    if (logs()[id]?.d) return record ? 'store' : 'seen'
+    if (logs()[id]?.d) return logs()[id].h ? false : record ? 'store' : 'seen'
     const r = record ?? remembered
     // 안 보내진 메시지·나만 보이는 메시지는 지워진 게 아니라 치워진 것
     if ((record?.state && record.state !== 'SENT') || (r.flags ?? 0) & EPHEMERAL) return false
@@ -152,7 +152,7 @@ function withDeleted(payload: any) {
     const oldest = !payload.isAfter && !payload.jump && payload.hasMoreBefore === false && messages.length < (payload.limit ?? 50)
     const extra: any[] = []
     for (const [id, e] of Object.entries(logs())) {
-        if (!e.d || !e.m || e.c !== channelId || have.has(id)) continue
+        if (!e.d || !e.m || e.h || e.c !== channelId || have.has(id)) continue
         const inRange = !ids.length || ((cmp(id, min) >= 0 || oldest) && (cmp(id, max) <= 0 || newest))
         if (inRange) extra.push(e.m)
     }
@@ -189,6 +189,15 @@ function reallyRemove(id: string, e: Entry) {
     } finally {
         bypassed.delete(id)
     }
+}
+
+/** 채팅에서만 지운다 (로그 보기에는 남는다): 지운 메시지는 채팅에서 빠지고, 수정 기록은 기록 줄이 사라진다 */
+export function hideInChat(id: string) {
+    const e = logs()[id]
+    if (!e || e.h) return
+    e.h = 1
+    reallyRemove(id, e)
+    save(true)
 }
 
 /** 로그 하나만 지운다 (지운 메시지면 채팅에서도 사라지고, 수정 기록이면 기록 줄만 없어진다) */

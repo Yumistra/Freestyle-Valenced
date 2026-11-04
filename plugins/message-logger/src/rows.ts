@@ -127,7 +127,7 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
     }
     if (takeChanged(id)) row.changeType = UPDATE
     const e = logs()[id]
-    if (!e) return
+    if (!e || e.h) return
     if (e.e?.length) {
         // 디스코드가 메시지 옆에 붙이는 "(수정됨)" 글자 그대로
         const raw = typeof row.message.edited === 'string' && row.message.edited.trim() ? row.message.edited.trim() : 'edited'
