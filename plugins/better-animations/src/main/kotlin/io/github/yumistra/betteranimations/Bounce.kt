@@ -375,6 +375,9 @@ internal class Bounce(private val recycler: Recycler?, private val enabled: (Vie
         if (!enabled(list)) return
         val s = state(list)
         if (s.pull != 0f) return
+        // 손가락으로 튕긴 스크롤만 (최근 3초 안에 만졌을 때).
+        // 새 메시지가 오면 디스코드가 스스로 맨 아래로 굴리는데, 그게 끝에 닿아도 튕기면 채팅이 위로 튀었다가 돌아온다
+        if (s.lastTime < 0 || android.os.SystemClock.uptimeMillis() - s.lastTime > 3000L) return
         if (s.axis == 0) s.axis = axisOf(list)
         if (s.axis == 0) return
         // 뒤쪽 끝이면 내용이 앞으로(−), 앞쪽 끝이면 뒤로(+)
