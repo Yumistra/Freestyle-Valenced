@@ -18,6 +18,7 @@ import de.robv.android.xposed.XposedBridge
 private object Hooks {
     var unhook: XC_MethodHook.Unhook? = null
     var decoUnhook: XC_MethodHook.Unhook? = null
+    var bgUnhook: XC_MethodHook.Unhook? = null
     val pushUnhooks = ArrayList<XC_MethodHook.Unhook>()
 
     fun start(scope: PluginScope) {
@@ -81,6 +82,8 @@ private object Hooks {
         try {
             RowBackground.listClass = scope.classLoader.loadClass("androidx.recyclerview.widget.RecyclerView")
             Diag.deco = true
+            // 우리 배경이 깔린 줄에 디스코드가 다른 배경을 넣을 때 (RowBackground.OnSetBackground)
+            bgUnhook = XposedBridge.hookMethod(android.view.View::class.java.getDeclaredMethod("setBackgroundDrawable", android.graphics.drawable.Drawable::class.java), OnSetBackground)
         } catch (t: Throwable) {
             Diag.error = t.toString()
         }
@@ -92,6 +95,8 @@ private object Hooks {
         unhook = null
         decoUnhook?.unhook()
         decoUnhook = null
+        bgUnhook?.unhook()
+        bgUnhook = null
         var i = 0
         while (i < pushUnhooks.size) pushUnhooks[i++].unhook()
         pushUnhooks.clear()

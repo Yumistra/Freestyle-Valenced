@@ -191,6 +191,16 @@ function reallyRemove(id: string, e: Entry) {
     }
 }
 
+/** 로그 하나만 지운다 (지운 메시지면 채팅에서도 사라지고, 수정 기록이면 기록 줄만 없어진다) */
+export function removeOne(id: string) {
+    const all = logs()
+    const e = all[id]
+    if (!e) return
+    delete all[id]
+    reallyRemove(id, e)
+    save(true)
+}
+
 export function clearAll() {
     const all = logs()
     for (const [id, e] of Object.entries(all)) {

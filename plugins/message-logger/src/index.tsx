@@ -9,6 +9,7 @@ import { AppState, ScrollView } from 'react-native'
 import { trim } from './away'
 import { bindNotes, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
+import { bindNavigation, LogsView } from './logs'
 import { styleRow } from './rows'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
 
@@ -21,6 +22,7 @@ import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings,
 function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const [, force] = useState(0)
+    const [view, setView] = useState<'settings' | 'logs'>('settings')
     useEffect(() => {
         const off = onChange(() => force(n => n + 1))
         return () => {
@@ -38,6 +40,7 @@ function SettingsPage({ api }: { api?: any }) {
         setSettings(patch)
         force(n => n + 1)
     }
+    if (view === 'logs') return <LogsView onBack={() => setView('settings')} />
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
             <Stack spacing={24}>
@@ -75,8 +78,17 @@ function SettingsPage({ api }: { api?: any }) {
                         <TableRadioRow key={h} label={label} value={String(h)} />
                     ))}
                 </TableRadioGroup>
+                <TableRowGroup title="Logs">
+                    <TableRow
+                        icon={<TableRowAssetIcon name="ChatXIcon" />}
+                        label="View logs"
+                        subLabel="Deleted and edited messages, shown like in chat. Tap one to go to it."
+                        arrow
+                        onPress={() => setView('logs')}
+                    />
+                </TableRowGroup>
                 <TableRowGroup title="Saved">
-                    <TableRow label={`${deleted} deleted · ${edited} edited`} subLabel={`${away} found after coming back · ${remembered} messages remembered. Older than the time above are removed automatically.`} />
+                    <TableRow label={`${deleted} deleted, ${edited} edited`} subLabel={`${away} found after coming back, ${remembered} messages remembered. Older than the time above are removed automatically.`} />
                 </TableRowGroup>
                 <Button text="Clear all logs" variant="destructive" size="md" disabled={!all.length} onPress={() => clearAll()} />
             </Stack>
@@ -111,6 +123,7 @@ export default plugin({
             } catch {}
         }
         bindNotes(notes)
+        bindNavigation(cleanup)
         const pull = () => {
             importPushes(me()).catch(() => {})
             readTray().catch(() => {})

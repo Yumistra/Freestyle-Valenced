@@ -26,10 +26,15 @@ internal object RowBackground {
     var listClass: Class<*>? = null
 
     private val listening = WeakHashMap<View, Boolean>()
+    private val waiting = WeakHashMap<View, Boolean>()
+
+    /** 우리가 일부러 배경을 되돌리는 중 */
+    @Volatile
+    var removing = false
 
     fun update(view: View?) {
         val tv = view as? TextView ?: return
-        tv.post(object : Runnable {
+        val r = object : Runnable {
             override fun run() {
                 try {
                     apply(tv)
@@ -37,7 +42,8 @@ internal object RowBackground {
                     Diag.error = t.toString()
                 }
             }
-        })
+        }
+        tv.post(r)
     }
 
     private fun apply(tv: TextView) {
@@ -45,7 +51,22 @@ internal object RowBackground {
         if (has) Diag.marked++
         val row = rowOf(tv)
         if (row == null) {
-            if (has) Diag.miss = "no row"
+            if (has) {
+                Diag.miss = "no row"
+                // 아직 목록에 안 붙었다 (채널을 열거나 메시지로 바로 갈 때). 붙는 순간 다시 한다
+                if (waiting[tv] == null) {
+                    waiting[tv] = true
+                    tv.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                        override fun onViewAttachedToWindow(v: View) {
+                            v.removeOnAttachStateChangeListener(this)
+                            waiting.remove(v)
+                            update(v)
+                        }
+
+                        override fun onViewDetachedFromWindow(v: View) {}
+                    })
+                }
+            }
             return
         }
         val cur = row.background
@@ -69,7 +90,12 @@ internal object RowBackground {
                 })
             }
         } else if (cur is HistoryDrawable && cur.owner.get() === tv) {
-            row.background = cur.prev
+            removing = true
+            try {
+                row.background = cur.prev
+            } finally {
+                removing = false
+            }
         }
     }
 
@@ -95,7 +121,25 @@ internal object RowBackground {
     }
 }
 
-private class HistoryDrawable(val prev: Drawable?, var owner: WeakReference<TextView>, row: View) : Drawable() {
+internal class HistoryDrawable(prev: Drawable?, var owner: WeakReference<TextView>, row: View) : Drawable(), Drawable.Callback {
+    /** 원래(또는 디스코드가 나중에 넣은) 배경. 그 위에 그린다 */
+    var prev: Drawable? = null
+        set(v) {
+            field?.callback = null
+            field = v
+            v?.callback = this
+            invalidateSelf()
+        }
+
+    init {
+        this.prev = prev
+    }
+
+    // 원래 배경이 움직이면(반짝임 등) 같이 다시 그린다
+    override fun invalidateDrawable(who: Drawable) = invalidateSelf()
+    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) = scheduleSelf(what, `when`)
+    override fun unscheduleDrawable(who: Drawable, what: Runnable) = unscheduleSelf(what)
+
     private val row = WeakReference(row)
     private val paint = Paint()
     private var gutter = -1
@@ -150,4 +194,20 @@ private class HistoryDrawable(val prev: Drawable?, var owner: WeakReference<Text
     override fun setAlpha(alpha: Int) {}
     override fun setColorFilter(colorFilter: ColorFilter?) {}
     @Deprecated("") override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * View.setBackgroundDrawable 앞: 우리 배경이 깔린 줄에 디스코드가 다른 배경을 넣으면(메시지로 바로 갈 때 반짝임 등)
+ * 우리 걸 치우지 않고 그 배경을 우리 안에 넣어 같이 그린다 (깜빡이지 않게)
+ */
+internal object OnSetBackground : de.robv.android.xposed.XC_MethodHook() {
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        val v = param.thisObject as? View ?: return
+        val cur = v.background as? HistoryDrawable ?: return
+        val next = param.args[0] as? Drawable
+        if (next is HistoryDrawable) return
+        if (RowBackground.removing) return
+        cur.prev = next
+        param.result = null
+    }
 }
