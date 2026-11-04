@@ -563,19 +563,22 @@ private class Rows(private val config: () -> Config, private val holderOf: (View
         val changes = attachedInPass + removedInPass - replaced * 2
         // 메시지 몇 개가 추가·삭제됐을 때만 (채널을 열거나 크게 새로 그릴 땐 그대로)
         val small = changes in 1..4
-        // 맨 아래에 있었는데 줄들이 모두 위로만 밀렸다 = 아래에 새 메시지가 붙어 디스코드가 끝으로 맞춘 것 → 밀기 효과 없음
-        var allUp = true
-        if (atBottomBefore) {
-            for (i in 0 until parent.childCount) {
-                val child = parent.getChildAt(i)
-                val old = tops[child] ?: continue
-                if (old - child.top < 0) {
-                    allUp = false
-                    break
-                }
+        // 원래 있던 줄들이 전부 같은 만큼 움직였다 = 목록 전체가 굴러간 것(아래에 새 메시지가 붙어 디스코드가 끝으로 맞춤 등).
+        // 사이에 끼거나 빠진 줄 때문에 일부만 움직인 게 아니므로 밀기 효과를 하지 않는다 (하면 두 번 움직여 튄다)
+        var uniform = true
+        var first: Int? = null
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            val old = tops[child] ?: continue
+            val d = old - child.top
+            val f = first
+            if (f == null) first = d else if (abs(d - f) > 2) {
+                uniform = false
+                break
             }
         }
-        if (c.shiftOn && small && !appended && !(atBottomBefore && allUp) && tops.isNotEmpty()) {
+        val allUp = uniform && first != null
+        if (c.shiftOn && small && !appended && !allUp && tops.isNotEmpty()) {
             for (i in 0 until parent.childCount) {
                 val child = parent.getChildAt(i)
                 val old = tops[child] ?: continue
