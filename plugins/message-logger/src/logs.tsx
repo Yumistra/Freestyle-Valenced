@@ -64,6 +64,7 @@ function palette() {
         danger,
         dangerSoft: alpha(danger, 0.1),
         text: tokenColor(['TEXT_DEFAULT', 'TEXT_NORMAL'], '#dbdee1'),
+        header: tokenColor(['TEXT_STRONG', 'HEADER_PRIMARY', 'TEXT_DEFAULT'], '#f2f3f5'),
         muted,
         mutedSoft: alpha(muted, 0.1),
         border: alpha(muted, 0.3),
@@ -116,6 +117,9 @@ function editedWord() {
     } catch {}
     return '(edited)'
 }
+
+/** <:이름:id> 같은 커스텀 이모지를 :이름: 으로 */
+const emojis = (t: string) => t.replace(/<a?:(\w+):\d+>/g, ':$1:')
 
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString() : '')
 
@@ -184,37 +188,37 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
             <Image source={{ uri: avatarUrl(a) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
             <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                    <Text variant="text-md/semibold" color="header-primary">
+                    <Text variant="text-md/semibold" style={{ color: P.header }}>
                         {name}
                     </Text>
-                    <Text variant="text-xs/medium" color="text-muted" style={{ marginLeft: 6 }}>
+                    <Text variant="text-xs/medium" style={{ color: P.muted, marginLeft: 6 }}>
                         {when(sentAt(id))}
                     </Text>
                 </View>
                 {!deleted &&
                     (e.e ?? []).map((h, i) => (
-                        <Text key={i} variant="text-md/normal" color="text-muted" style={{ opacity: 0.75 }}>
-                            {h.t || ' '}
-                            <Text variant="text-xs/medium" color="text-muted">
+                        <Text key={i} variant="text-md/normal" style={{ color: P.muted }}>
+                            {emojis(h.t) || ' '}
+                            <Text variant="text-xs/medium" style={{ color: P.muted }}>
                                 {`  ${editedWord()} ${when(h.at)}`}
                             </Text>
                         </Text>
                     ))}
-                <Text variant="text-md/normal" color={deleted ? undefined : 'text-normal'} style={deleted ? { color: P.danger } : undefined}>
-                    {current || (files ? '' : ' ')}
+                <Text variant="text-md/normal" style={{ color: deleted ? P.danger : P.text }}>
+                    {emojis(current) || (files ? '' : ' ')}
                     {!deleted && now?.editedTimestamp ? (
-                        <Text variant="text-xs/medium" color="text-muted">
+                        <Text variant="text-xs/medium" style={{ color: P.muted }}>
                             {`  ${editedWord()}`}
                         </Text>
                     ) : null}
                 </Text>
                 {files ? (
-                    <Text variant="text-sm/medium" color="text-muted">
+                    <Text variant="text-sm/medium" style={{ color: P.muted }}>
                         {`${files} attachment${files > 1 ? 's' : ''}`}
                     </Text>
                 ) : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                    <Text variant="text-xs/medium" color="text-muted" style={{ flex: 1 }}>
+                    <Text variant="text-xs/medium" style={{ color: P.muted, flex: 1 }}>
                         {[deleted ? `Deleted ${when(e.d!)}` : `Edited ${e.e?.length ?? 0} time(s)`, e.h ? "Hidden in chat" : "", where(e)].filter(Boolean).join(', ')}
                     </Text>
                     <Button text={armed ? 'Tap again to delete' : 'Delete log'} variant={armed ? 'destructive' : 'secondary'} size="sm" onPress={del} />
@@ -261,10 +265,10 @@ function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void;
             }}
         >
             {item.img ? <Image source={{ uri: item.img }} style={{ width: 22, height: 22, borderRadius: 11, marginRight: 6 }} /> : null}
-            <Text variant="text-sm/medium" color="text-normal" numberOfLines={1} style={{ maxWidth: 150 }}>
+            <Text variant="text-sm/medium" numberOfLines={1} style={{ color: P.text, maxWidth: 150 }}>
                 {item.label}
             </Text>
-            <Text variant="text-xs/semibold" color="text-muted" style={{ marginLeft: 6 }}>
+            <Text variant="text-xs/semibold" style={{ color: P.muted, marginLeft: 6 }}>
                 {item.n}
             </Text>
         </Pressable>
@@ -273,10 +277,11 @@ function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void;
 
 function ChipRow({ title, items, selected, onToggle }: { title: string; items: Item[]; selected: string[]; onToggle(v: string): void }) {
     const { Text } = Design as any
+    const P = palette()
     if (!items.length) return null
     return (
         <View style={{ marginTop: 10 }}>
-            <Text variant="text-xs/bold" color="text-muted" style={{ marginBottom: 6, letterSpacing: 0.4 }}>
+            <Text variant="text-xs/bold" style={{ color: P.muted, marginBottom: 6, letterSpacing: 0.4 }}>
                 {title.toUpperCase()}
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -389,7 +394,7 @@ export function LogsView() {
         return { v, n, label: v === DM ? 'DMs' : g?.name ?? 'Server', img: g?.icon ? `https://cdn.discordapp.com/icons/${v}/${g.icon}.png?size=64` : undefined }
     })
     const channels = count(x => (f.places.length && !f.places.includes(x.k.place) ? '' : x.k.channel)).map(([v, n]): Item => ({ v, n, label: all.find(x => x.k.channel === v)?.k.channelName ?? v }))
-    const users = count(x => x.k.user)
+    const users = count(x => ((f.places.length && !f.places.includes(x.k.place)) || (f.channels.length && !f.channels.includes(x.k.channel)) ? '' : x.k.user))
         .slice(0, 40)
         .map(([v, n]): Item => {
             const k = all.find(x => x.k.user === v)?.k
@@ -567,7 +572,7 @@ export function LogsView() {
                                         {sg.label}
                                     </Text>
                                     {sg.sub ? (
-                                        <Text variant="text-xs/medium" color="text-muted" numberOfLines={1}>
+                                        <Text variant="text-xs/medium" numberOfLines={1} style={{ color: P.muted }}>
                                             {sg.sub}
                                         </Text>
                                     ) : null}
@@ -591,7 +596,7 @@ export function LogsView() {
                         ) : null}
                     </View>
                 ) : null}
-                <Text variant="text-xs/medium" color="text-muted" style={{ marginTop: 10 }}>
+                <Text variant="text-xs/medium" style={{ color: P.muted, marginTop: 10 }}>
                     {all.length ? `${entries.length} of ${all.length} log(s), tap a message to go to it` : 'No logs yet.'}
                     {all.length && !entries.length && (q.trim() || active) ? ', nothing matches' : ''}
                 </Text>
