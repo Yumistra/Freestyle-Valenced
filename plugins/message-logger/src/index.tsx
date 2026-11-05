@@ -9,11 +9,11 @@ import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
 import { AppState, LayoutAnimation, ScrollView } from 'react-native'
 import { trim } from './away'
-import { bindNotes, readTray, trimNotes } from './tray'
+import { bindNotes, nativeStatus, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
 import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
 import { patchSheet } from './sheet'
-import { styleRow } from './rows'
+import { setNative, styleRow } from './rows'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
 
 /**
@@ -135,6 +135,12 @@ export default plugin({
         }
         bindNotes(notes)
         bindNavigation(cleanup)
+        // 네이티브 부분이 켜져 있는지 묻고, 대답하면 수정 기록을 꾸며서 보여 준다
+        setNative(false)
+        nativeStatus()
+            .then(r => setNative(!!r && !String(r).startsWith('error')))
+            .catch(() => setNative(false))
+        cleanup(() => setNative(false))
         // 로그 보기는 디스코드 설정 화면처럼 새 화면으로 넘어간다 (목록에는 안 보이는 경로)
         try {
             cleanup(
