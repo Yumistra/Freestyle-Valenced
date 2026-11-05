@@ -1,10 +1,10 @@
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after, instead } from '@valenced/patcher'
+import { instead } from '@valenced/patcher'
 import { bindPicker } from './picker'
 import SettingsPage from './Settings'
-import { bind, DEFAULTS, settings, update } from './store'
+import { bind, DEFAULTS, settings } from './store'
 
 /**
  * Custom Welcome: "Wave to say hi!" 버튼이 보내는 것을 바꾼다.
@@ -98,20 +98,10 @@ export default plugin({
                 done.add(mod)
                 cleanup(instead(mod, 'sendGreetMessage', greet))
             }) as any,
+            // 보내는 함수는 찾아 두기만 한다 (보낼 때마다 끼어들지 않는다)
             getModules(withProps('sendMessage', 'deleteMessage') as any, (mod: any) => {
-                if (typeof mod?.sendMessage !== 'function' || actions) return
-                actions = mod
-                // 마지막으로 보낸 스티커를 기억해 둔다 (설정에서 한 번에 추가)
-                cleanup(
-                    after(mod, 'sendMessage', (args: any[]) => {
-                        try {
-                            if (sending) return
-                            const id = args?.[3]?.stickerIds?.[0]
-                            if (id && String(id) !== settings().lastSticker) update({ lastSticker: String(id) })
-                        } catch {}
-                    }),
-                )
-            }) as any,
+                if (typeof mod?.sendMessage === 'function' && !actions) actions = mod
+            }, { max: 1 } as any) as any,
         )
     },
     SettingsComponent: SettingsPage,

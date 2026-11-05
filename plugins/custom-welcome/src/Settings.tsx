@@ -3,10 +3,17 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { ExpressionGrid, stickerImage } from './grid'
 import { canPick, emojiText, gifText, openPicker } from './picker'
 import { bind, settings, update, useSettings } from './store'
 
-const stickerUrl = (id: string) => `https://media.discordapp.net/stickers/${id}.png?size=96`
+function stickerUrl(id: string) {
+    let format: number | undefined
+    try {
+        format = (Stores as any).StickersStore?.getStickerById?.(id)?.format_type
+    } catch {}
+    return stickerImage({ id, format_type: format })
+}
 
 function stickerName(id: string) {
     try {
@@ -48,6 +55,8 @@ export default function SettingsPage({ api }: { api?: any }) {
     const [sid, setSid] = useState('')
     const [openMsg, setOpenMsg] = useState(true)
     const [openSticker, setOpenSticker] = useState(false)
+    const [emojiGrid, setEmojiGrid] = useState(false)
+    const [stickerGrid, setStickerGrid] = useState(false)
     const pickable = canPick()
 
     const addMessage = (text = msg) => {
@@ -120,20 +129,22 @@ export default function SettingsPage({ api }: { api?: any }) {
                             </TableRowGroup>
                         ) : null}
                         <TextInput label="New message" value={msg} placeholder="Welcome {mention}! 👋" onChange={setMsg} onSubmitEditing={() => addMessage()} returnKeyType="done" />
-                        {pickable ? (
-                            <View style={{ flexDirection: 'row' }}>
-                                <View style={{ flex: 1, marginRight: 8 }}>
-                                    <Button text="Emoji or GIF" variant="secondary" size="md" icon={<TableRowAssetIcon name="ReactionIcon" />} onPress={pickForMessage} />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Button text="Add message" variant="primary" size="md" disabled={!msg.trim()} onPress={() => addMessage()} />
-                                </View>
+                        <View style={{ flexDirection: 'row' }}>
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                                <Button text={emojiGrid ? 'Hide emojis' : 'Server emojis'} variant="secondary" size="md" onPress={() => (anim(), setEmojiGrid(v => !v))} />
                             </View>
-                        ) : (
-                            <Button text="Add message" variant="primary" size="md" disabled={!msg.trim()} onPress={() => addMessage()} />
-                        )}
+                            {pickable ? (
+                                <View style={{ flex: 1, marginRight: 8 }}>
+                                    <Button text="Emoji or GIF" variant="secondary" size="md" onPress={pickForMessage} />
+                                </View>
+                            ) : null}
+                            <View style={{ flex: 1 }}>
+                                <Button text="Add" variant="primary" size="md" disabled={!msg.trim()} onPress={() => addMessage()} />
+                            </View>
+                        </View>
+                        {emojiGrid ? <ExpressionGrid kind="emoji" onPick={e => setMsg(m => `${m}${emojiText(e)}`)} /> : null}
                         <Text variant="text-xs/medium" color="text-muted">
-                            {'{mention} pings them, {name} is their name, {server} and {channel} are where they joined. Picking a GIF adds its link, which Discord shows as the GIF.'}
+                            {'{mention} pings them, {name} is their name, {server} and {channel} are where they joined. Keyboard emojis work as they are, server emojis from other servers need Nitro. Paste a GIF link (Tenor, Giphy) to send a GIF.'}
                         </Text>
                     </Stack>
                 </Section>
@@ -158,24 +169,14 @@ export default function SettingsPage({ api }: { api?: any }) {
                                 ))}
                             </TableRowGroup>
                         ) : null}
-                        {pickable ? <Button text="Pick a sticker" variant="primary" size="md" icon={<TableRowAssetIcon name="StickerIcon" />} onPress={pickSticker} /> : null}
-                        {s.lastSticker && !s.stickers.includes(s.lastSticker) ? (
-                            <TableRowGroup>
-                                <TableRow
-                                    icon={thumb(s.lastSticker)}
-                                    label={stickerName(s.lastSticker)}
-                                    subLabel="The last sticker you sent"
-                                    trailing={<Button size="sm" variant="secondary" text="Add" onPress={() => addSticker(s.lastSticker)} />}
-                                />
-                            </TableRowGroup>
-                        ) : null}
+                        <Button text={stickerGrid ? 'Hide stickers' : 'Pick a sticker'} variant="primary" size="md" onPress={() => (anim(), setStickerGrid(v => !v))} />
+                        {stickerGrid ? <ExpressionGrid kind="sticker" chosen={s.stickers} onPick={st => st?.id && addSticker(String(st.id))} /> : null}
+                        {pickable ? <Button text="Open Discord's picker" variant="secondary" size="md" onPress={pickSticker} /> : null}
                         <TextInput label="Or paste a sticker ID or link" value={sid} placeholder="123456789012345678" onChange={setSid} onSubmitEditing={() => addSticker(stickerIdOf(sid))} />
                         {stickerIdOf(sid) ? <Button text="Add this sticker" variant="secondary" size="md" onPress={() => addSticker(stickerIdOf(sid))} /> : null}
-                        {pickable ? (
-                            <Text variant="text-xs/medium" color="text-muted">
-                                In the picker, open the Stickers tab. Locked stickers need Nitro to send.
-                            </Text>
-                        ) : null}
+                        <Text variant="text-xs/medium" color="text-muted">
+                            Stickers from other servers need Nitro to send.
+                        </Text>
                     </Stack>
                 </Section>
 
