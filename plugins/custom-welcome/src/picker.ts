@@ -54,6 +54,7 @@ export const canPick = () => (refresh(), !!openFn || !!emojiFn)
 /** 이모지 → 메시지에 넣을 글자 */
 export function emojiText(e: any): string {
     if (!e) return ''
+    if (e.unicode || (e.surrogates && !/^\d+$/.test(String(e.id ?? '')))) return String(e.surrogates)
     if (e.id) return `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`
     return String(e.surrogates ?? e.optionallyDiverseSequence ?? (e.name ? `:${e.name}:` : ''))
 }

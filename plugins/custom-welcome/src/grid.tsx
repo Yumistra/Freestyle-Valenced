@@ -1,5 +1,7 @@
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
 import { Animated, Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
 import { palette } from './colors'
@@ -37,27 +39,101 @@ function guildIcon(id: string) {
     return g?.icon ? `https://cdn.discordapp.com/icons/${id}/${g.icon}.png?size=64` : undefined
 }
 
-function stickerGroups(): Array<[string, Sticker[]]> {
-    const out: Array<[string, Sticker[]]> = []
+/** 고르기 칸 아래 줄의 한 칸: 서버, 또는 디스코드 기본 묶음 */
+interface Group {
+    key: string
+    label: string
+    /** 아이콘 그림 주소, 없으면 글자 */
+    icon?: string
+    iconText?: string
+    items: any[]
+}
+
+function guildLabel(id: string) {
+    return { label: guildName(id), icon: guildIcon(id), iconText: guildName(id).slice(0, 2) }
+}
+
+// ── 디스코드 기본 스티커 묶음 (Wumpus 같은 것) ──────────────────────────────
+let packsAsked = false
+function systemStickerGroups(): Group[] {
+    const S: any = (Stores as any).StickersStore
+    let packs: any[] = []
+    try {
+        packs = S?.getPremiumPacks?.() ?? []
+    } catch {}
+    if (!packs?.length && !packsAsked) {
+        // 아직 안 받아 왔으면 한 번 받아 오라고 한다
+        packsAsked = true
+        try {
+            const [m]: any = lookupModule(withProps('fetchStickerPacks') as any) ?? []
+            m?.fetchStickerPacks?.()
+        } catch {}
+    }
+    const out: Group[] = []
+    for (const p of packs ?? []) {
+        const items = (p?.stickers ?? []).filter((x: any) => x?.id)
+        if (!items.length) continue
+        out.push({ key: `pack:${p.id}`, label: String(p.name ?? 'Discord'), icon: stickerImage(items.find((x: any) => x.format_type !== 3) ?? items[0]), iconText: '✨', items })
+    }
+    return out
+}
+
+function guildStickerGroups(): Group[] {
+    const out: Group[] = []
     try {
         const all = (Stores as any).StickersStore?.getAllGuildStickers?.()
+        const add = (g: string, list: any) => Array.isArray(list) && list.length && out.push({ key: `g:${g}`, ...guildLabel(g), items: list })
         if (all instanceof Map) {
-            for (const [g, list] of all) if (Array.isArray(list) && list.length) out.push([String(g), list])
+            for (const [g, list] of all) add(String(g), list)
         } else if (all && typeof all === 'object') {
-            for (const g of Object.keys(all)) if (all[g]?.length) out.push([g, all[g]])
+            for (const g of Object.keys(all)) add(g, all[g])
         }
     } catch {}
     return out
 }
 
-function emojiGroups(): Array<[string, Emoji[]]> {
+// ── 디스코드 기본 이모지 (유니코드, 분류별) ──────────────────────────────────
+const CATEGORY: Record<string, [string, string]> = {
+    people: ['People', '😀'],
+    nature: ['Nature', '🐻'],
+    food: ['Food', '🍔'],
+    activity: ['Activities', '⚽'],
+    travel: ['Travel', '🚗'],
+    objects: ['Objects', '💡'],
+    symbols: ['Symbols', '❤️'],
+    flags: ['Flags', '🏳️'],
+}
+let unicode: any
+function systemEmojiGroups(): Group[] {
+    try {
+        unicode ??= (lookupModule(withProps('getByCategory', 'getCategories') as any) as any)?.[0]
+        const cats: string[] = unicode?.getCategories?.() ?? []
+        const out: Group[] = []
+        for (const c of cats) {
+            const list = (unicode.getByCategory?.(c) ?? [])
+                .map((e: any) => {
+                    const surrogates = e?.surrogates ?? e?.optionallyDiverseSequence
+                    return surrogates ? { id: `u:${e.uniqueName ?? e.name ?? surrogates}`, name: String(e.uniqueName ?? e.name ?? (e.names ?? [])[0] ?? ''), surrogates, unicode: true } : undefined
+                })
+                .filter(Boolean)
+            if (!list.length) continue
+            const [label, iconText] = CATEGORY[c] ?? [c.charAt(0).toUpperCase() + c.slice(1), list[0].surrogates]
+            out.push({ key: `u:${c}`, label, iconText, items: list })
+        }
+        return out
+    } catch {
+        return []
+    }
+}
+
+function guildEmojiGroups(): Group[] {
     const S: any = Stores
-    const out: Array<[string, Emoji[]]> = []
+    const out: Group[] = []
     try {
         const guilds = S.GuildStore?.getGuilds?.() ?? {}
         for (const id of Object.keys(guilds)) {
             const list = S.EmojiStore?.getGuildEmoji?.(id) ?? S.EmojiStore?.getGuildEmojis?.(id)
-            if (Array.isArray(list) && list.length) out.push([id, list])
+            if (Array.isArray(list) && list.length) out.push({ key: `g:${id}`, ...guildLabel(id), items: list })
         }
     } catch {}
     return out
@@ -99,8 +175,16 @@ function FadeIn({ children, k }: { children: any; k: string }) {
 export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'emoji'; onPick(x: any): void; chosen?: string[] }) {
     const { Text } = Design as any
     const P = palette()
-    const groups: Array<[string, any[]]> = kind === 'sticker' ? stickerGroups() : emojiGroups()
-    const [sel, setSel] = useState<string | undefined>(groups[0]?.[0])
+    const groups: Group[] = kind === 'sticker' ? [...systemStickerGroups(), ...guildStickerGroups()] : [...systemEmojiGroups(), ...guildEmojiGroups()]
+    const [sel, setSel] = useState<string | undefined>(groups[0]?.key)
+    // 기본 스티커 묶음을 막 받아 오기 시작했으면 조금 뒤 다시 그린다
+    const [, tick] = useState(0)
+    const noPacks = kind === 'sticker' && !groups.some(g => g.key.startsWith('pack:'))
+    useEffect(() => {
+        if (!noPacks) return
+        const t = setTimeout(() => tick(n => n + 1), 1500)
+        return () => clearTimeout(t)
+    }, [noPacks])
     const [q, setQ] = useState('')
     const size = kind === 'sticker' ? 64 : 36
     const ql = q.trim().toLowerCase()
@@ -108,24 +192,22 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
     if (!groups.length)
         return (
             <Text variant="text-sm/medium" style={{ color: P.muted }}>
-                {kind === 'sticker' ? 'No server stickers found.' : 'No server emojis found. Keyboard emojis work too.'}
+                {kind === 'sticker' ? 'No stickers found.' : 'No emojis found. Keyboard emojis work too.'}
             </Text>
         )
 
-    const current = groups.find(([g]) => g === sel) ?? groups[0]
-    // 검색하면 모든 서버에서 찾는다
-    const results = ql
-        ? groups
-              .flatMap(([g, list]) => list.filter(x => String(x.name ?? '').toLowerCase().includes(ql)).map(x => [g, x] as [string, any]))
-              .slice(0, 150)
-        : current[1].map(x => [current[0], x] as [string, any])
+    const current = groups.find(g => g.key === sel) ?? groups[0]
+    // 검색하면 모든 묶음에서 찾는다
+    const results: any[] = ql ? groups.flatMap(g => g.items.filter(x => String(x.name ?? '').toLowerCase().includes(ql))).slice(0, 150) : current.items
 
-    const cell = ([, x]: [string, any]) => {
+    const cell = (x: any) => {
         const on = chosen?.includes(String(x.id))
         const lottie = kind === 'sticker' && x.format_type === 3
         return (
             <Cell key={x.id} size={size} on={on} onPress={() => onPick(x)}>
-                {lottie ? (
+                {x.unicode ? (
+                    <Text style={{ fontSize: size * 0.8, lineHeight: size, textAlign: 'center', color: P.text }}>{x.surrogates}</Text>
+                ) : lottie ? (
                     <Text variant="text-xs/medium" numberOfLines={2} style={{ color: P.text, textAlign: 'center' }}>
                         {x.name}
                     </Text>
@@ -150,10 +232,10 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
                 />
             </View>
             <Text variant="text-xs/bold" style={{ color: P.muted, paddingHorizontal: 14, paddingTop: 4, letterSpacing: 0.4 }} numberOfLines={1}>
-                {(ql ? `Results (${results.length})` : guildName(current[0])).toUpperCase()}
+                {(ql ? `Results (${results.length})` : current.label).toUpperCase()}
             </Text>
             <ScrollView nestedScrollEnabled style={{ height: kind === 'sticker' ? 300 : 260 }} contentContainerStyle={{ padding: 6 }}>
-                <FadeIn k={ql ? `q:${ql}` : current[0]}>
+                <FadeIn k={ql ? `q:${ql}` : current.key}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{results.map(cell)}</View>
                     {!results.length ? (
                         <Text variant="text-sm/medium" style={{ color: P.muted, padding: 8 }}>
@@ -164,24 +246,23 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
             </ScrollView>
             {/* 서버 아이콘 줄 */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 1, borderTopColor: P.chip }} contentContainerStyle={{ padding: 8 }}>
-                {groups.map(([g]) => {
-                    const icon = guildIcon(g)
-                    const on = !ql && g === current[0]
+                {groups.map(g => {
+                    const on = !ql && g.key === current.key
                     return (
                         <Pressable
-                            key={g}
+                            key={g.key}
                             onPress={() => {
                                 LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
                                 setQ('')
-                                setSel(g)
+                                setSel(g.key)
                             }}
                             style={{ width: 44, height: 44, marginRight: 6, borderRadius: on ? 14 : 22, borderWidth: 2, borderColor: on ? P.brand : 'transparent', alignItems: 'center', justifyContent: 'center', backgroundColor: P.chip, overflow: 'hidden' }}
                         >
-                            {icon ? (
-                                <Image source={{ uri: icon }} style={{ width: 40, height: 40 }} />
+                            {g.icon ? (
+                                <Image source={{ uri: g.icon }} style={{ width: 40, height: 40 }} resizeMode="contain" />
                             ) : (
-                                <Text variant="text-xs/bold" style={{ color: P.text }} numberOfLines={1}>
-                                    {guildName(g).slice(0, 2)}
+                                <Text style={{ color: P.text, fontSize: g.key.startsWith('u:') ? 22 : 12, fontWeight: '700' }} numberOfLines={1}>
+                                    {g.iconText ?? g.label.slice(0, 2)}
                                 </Text>
                             )}
                         </Pressable>
