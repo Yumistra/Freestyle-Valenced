@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.plugin-studio",
+	"name": "Plugin Studio",
+	"description": "Make Valenced plugins inside Discord: build settings screens with real Discord parts, link them with buttons, or change the text of an installed plugin's settings, then save an installable zip.",
+	"author": "Yumistra",
+	"icon": "SparklesIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.pluginstudio.PluginStudioPlugin"
+		}
+	}
+}
