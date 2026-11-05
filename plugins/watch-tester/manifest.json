@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.watch-tester",
+	"name": "Watch Tester",
+	"description": "A harmless plugin for testing Security Watch. Its buttons trip each alert without stealing anything: it reads the token and throws it away, and sends a fake token-shaped string to example.com.",
+	"author": "Yumistra",
+	"icon": "BeakerIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
