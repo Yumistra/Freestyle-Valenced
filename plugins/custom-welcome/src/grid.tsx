@@ -1,5 +1,6 @@
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
+import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
@@ -46,6 +47,8 @@ interface Group {
     /** 아이콘 그림 주소, 없으면 글자 */
     icon?: string
     iconText?: string
+    /** 아이콘으로 그릴 스티커 (그림 주소가 없는 Lottie 묶음) */
+    sticker?: any
     items: any[]
 }
 
@@ -53,27 +56,74 @@ function guildLabel(id: string) {
     return { label: guildName(id), icon: guildIcon(id), iconText: guildName(id).slice(0, 2) }
 }
 
-// ── 디스코드 기본 스티커 묶음 (Wumpus 같은 것) ──────────────────────────────
-let packsAsked = false
-function systemStickerGroups(): Group[] {
-    const S: any = (Stores as any).StickersStore
-    let packs: any[] = []
+// ── 디스코드 스티커 그림 (Lottie, APNG 도 디스코드가 그리는 그대로) ─────────────
+let StickerC: any
+function stickerComponent() {
+    if (StickerC) return StickerC
     try {
-        packs = S?.getPremiumPacks?.() ?? []
+        const m: any = (lookupModuleWithImportedPath('modules/stickers/native/Sticker.tsx') as any)?.[0]
+        const c = m?.default ?? m?.Sticker
+        if (c) StickerC = c
     } catch {}
-    if (!packs?.length && !packsAsked) {
-        // 아직 안 받아 왔으면 한 번 받아 오라고 한다
-        packsAsked = true
+    return StickerC
+}
+
+/** 스티커 하나 그리기. 디스코드 부품이 있으면 그걸로, 없으면 그림 주소로 */
+export function StickerView({ sticker, size }: { sticker: any; size: number }) {
+    // 디스코드 부품은 온전한 스티커 정보(형식 포함)가 있을 때만 쓴다
+    const C = sticker?.format_type != null && sticker?.name ? stickerComponent() : undefined
+    if (C) return <C sticker={sticker} size={size} animated={false} />
+    if (sticker?.format_type === 3) {
+        const { Text } = Design as any
+        return (
+            <Text variant="text-xs/medium" numberOfLines={2} style={{ color: palette().text, textAlign: 'center', width: size }}>
+                {sticker.name}
+            </Text>
+        )
+    }
+    return <Image source={{ uri: stickerImage(sticker) }} style={{ width: size, height: size }} resizeMode="contain" />
+}
+
+// ── 디스코드 기본 스티커 묶음 (Wumpus 같은 것) ──────────────────────────────
+let apiPacks: any[] | undefined
+let loading = false
+/** 디스코드 기본 스티커 묶음 목록 (로그인 없이 받는 공개 주소, 토큰은 쓰지 않는다) */
+function loadPacks(done: () => void) {
+    if (apiPacks || loading) return
+    loading = true
+    fetch('https://discord.com/api/v9/sticker-packs')
+        .then(r => r.json())
+        .then(j => {
+            apiPacks = Array.isArray(j?.sticker_packs) ? j.sticker_packs : []
+        })
+        .catch(() => {
+            apiPacks = []
+        })
+        .finally(() => {
+            loading = false
+            done()
+        })
+}
+
+function storePacks(): any[] {
+    const S: any = Stores
+    for (const store of [S.StickersStore, S.StickersPackStore]) {
         try {
-            const [m]: any = lookupModule(withProps('fetchStickerPacks') as any) ?? []
-            m?.fetchStickerPacks?.()
+            const p = store?.getPremiumPacks?.()
+            if (Array.isArray(p) && p.length) return p
         } catch {}
     }
+    return []
+}
+
+function systemStickerGroups(): Group[] {
+    const packs = storePacks().length ? storePacks() : apiPacks ?? []
     const out: Group[] = []
-    for (const p of packs ?? []) {
+    for (const p of packs) {
         const items = (p?.stickers ?? []).filter((x: any) => x?.id)
         if (!items.length) continue
-        out.push({ key: `pack:${p.id}`, label: String(p.name ?? 'Discord'), icon: stickerImage(items.find((x: any) => x.format_type !== 3) ?? items[0]), iconText: '✨', items })
+        const preview = items.find((x: any) => x.format_type !== 3)
+        out.push({ key: `pack:${p.id}`, label: String(p.name ?? 'Discord'), icon: preview ? stickerImage(preview) : undefined, iconText: '✨', sticker: items[0], items })
     }
     return out
 }
@@ -181,9 +231,7 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
     const [, tick] = useState(0)
     const noPacks = kind === 'sticker' && !groups.some(g => g.key.startsWith('pack:'))
     useEffect(() => {
-        if (!noPacks) return
-        const t = setTimeout(() => tick(n => n + 1), 1500)
-        return () => clearTimeout(t)
+        if (noPacks) loadPacks(() => tick(n => n + 1))
     }, [noPacks])
     const [q, setQ] = useState('')
     const size = kind === 'sticker' ? 64 : 36
@@ -202,17 +250,14 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
 
     const cell = (x: any) => {
         const on = chosen?.includes(String(x.id))
-        const lottie = kind === 'sticker' && x.format_type === 3
         return (
             <Cell key={x.id} size={size} on={on} onPress={() => onPick(x)}>
                 {x.unicode ? (
                     <Text style={{ fontSize: size * 0.8, lineHeight: size, textAlign: 'center', color: P.text }}>{x.surrogates}</Text>
-                ) : lottie ? (
-                    <Text variant="text-xs/medium" numberOfLines={2} style={{ color: P.text, textAlign: 'center' }}>
-                        {x.name}
-                    </Text>
+                ) : kind === 'sticker' ? (
+                    <StickerView sticker={x} size={size} />
                 ) : (
-                    <Image source={{ uri: kind === 'sticker' ? stickerImage(x) : emojiImage(x) }} style={{ width: size, height: size }} resizeMode="contain" />
+                    <Image source={{ uri: emojiImage(x) }} style={{ width: size, height: size }} resizeMode="contain" />
                 )}
             </Cell>
         )
@@ -258,7 +303,9 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
                             }}
                             style={{ width: 44, height: 44, marginRight: 6, borderRadius: on ? 14 : 22, borderWidth: 2, borderColor: on ? P.brand : 'transparent', alignItems: 'center', justifyContent: 'center', backgroundColor: P.chip, overflow: 'hidden' }}
                         >
-                            {g.icon ? (
+                            {g.sticker && !g.icon ? (
+                                <StickerView sticker={g.sticker} size={36} />
+                            ) : g.icon ? (
                                 <Image source={{ uri: g.icon }} style={{ width: 40, height: 40 }} resizeMode="contain" />
                             ) : (
                                 <Text style={{ color: P.text, fontSize: g.key.startsWith('u:') ? 22 : 12, fontWeight: '700' }} numberOfLines={1}>
@@ -271,4 +318,14 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
             </ScrollView>
         </View>
     )
+}
+
+/** ID 로 스티커 찾기 (서버 스티커, 디스코드 기본 묶음) */
+export function stickerById(id: string): any {
+    try {
+        const s = (Stores as any).StickersStore?.getStickerById?.(id)
+        if (s) return s
+    } catch {}
+    for (const p of [...storePacks(), ...(apiPacks ?? [])]) for (const x of p?.stickers ?? []) if (String(x?.id) === id) return x
+    return undefined
 }

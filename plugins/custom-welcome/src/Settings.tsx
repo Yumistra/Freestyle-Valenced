@@ -4,24 +4,13 @@ import { Stores } from '@valenced/discord/flux'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { palette } from './colors'
-import { ExpressionGrid, stickerImage } from './grid'
+import { ExpressionGrid, stickerById, StickerView } from './grid'
 import { canPick, emojiText, gifText, openPicker } from './picker'
 import { bind, settings, update, useSettings } from './store'
 
-function stickerUrl(id: string) {
-    let format: number | undefined
-    try {
-        format = (Stores as any).StickersStore?.getStickerById?.(id)?.format_type
-    } catch {}
-    return stickerImage({ id, format_type: format })
-}
 
 function stickerName(id: string) {
-    try {
-        return String((Stores as any).StickersStore?.getStickerById?.(id)?.name ?? '') || `Sticker ${id}`
-    } catch {
-        return `Sticker ${id}`
-    }
+    return String(stickerById(id)?.name ?? '') || `Sticker ${id}`
 }
 
 /** 붙여 넣은 글에서 스티커 ID 를 꺼낸다 (ID 그대로, 또는 스티커 링크) */
@@ -88,7 +77,7 @@ export default function SettingsPage({ api }: { api?: any }) {
             sticker: st => st?.id && addSticker(String(st.id)),
             emoji: e => setMsg(m => `${m}${emojiText(e)}`),
         })
-    const thumb = (id: string) => <Image source={{ uri: stickerUrl(id) }} style={{ width: 40, height: 40 }} />
+    const thumb = (id: string) => <StickerView sticker={stickerById(id) ?? { id }} size={40} />
 
     return (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 64 }}>
