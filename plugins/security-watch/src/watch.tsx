@@ -27,7 +27,7 @@ function frames(): string[] {
 }
 
 /** 이 기기에서 스택에 플러그인 이름이 보이는지 (시작할 때 확인) */
-export const status = { names: false, gap: 0, patched: [] as string[] }
+export const status = { names: false, gap: 0, patched: [] as string[], screens: 0 }
 
 /** 훅 바로 바깥에서 부른 플러그인 (patcher 안쪽 줄 수는 시작할 때 재 둔다) */
 function directCaller(): string {
@@ -77,7 +77,14 @@ const WHAT: Record<Kind, string> = {
 
 let seq = 0
 const lastToast = new Map<string, number>()
+/** 디스코드가 다 뜬 뒤(start)에만 토스트, 팝업을 띄운다. 그 전에 디스코드 모듈을 부르면 앱이 안 켜진다 */
+let ready = false
+export function setReady(v: boolean) {
+    ready = v
+}
+
 function toast(text: string) {
+    if (!ready) return
     try {
         ToastActionCreators.open(`security-watch-${Date.now()}-${seq++}`, { text } as any)
     } catch {}
@@ -113,7 +120,7 @@ function prompt(p: string, k: Kind, d: string | undefined, replay?: Replay) {
         if (replay) list.push(replay)
         return
     }
-    if (Date.now() < (quietUntil.get(key) ?? 0)) {
+    if (!ready || Date.now() < (quietUntil.get(key) ?? 0)) {
         replay?.deny()
         return
     }
@@ -402,7 +409,7 @@ export function startWatching(cleanup: (...f: Array<() => void>) => void) {
     cleanup(
         getModules(withProps('getToken', 'setToken') as any, (mod: any) => patchTokenModule(cleanup, mod, 'token module')) as any,
     )
-    patchStores(cleanup)
+    // 스토어(Stores.…)는 여기서 건드리면 디스코드 모듈이 너무 일찍 불려 앱이 안 켜진다. start 에서 한다
     patchNetwork(cleanup)
     patchClipboard(cleanup)
     patchBridge(cleanup)

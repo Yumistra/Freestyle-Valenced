@@ -3,7 +3,7 @@ import { readFileSync } from '@valenced/modules/native/fs'
 import { patchPluginScreens } from './panel'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, setEarly } from './store'
-import { patchStores, SELF, startWatching } from './watch'
+import { patchStores, SELF, setReady, startWatching } from './watch'
 
 /**
  * Security Watch: 다른 플러그인이 토큰이나 민감한 것을 건드릴 때마다 알리거나 막는다.
@@ -28,6 +28,8 @@ export default plugin({
     },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
+        setReady(true)
+        cleanup(() => setReady(false))
         patchStores(cleanup)
         patchPluginScreens(cleanup)
     },

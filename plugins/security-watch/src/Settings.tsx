@@ -42,6 +42,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                                 : 'Alerts for token reads start once Discord loads the token module. Sends, copies and file reads still show.'
                         }
                     />
+                    <TableRow icon={<TableRowAssetIcon name="SettingsIcon" />} label="Rules on plugin settings" subLabel={status.screens ? `Shown on top of ${status.screens} plugin settings page(s).` : 'No plugin settings page found yet.'} />
                     <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Show toasts" subLabel="Everything is still kept in the log below." value={s.toasts} onValueChange={(toasts: boolean) => update({ toasts })} />
                 </TableRowGroup>
                 {KINDS.map(([k, label, sub]) => (

@@ -1,13 +1,14 @@
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
+import { refreshSettings } from '@valenced/discord/modules/settings'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { useState } from 'react'
 import { LayoutAnimation, Pressable, View } from 'react-native'
 import { setRule, useSettings, type Kind, type Rule } from './store'
-import { SELF } from './watch'
+import { SELF, status } from './watch'
 
 /**
  * 다른 플러그인 설정 화면 맨 위에 그 플러그인만의 Security Watch 규칙을 넣는다.
@@ -146,6 +147,7 @@ export function patchPluginScreens(cleanup: (...f: Array<() => void>) => void) {
         } catch {}
         const self = cfg?.[SELF]
         if (!self) return
+        let changed = false
         for (const key of Object.keys(cfg)) {
             const item = cfg[key]
             if (key === SELF || !item || seen.has(item) || !ID.test(key)) continue
@@ -154,6 +156,8 @@ export function patchPluginScreens(cleanup: (...f: Array<() => void>) => void) {
             const get = screen.getComponent
             if (typeof get !== 'function') continue
             seen.add(item)
+            changed = true
+            status.screens++
             let Inner: any
             let Outer: any
             item.screen = {
@@ -180,6 +184,11 @@ export function patchPluginScreens(cleanup: (...f: Array<() => void>) => void) {
                 if (item.screen?.getComponent && item.screen.route === key) item.screen = screen
             })
         }
+        // 디스코드 설정 화면 목록은 다시 읽으라고 해야 바뀐 화면을 쓴다
+        if (changed)
+            try {
+                refreshSettings()
+            } catch {}
     }
     cleanup(
         getModules(withProps('SETTING_RENDERER_CONFIG') as any, (mod: any) => {
@@ -192,5 +201,8 @@ export function patchPluginScreens(cleanup: (...f: Array<() => void>) => void) {
     cleanup(() => {
         clearInterval(t)
         for (const r of restore) r()
+        try {
+            refreshSettings()
+        } catch {}
     })
 }

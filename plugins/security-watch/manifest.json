@@ -5,7 +5,7 @@
 	"description": "Tells you, or stops it, whenever a plugin touches your token or other sensitive things: reading the token, sending it outside Discord, copying it, or reading Discord's app files.",
 	"author": "Yumistra",
 	"icon": "ShieldIcon",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
