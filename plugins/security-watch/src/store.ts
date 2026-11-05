@@ -21,13 +21,18 @@ export interface Settings {
     toasts: boolean
     watch: Record<Kind, Mode>
     trusted: string[]
+    /** 플러그인마다 따로 정한 규칙 (없으면 위의 watch 를 따른다) */
+    rules: Record<string, Partial<Record<Kind, Rule>>>
     log: Hit[]
 }
+
+export type Rule = 'block' | 'alert' | 'allow'
 
 export const DEFAULTS: Settings = {
     toasts: true,
     watch: { read: 'alert', send: 'block', copy: 'alert', files: 'alert', account: 'block' },
     trusted: [],
+    rules: {},
     log: [],
 }
 
@@ -89,4 +94,15 @@ export function record(p: string, k: Kind, d: string | undefined, b: boolean) {
     }
     clearTimeout(timer)
     timer = setTimeout(() => update({ log: settings().log }), 1500)
+}
+
+/** 플러그인 하나의 규칙을 바꾼다 (undefined 면 기본으로) */
+export function setRule(p: string, k: Kind, r: Rule | undefined) {
+    const rules = { ...settings().rules }
+    const one = { ...(rules[p] ?? {}) }
+    if (r) one[k] = r
+    else delete one[k]
+    if (Object.keys(one).length) rules[p] = one
+    else delete rules[p]
+    update({ rules })
 }

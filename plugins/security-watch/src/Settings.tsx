@@ -2,7 +2,7 @@ import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { useState } from 'react'
-import { bind, settings, update, useSettings, type Kind, type Mode } from './store'
+import { bind, setRule, settings, update, useSettings, type Kind, type Mode } from './store'
 import { nameOf, status } from './watch'
 
 const KINDS: Array<[Kind, string, string, string]> = [
@@ -46,7 +46,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                 </TableRowGroup>
                 {KINDS.map(([k, label, sub]) => (
                     <TableRadioGroup key={k} title={label} defaultValue={s.watch[k]} onChange={(v: Mode) => update({ watch: { ...settings().watch, [k]: v } })}>
-                        <TableRadioRow label="Block" subLabel={`${sub} It is stopped and you get told.`} value="block" />
+                        <TableRadioRow label="Block" subLabel={`${sub} It is stopped, and a popup lets you allow it.`} value="block" />
                         <TableRadioRow label="Alert" subLabel="Let it happen, but tell me." value="alert" />
                         <TableRadioRow label="Off" subLabel="Don't watch this." value="off" />
                     </TableRadioGroup>
@@ -58,6 +58,22 @@ export default function SettingsPage({ api }: { api?: any }) {
                         ))
                     ) : (
                         <TableRow label="Nothing yet" subLabel="Trust a plugin from the log to allow everything it does, with no alerts." />
+                    )}
+                </TableRowGroup>
+                <TableRowGroup title={`Per plugin rules (${Object.keys(s.rules).length})`}>
+                    {Object.keys(s.rules).length ? (
+                        Object.entries(s.rules).map(([p, r]) => (
+                            <TableRow
+                                key={p}
+                                label={nameOf(p)}
+                                subLabel={Object.entries(r)
+                                    .map(([k, v]) => `${LABEL[k as Kind] ?? k}: ${v}`)
+                                    .join(', ')}
+                                trailing={<Button size="sm" variant="secondary" text="Reset" onPress={() => Object.keys(r).forEach(k => setRule(p, k as Kind, undefined))} />}
+                            />
+                        ))
+                    ) : (
+                        <TableRow label="Nothing yet" subLabel="Change these at the top of each plugin's settings, or tap Always allow in a popup." />
                     )}
                 </TableRowGroup>
                 <TableRowGroup title={`Log (${s.log.length})`}>

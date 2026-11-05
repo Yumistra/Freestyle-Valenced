@@ -4,7 +4,9 @@ import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import * as Internal from '@valenced/plugins/_'
-import { record, settings, type Kind } from './store'
+import { AlertActionCreators } from '@valenced/discord/actions'
+import { Design } from '@valenced/discord/design'
+import { record, setRule, settings, type Kind, type Mode } from './store'
 
 /**
  * 누가 불렀는지는 호출 스택으로 안다. Valenced 는 플러그인 코드를
@@ -75,24 +77,123 @@ const WHAT: Record<Kind, string> = {
 
 let seq = 0
 const lastToast = new Map<string, number>()
-/** 알리고, 막아야 하면 true 를 돌려준다 */
-function alert(p: string, k: Kind, d?: string): boolean {
+function toast(text: string) {
+    try {
+        ToastActionCreators.open(`security-watch-${Date.now()}-${seq++}`, { text } as any)
+    } catch {}
+}
+
+/** 막은 일을 나중에 허용하면 다시 하거나(run), 거절하면 실패로 끝낸다(deny) */
+export interface Replay {
+    run(): void
+    deny(): void
+}
+
+/** 묻는 중인 것 (같은 플러그인, 같은 일은 한 창으로 모은다) */
+const asking = new Map<string, Replay[]>()
+/** "이번만 허용": 잠깐 동안 그냥 통과 */
+const allowUntil = new Map<string, number>()
+/** "계속 막기": 잠깐 동안 다시 묻지 않는다 */
+const quietUntil = new Map<string, number>()
+const ONCE = 60_000
+
+function finish(key: string, allow: boolean) {
+    const list = asking.get(key) ?? []
+    asking.delete(key)
+    for (const r of list)
+        try {
+            allow ? r.run() : r.deny()
+        } catch {}
+}
+
+function prompt(p: string, k: Kind, d: string | undefined, replay?: Replay) {
+    const key = `${p}|${k}`
+    const list = asking.get(key)
+    if (list) {
+        if (replay) list.push(replay)
+        return
+    }
+    if (Date.now() < (quietUntil.get(key) ?? 0)) {
+        replay?.deny()
+        return
+    }
+    asking.set(key, replay ? [replay] : [])
+    // 답이 없으면 1분 뒤 거절
+    setTimeout(() => asking.has(key) && finish(key, false), ONCE)
+    const name = nameOf(p)
+    const later = replay ? '' : ' If you allow it, it works the next time the plugin tries.'
+    try {
+        const { AlertModal, AlertActionButton } = Design as any
+        AlertActionCreators.openAlert(
+            `security-watch-${Date.now()}-${seq++}`,
+            <AlertModal
+                title="Blocked by Security Watch"
+                content={`${name} tried ${BLOCKED[k]}${d ? ` (${d})` : ''}.${later}`}
+                actions={
+                    <>
+                        <AlertActionButton
+                            text="Allow this time"
+                            variant="primary"
+                            onPress={() => {
+                                allowUntil.set(key, Date.now() + ONCE)
+                                finish(key, true)
+                            }}
+                        />
+                        <AlertActionButton
+                            text={`Always allow ${name}`}
+                            variant="secondary"
+                            onPress={() => {
+                                setRule(p, k, 'allow')
+                                finish(key, true)
+                            }}
+                        />
+                        <AlertActionButton
+                            text="Keep blocked"
+                            variant="destructive"
+                            onPress={() => {
+                                quietUntil.set(key, Date.now() + 2 * ONCE)
+                                finish(key, false)
+                            }}
+                        />
+                    </>
+                }
+            />,
+        )
+    } catch {
+        // 창을 못 띄우면 (디스코드가 아직 안 떴을 때 등) 토스트만
+        asking.delete(key)
+        replay?.deny()
+        toast(`Blocked ${name} from ${BLOCKED[k]}`)
+    }
+}
+
+/** 이 플러그인, 이 일에 지금 적용되는 규칙 */
+export function modeFor(p: string, k: Kind): Mode | 'allow' {
     const s = settings()
-    const mode = s.watch[k]
-    if (mode === 'off' || (p && s.trusted.includes(p))) return false
+    if (s.watch[k] === 'off') return 'off'
+    if (p && s.trusted.includes(p)) return 'allow'
+    return (p && s.rules[p]?.[k]) || s.watch[k]
+}
+
+/** 알리고, 막아야 하면 true 를 돌려준다. 막을 때는 허용할지 묻는다 */
+function alert(p: string, k: Kind, d?: string, replay?: Replay): boolean {
+    const mode = modeFor(p, k)
+    if (mode === 'off' || mode === 'allow') return false
+    const key = `${p}|${k}`
+    if (mode === 'block' && Date.now() < (allowUntil.get(key) ?? 0)) return false
     const block = mode === 'block'
     record(p, k, d, block)
-    if (!s.toasts) return block
+    if (block) {
+        prompt(p, k, d, replay)
+        return true
+    }
+    if (!settings().toasts) return false
     // 같은 플러그인, 같은 일은 30초에 한 번만 띄운다 (보내기는 매번)
-    const key = `${p}|${k}|${block}`
     const now = Date.now()
-    if (k !== 'send' && now - (lastToast.get(key) ?? 0) < 30_000) return block
+    if (k !== 'send' && now - (lastToast.get(key) ?? 0) < 30_000) return false
     lastToast.set(key, now)
-    const where = d && k !== 'files' ? `, ${d}` : ''
-    try {
-        ToastActionCreators.open(`security-watch-${now}-${seq++}`, { text: block ? `Blocked ${nameOf(p)} from ${BLOCKED[k]}${where}` : `${nameOf(p)} ${WHAT[k]}${where}` } as any)
-    } catch {}
-    return block
+    toast(`${nameOf(p)} ${WHAT[k]}${d && k !== 'files' ? `, ${d}` : ''}`)
+    return false
 }
 
 export const BLOCK_ERROR = 'Blocked by Security Watch'
@@ -135,7 +236,8 @@ function patchTokenModule(cleanup: (...f: Array<() => void>) => void, mod: any, 
             cleanup(
                 instead(mod, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                     const p = directCaller()
-                    if (p && alert(p, 'account', key === 'removeToken' ? 'removed' : undefined)) return undefined
+                    const self = this
+                    if (p && alert(p, 'account', key === 'removeToken' ? 'removed' : undefined, { run: () => orig.apply(self, args), deny() {} })) return undefined
                     return orig.apply(this, args)
                 }),
             )
@@ -184,13 +286,26 @@ function patchNetwork(cleanup: (...f: Array<() => void>) => void) {
                     return orig.apply(this, args)
                 }),
                 instead(XHR, 'send', function (this: any, args: any[], orig: (...a: any[]) => any) {
+                    const xhr = this
                     let block = false
                     try {
                         const host = hostOf(this.__swUrl)
-                        if (host && !DISCORD.test(host) && (hasToken(String(this.__swUrl)) || (this.__swHeaders ?? []).some(hasToken) || hasToken(args[0]))) block = alert(anyCaller(), 'send', host)
+                        if (host && !DISCORD.test(host) && (hasToken(String(this.__swUrl)) || (this.__swHeaders ?? []).some(hasToken) || hasToken(args[0])))
+                            block = alert(anyCaller(), 'send', host, {
+                                // 허용하면 그때 보낸다
+                                run: () => orig.apply(xhr, args),
+                                // 거절하면 네트워크 오류처럼 끝낸다 (fetch 는 실패로 끝난다)
+                                deny() {
+                                    try {
+                                        xhr.onerror?.({ type: 'error', message: BLOCK_ERROR })
+                                    } catch {}
+                                    try {
+                                        xhr.onloadend?.({ type: 'loadend' })
+                                    } catch {}
+                                },
+                            })
                     } catch {}
-                    // fetch 는 이 오류로 실패한다 (요청은 나가지 않는다)
-                    if (block) throw new Error(BLOCK_ERROR)
+                    if (block) return undefined
                     return orig.apply(this, args)
                 }),
             )
@@ -201,12 +316,13 @@ function patchNetwork(cleanup: (...f: Array<() => void>) => void) {
         try {
             cleanup(
                 instead(WS, 'send', function (this: any, args: any[], orig: (...a: any[]) => any) {
+                    const ws = this
                     let block = false
                     try {
                         const host = hostOf(this.url)
-                        if (host && !DISCORD.test(host) && hasToken(args[0])) block = alert(anyCaller(), 'send', host)
+                        if (host && !DISCORD.test(host) && hasToken(args[0])) block = alert(anyCaller(), 'send', host, { run: () => orig.apply(ws, args), deny() {} })
                     } catch {}
-                    if (block) throw new Error(BLOCK_ERROR)
+                    if (block) return undefined
                     return orig.apply(this, args)
                 }),
             )
@@ -222,9 +338,10 @@ function patchClipboard(cleanup: (...f: Array<() => void>) => void) {
             try {
                 cleanup(
                     instead(mod, 'setString', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        const self = this
                         let block = false
                         try {
-                            if (hasToken(args[0])) block = alert(anyCaller(), 'copy')
+                            if (hasToken(args[0])) block = alert(anyCaller(), 'copy', undefined, { run: () => orig.apply(self, args), deny() {} })
                         } catch {}
                         if (block) return undefined
                         return orig.apply(this, args)
@@ -245,17 +362,24 @@ function patchBridge(cleanup: (...f: Array<() => void>) => void) {
         if (typeof orig !== 'function') continue
         const isAsync = name.endsWith('async')
         const wrapped = function (this: unknown, payload: any) {
+            const self = this
             let block = false
+            let later: Promise<any> | undefined
             try {
                 const m = payload?.valenced?.method
                 const path = payload?.valenced?.args?.[0]
                 if (typeof m === 'string' && /^valenced\.fs\./.test(m) && typeof path === 'string' && SECRET_PATH.test(path) && !/\/valenced\/|plugins?\//i.test(path)) {
                     const p = anyCaller()
-                    if (p) block = alert(p, 'files', path)
+                    if (p) {
+                        // 비동기 호출은 답을 기다렸다가 허용하면 그때 읽는다
+                        let done: (v: any) => void = () => {}
+                        if (isAsync) later = new Promise(r => (done = r))
+                        block = alert(p, 'files', path, isAsync ? { run: () => done(orig.call(self, payload)), deny: () => done({ error: BLOCK_ERROR }) } : undefined)
+                    }
                 }
             } catch {}
             // callNativeMethod 는 { error } 를 받으면 실패로 던진다
-            if (block) return isAsync ? Promise.resolve({ error: BLOCK_ERROR }) : { error: BLOCK_ERROR }
+            if (block) return later ?? { error: BLOCK_ERROR }
             return orig.call(this, payload)
         }
         try {

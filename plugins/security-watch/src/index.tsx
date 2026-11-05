@@ -1,5 +1,6 @@
 import { pluginStoragePathFor } from '@valenced/json-storage'
 import { readFileSync } from '@valenced/modules/native/fs'
+import { patchPluginScreens } from './panel'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, setEarly } from './store'
 import { patchStores, SELF, startWatching } from './watch'
@@ -28,6 +29,7 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
         patchStores(cleanup)
+        patchPluginScreens(cleanup)
     },
     SettingsComponent: SettingsPage,
 } as any)
