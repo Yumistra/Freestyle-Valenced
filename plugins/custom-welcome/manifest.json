@@ -5,7 +5,7 @@
 	"description": "Choose what the \"Wave to say hi!\" button sends: your own message, a GIF link, your own sticker, or a mix, picked at random.",
 	"author": "Yumistra",
 	"icon": "HandRequestSpeakIcon",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

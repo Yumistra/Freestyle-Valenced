@@ -2,6 +2,7 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
+import { bindSticker } from './grid'
 import { bindPicker } from './picker'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, settings } from './store'
@@ -67,10 +68,18 @@ function send(channelId: string, ref: any): boolean {
             ...(ref.guild_id ? { guild_id: ref.guild_id } : {}),
         }
     if (!s.ping) options.allowedMentions = { parse: ['users', 'roles', 'everyone'], replied_user: false }
-    if (sticker) options.stickerIds = [sticker]
+    const msg = (text: string) => ({ content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] })
     sending = true
     try {
-        actions.sendMessage(channelId, { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, options)
+        if (s.mode === 'separate' && content.trim() && sticker) {
+            // 메시지 먼저, 그다음 스티커 (두 번째는 다시 알림 가지 않게)
+            Promise.resolve(actions.sendMessage(channelId, msg(content), undefined, options))
+                .catch(() => {})
+                .then(() => actions.sendMessage(channelId, msg(''), undefined, { ...options, stickerIds: [sticker], allowedMentions: { parse: [], replied_user: false } }))
+        } else {
+            if (sticker) options.stickerIds = [sticker]
+            actions.sendMessage(channelId, msg(content), undefined, options)
+        }
     } finally {
         sending = false
     }
@@ -82,6 +91,7 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
         bindPicker(cleanup)
+        bindSticker(cleanup)
         const greet = function (this: unknown, args: any[], orig: (...a: any[]) => any) {
             try {
                 if (settings().enabled) {

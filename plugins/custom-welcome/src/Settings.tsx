@@ -40,7 +40,7 @@ function Section({ title, sub, icon, open, onToggle, children }: { title: string
 export default function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const s = useSettings()
-    const { Stack, TableRowGroup, TableRow, TableSwitchRow, Button, TextInput, Text } = Design as any
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TableRadioGroup, TableRadioRow, Button, TextInput, Text } = Design as any
     const [msg, setMsg] = useState('')
     const [sid, setSid] = useState('')
     const [openMsg, setOpenMsg] = useState(true)
@@ -98,6 +98,11 @@ export default function SettingsPage({ api }: { api?: any }) {
                         onValueChange={(ping: boolean) => update({ ping })}
                     />
                 </TableRowGroup>
+
+                <TableRadioGroup title="Message and sticker" defaultValue={s.mode} onChange={(mode: 'together' | 'separate') => update({ mode })}>
+                    <TableRadioRow label="Together" subLabel="One message with the text and the sticker." value="together" />
+                    <TableRadioRow label="Separately" subLabel="The text first, then the sticker as its own message." value="separate" />
+                </TableRadioGroup>
 
                 <Section
                     title="Messages"

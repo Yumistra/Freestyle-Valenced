@@ -1,7 +1,7 @@
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { lookupModule } from '@valenced/modules/finders'
+import { getModules, lookupModule, lookupModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
 import { Animated, Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
@@ -58,12 +58,28 @@ function guildLabel(id: string) {
 
 // ── 디스코드 스티커 그림 (Lottie, APNG 도 디스코드가 그리는 그대로) ─────────────
 let StickerC: any
+/** modules/stickers/native/Sticker.tsx: { default: Sticker, getStickerAssetUrl } */
+const isStickerModule = (m: any) => typeof m?.default === 'function' && typeof m?.getStickerAssetUrl === 'function'
+export function bindSticker(cleanup: (...f: Array<() => void>) => void) {
+    cleanup(
+        getModules(withProps('getStickerAssetUrl') as any, (m: any) => {
+            if (!StickerC && isStickerModule(m)) StickerC = m.default
+        }) as any,
+    )
+}
 function stickerComponent() {
     if (StickerC) return StickerC
     try {
         const m: any = (lookupModuleWithImportedPath('modules/stickers/native/Sticker.tsx') as any)?.[0]
-        const c = m?.default ?? m?.Sticker
-        if (c) StickerC = c
+        if (isStickerModule(m)) StickerC = m.default
+    } catch {}
+    try {
+        if (!StickerC)
+            for (const m of (lookupModules(withProps('getStickerAssetUrl') as any) as any) ?? [])
+                if (isStickerModule(Array.isArray(m) ? m[0] : m)) {
+                    StickerC = (Array.isArray(m) ? m[0] : m).default
+                    break
+                }
     } catch {}
     return StickerC
 }
@@ -74,11 +90,15 @@ export function StickerView({ sticker, size }: { sticker: any; size: number }) {
     const C = sticker?.format_type != null && sticker?.name ? stickerComponent() : undefined
     if (C) return <C sticker={sticker} size={size} animated={false} />
     if (sticker?.format_type === 3) {
+        // 움직이는 Lottie 스티커는 그림 주소가 없다. 디스코드 부품을 못 찾으면 이름 칸으로
         const { Text } = Design as any
+        const P = palette()
         return (
-            <Text variant="text-xs/medium" numberOfLines={2} style={{ color: palette().text, textAlign: 'center', width: size }}>
-                {sticker.name}
-            </Text>
+            <View style={{ width: size, height: size, borderRadius: 12, backgroundColor: P.chip, alignItems: 'center', justifyContent: 'center', padding: 2 }}>
+                <Text variant="text-xs/semibold" numberOfLines={2} adjustsFontSizeToFit style={{ color: P.text, textAlign: 'center' }}>
+                    {sticker.name}
+                </Text>
+            </View>
         )
     }
     return <Image source={{ uri: stickerImage(sticker) }} style={{ width: size, height: size }} resizeMode="contain" />

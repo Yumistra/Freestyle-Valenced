@@ -7,7 +7,9 @@ export interface Settings {
     stickers: string[]
     /** 답장할 때 그 사람에게 알림 (멘션) */
     ping: boolean
-    /** 마지막으로 보낸 스티커 (설정에서 바로 추가하려고 기억한다) */
+    /** 메시지와 스티커를 한 메시지로(together), 따로 두 메시지로(separate) */
+    mode: 'together' | 'separate'
+    /** 예전 버전에서 쓰던 값 */
     lastSticker?: string
 }
 
@@ -16,6 +18,7 @@ export const DEFAULTS: Settings = {
     messages: ['Welcome {mention}! 👋'],
     stickers: [],
     ping: true,
+    mode: 'together',
 }
 
 let storage: any
