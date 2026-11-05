@@ -6,7 +6,7 @@ import { getModules, lookupModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { cloneElement, createContext, createElement, isValidElement, useContext, useEffect, useState } from 'react'
-import { ScrollView, StyleSheet, View } from 'react-native'
+import { LayoutAnimation, ScrollView, StyleSheet, View } from 'react-native'
 
 /**
  * 포럼·스레드는 채널 화면(StandaloneChannelScreen)을 채팅 위에 한 장 더 쌓아서 연다.
@@ -442,7 +442,7 @@ function StatusRows() {
             key="summary"
             label={summary}
             trailing={<Text variant="text-lg/bold">{working ? '✓' : '!'}</Text>}
-            onPress={() => setOpen(!open)}
+            onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setOpen(!open))}
         />,
         ...(open ? rows.map(([k, v]) => <TableRow key={k} label={k} trailing={<Text variant="text-sm/medium" color="text-muted">{v}</Text>} />) : []),
     ]
@@ -453,6 +453,7 @@ function SettingsPage({ api }: { api: any }) {
     const [s, setS] = useState<Settings>(settings)
     const [alpha, setAlpha] = useState(s.alpha)
     const save = (patch: Partial<Settings>) => {
+        if ('mode' in patch) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
         const next = { ...s, ...patch }
         setS(next)
         api.jsonStorage.set({ ...next, v: 2 }, true)

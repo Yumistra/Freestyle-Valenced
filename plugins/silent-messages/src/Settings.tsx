@@ -2,6 +2,7 @@ import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { useState } from 'react'
+import { LayoutAnimation } from 'react-native'
 import { labelOf } from './chat'
 import { bind, settings, update, useSettings, type Settings } from './store'
 
@@ -43,7 +44,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                                 key={id}
                                 label={labelOf(id)}
                                 subLabel={id}
-                                trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => update({ silentList: settings().silentList.filter(x => x !== id) })} />}
+                                trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), update({ silentList: settings().silentList.filter(x => x !== id) }))} />}
                             />
                         ))
                     ) : (

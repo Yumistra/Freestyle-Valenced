@@ -5,8 +5,8 @@ import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { useEffect, useRef, useState } from 'react'
-import { Image, Pressable, ScrollView, View } from 'react-native'
+import { useLayoutEffect, useState } from 'react'
+import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { removeOne } from './logger'
 import { logs, seen, type Entry } from './store'
 
@@ -261,7 +261,19 @@ const SEARCH_HINTS: Array<[string, string]> = [
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
 
-export function LogsView({ onBack }: { onBack(): void }) {
+export const LOGS_ROUTE = 'yumistra.message-logger.logs'
+
+/** 설정 안의 새 화면 (위쪽 화살표, 뒤로 가기는 디스코드가 알아서) */
+export function LogsScreen({ navigation }: { navigation?: any }) {
+    useLayoutEffect(() => {
+        try {
+            navigation?.setOptions?.({ title: 'Logs' })
+        } catch {}
+    }, [])
+    return <LogsView />
+}
+
+export function LogsView() {
     const { Text, Button, TextInput } = Design as any
     const search = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
     const [shown, setShown] = useState(PAGE)
@@ -274,22 +286,7 @@ export function LogsView({ onBack }: { onBack(): void }) {
     const [showFilters, setShowFilters] = useState(false)
     const [q, setQ] = useState('')
     const [focused, setFocused] = useState(false)
-    // 위쪽 화살표(와 폰의 뒤로 가기)로 설정으로 돌아간다. 메시지로 이동할 때만 그대로 나간다
-    const leaving = useRef(false)
-    const backRef = useRef(onBack)
-    backRef.current = onBack
-    useEffect(() => {
-        const off = nav?.addListener?.('beforeRemove', (ev: any) => {
-            if (leaving.current) return
-            ev?.preventDefault?.()
-            backRef.current()
-        })
-        return () => {
-            try {
-                typeof off === 'function' ? off() : off?.remove?.()
-            } catch {}
-        }
-    }, [nav])
+    const anim = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     const all = Object.entries(logs())
         .filter(([, e]) => e.d || e.e?.length)
         .sort((a, b) => (b[1].d ?? b[1].at) - (a[1].d ?? a[1].at))
@@ -381,7 +378,6 @@ export function LogsView({ onBack }: { onBack(): void }) {
         .map(x => [x.id, x.e] as [string, Entry])
     const active = f.kinds.length + f.places.length + f.channels.length + f.users.length
     const open = (id: string, e: Entry) => {
-        leaving.current = true
         closeSettings(nav)
         setTimeout(() => {
             try {
@@ -401,13 +397,13 @@ export function LogsView({ onBack }: { onBack(): void }) {
                             isClearable
                             onClear={() => setQ('')}
                             onChange={(v: string) => setQ(v)}
-                            onFocus={() => setFocused(true)}
-                            onBlur={() => setTimeout(() => setFocused(false), 150)}
+                            onFocus={() => (anim(), setFocused(true))}
+                            onBlur={() => setTimeout(() => (anim(), setFocused(false)), 150)}
                             returnKeyType="search"
                         />
                     </View>
                     <Pressable
-                        onPress={() => setShowFilters(v => !v)}
+                        onPress={() => (anim(), setShowFilters(v => !v))}
                         hitSlop={8}
                         style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: showFilters || active ? 'rgba(88,101,242,0.24)' : 'rgba(148,155,164,0.12)' }}
                     >
@@ -453,12 +449,12 @@ export function LogsView({ onBack }: { onBack(): void }) {
                 ) : null}
                 {showFilters ? (
                     <View style={{ marginTop: 10, padding: 12, paddingTop: 2, borderRadius: 12, backgroundColor: 'rgba(148,155,164,0.08)' }}>
-                        <ChipRow title="Type" items={kinds} selected={f.kinds} onToggle={v => setF({ ...f, kinds: toggle(f.kinds, v) })} />
-                        <ChipRow title="Server or DMs" items={places} selected={f.places} onToggle={v => setF({ ...f, places: toggle(f.places, v), channels: [] })} />
-                        <ChipRow title="Channel" items={channels} selected={f.channels} onToggle={v => setF({ ...f, channels: toggle(f.channels, v) })} />
-                        <ChipRow title="User" items={users} selected={f.users} onToggle={v => setF({ ...f, users: toggle(f.users, v) })} />
+                        <ChipRow title="Type" items={kinds} selected={f.kinds} onToggle={v => (anim(), setF({ ...f, kinds: toggle(f.kinds, v) }))} />
+                        <ChipRow title="Server or DMs" items={places} selected={f.places} onToggle={v => (anim(), setF({ ...f, places: toggle(f.places, v), channels: [] }))} />
+                        <ChipRow title="Channel" items={channels} selected={f.channels} onToggle={v => (anim(), setF({ ...f, channels: toggle(f.channels, v) }))} />
+                        <ChipRow title="User" items={users} selected={f.users} onToggle={v => (anim(), setF({ ...f, users: toggle(f.users, v) }))} />
                         {active ? (
-                            <Pressable onPress={() => setF(EMPTY)} style={{ marginTop: 12, alignSelf: 'flex-start' }}>
+                            <Pressable onPress={() => (anim(), setF(EMPTY))} style={{ marginTop: 12, alignSelf: 'flex-start' }}>
                                 <Text variant="text-sm/semibold" style={{ color: '#00a8fc' }}>
                                     Clear filters
                                 </Text>
@@ -478,6 +474,7 @@ export function LogsView({ onBack }: { onBack(): void }) {
                     e={e}
                     onOpen={() => open(id, e)}
                     onDelete={() => {
+                        anim()
                         removeOne(id)
                         force(n => n + 1)
                     }}
@@ -485,7 +482,7 @@ export function LogsView({ onBack }: { onBack(): void }) {
             ))}
             {entries.length > shown ? (
                 <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-                    <Button text={`Show more (${entries.length - shown} left)`} variant="secondary" size="md" onPress={() => setShown(n => n + PAGE)} />
+                    <Button text={`Show more (${entries.length - shown} left)`} variant="secondary" size="md" onPress={() => (anim(), setShown(n => n + PAGE))} />
                 </View>
             ) : null}
         </ScrollView>

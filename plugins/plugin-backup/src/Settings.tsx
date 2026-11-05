@@ -3,7 +3,7 @@ import { Design } from '@valenced/discord/design'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { reloadApp } from '@valenced/modules/native/app'
 import { useEffect, useState } from 'react'
-import { ScrollView, Share, View } from 'react-native'
+import { LayoutAnimation, ScrollView, Share, View } from 'react-native'
 import {
     createBackup,
     dataCountOf,
@@ -47,6 +47,7 @@ function useBackups(storage: any) {
             .catch(() => {})
     }, [])
     const save = async (next: Backup[]) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
         setBackups(next)
         await storage.set({ backups: next }, true)
     }
@@ -172,7 +173,7 @@ export default function SettingsPage({ api }: { api: any }) {
                                 key={`${b.createdAt}-${i}`}
                                 label={`${selected === i ? '● ' : ''}${dateOf(b.createdAt)}`}
                                 subLabel={summaryOf(b)}
-                                onPress={() => setSelected(selected === i ? null : i)}
+                                onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setSelected(selected === i ? null : i))}
                             />
                         ))
                     ) : (

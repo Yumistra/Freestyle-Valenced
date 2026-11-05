@@ -5,7 +5,7 @@
 	"description": "Back up and restore your plugins.",
 	"author": "Yumistra",
 	"icon": "DownloadIcon",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

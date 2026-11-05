@@ -5,7 +5,7 @@
 	"description": "Keeps deleted (red) and edited (gray) messages with the same highlight as pings, even after restarting Discord. Remembers notifications so changes made while you're away are found too.",
 	"author": "Yumistra",
 	"icon": "ChatXIcon",
-	"version": "1.0.7",
+	"version": "1.0.8",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
