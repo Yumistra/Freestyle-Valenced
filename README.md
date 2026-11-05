@@ -5,15 +5,12 @@ Plugins for Valenced.
 | Plugin | ID |
 | --- | --- |
 | Better Animations | `yumistra.better-animations` |
-| Commands | `yumistra.commands` |
 | Intelligent Compression | `yumistra.intelligent-compression` |
 | Message Actions | `yumistra.message-actions` |
 | Message Logger | `yumistra.message-logger` |
 | Overlay Background | `yumistra.overlay-background` |
-| Plugin Backup | `yumistra.plugin-backup` |
 | Silent Messages | `yumistra.silent-messages` |
 | Silent Leave | `yumistra.silent-leave` |
-| Toast Fix | `yumistra.toast-fix` |
 
 ## Install
 
