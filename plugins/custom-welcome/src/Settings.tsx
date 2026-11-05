@@ -3,6 +3,7 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { palette } from './colors'
 import { ExpressionGrid, stickerImage } from './grid'
 import { canPick, emojiText, gifText, openPicker } from './picker'
 import { bind, settings, update, useSettings } from './store'
@@ -143,7 +144,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                             </View>
                         </View>
                         {emojiGrid ? <ExpressionGrid kind="emoji" onPick={e => setMsg(m => `${m}${emojiText(e)}`)} /> : null}
-                        <Text variant="text-xs/medium" color="text-muted">
+                        <Text variant="text-xs/medium" style={{ color: palette().muted }}>
                             {'{mention} pings them, {name} is their name, {server} and {channel} are where they joined. Keyboard emojis work as they are, server emojis from other servers need Nitro. Paste a GIF link (Tenor, Giphy) to send a GIF.'}
                         </Text>
                     </Stack>
@@ -170,17 +171,27 @@ export default function SettingsPage({ api }: { api?: any }) {
                             </TableRowGroup>
                         ) : null}
                         <Button text={stickerGrid ? 'Hide stickers' : 'Pick a sticker'} variant="primary" size="md" onPress={() => (anim(), setStickerGrid(v => !v))} />
-                        {stickerGrid ? <ExpressionGrid kind="sticker" chosen={s.stickers} onPick={st => st?.id && addSticker(String(st.id))} /> : null}
+                        {stickerGrid ? <ExpressionGrid
+                                kind="sticker"
+                                chosen={s.stickers}
+                                onPick={st => {
+                                    const id = st?.id && String(st.id)
+                                    if (!id) return
+                                    // 이미 고른 것을 다시 누르면 뺀다
+                                    if (settings().stickers.includes(id)) (anim(), update({ stickers: settings().stickers.filter(x => x !== id) }))
+                                    else addSticker(id)
+                                }}
+                            /> : null}
                         {pickable ? <Button text="Open Discord's picker" variant="secondary" size="md" onPress={pickSticker} /> : null}
                         <TextInput label="Or paste a sticker ID or link" value={sid} placeholder="123456789012345678" onChange={setSid} onSubmitEditing={() => addSticker(stickerIdOf(sid))} />
                         {stickerIdOf(sid) ? <Button text="Add this sticker" variant="secondary" size="md" onPress={() => addSticker(stickerIdOf(sid))} /> : null}
-                        <Text variant="text-xs/medium" color="text-muted">
+                        <Text variant="text-xs/medium" style={{ color: palette().muted }}>
                             Stickers from other servers need Nitro to send.
                         </Text>
                     </Stack>
                 </Section>
 
-                <Text variant="text-xs/medium" color="text-muted">
+                <Text variant="text-xs/medium" style={{ color: palette().muted }}>
                     With nothing in both lists, Discord's own wave sticker is sent.
                 </Text>
             </Stack>
