@@ -2,7 +2,7 @@ import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { useState } from 'react'
-import { bind, settings, update, useSettings, type Kind } from './store'
+import { bind, settings, update, useSettings, type Kind, type Mode } from './store'
 import { nameOf, status } from './watch'
 
 const KINDS: Array<[Kind, string, string, string]> = [
@@ -25,7 +25,7 @@ const ago = (ms: number) => {
 export default function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const s = useSettings()
-    const { Stack, TableRowGroup, TableRow, TableSwitchRow, Button } = Design as any
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TableRadioGroup, TableRadioRow, Button } = Design as any
     const [confirmClear, setConfirmClear] = useState(false)
     const trust = (p: string) => update({ trusted: [...settings().trusted.filter(x => x !== p), p] })
 
@@ -44,18 +44,20 @@ export default function SettingsPage({ api }: { api?: any }) {
                     />
                     <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Show toasts" subLabel="Everything is still kept in the log below." value={s.toasts} onValueChange={(toasts: boolean) => update({ toasts })} />
                 </TableRowGroup>
-                <TableRowGroup title="Watch">
-                    {KINDS.map(([k, label, sub, icon]) => (
-                        <TableSwitchRow key={k} icon={<TableRowAssetIcon name={icon} />} label={label} subLabel={sub} value={s.watch[k]} onValueChange={(v: boolean) => update({ watch: { ...settings().watch, [k]: v } })} />
-                    ))}
-                </TableRowGroup>
+                {KINDS.map(([k, label, sub]) => (
+                    <TableRadioGroup key={k} title={label} defaultValue={s.watch[k]} onChange={(v: Mode) => update({ watch: { ...settings().watch, [k]: v } })}>
+                        <TableRadioRow label="Block" subLabel={`${sub} It is stopped and you get told.`} value="block" />
+                        <TableRadioRow label="Alert" subLabel="Let it happen, but tell me." value="alert" />
+                        <TableRadioRow label="Off" subLabel="Don't watch this." value="off" />
+                    </TableRadioGroup>
+                ))}
                 <TableRowGroup title={`Trusted plugins (${s.trusted.length})`}>
                     {s.trusted.length ? (
                         s.trusted.map(p => (
                             <TableRow key={p} label={nameOf(p)} subLabel={p} trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => update({ trusted: settings().trusted.filter(x => x !== p) })} />} />
                         ))
                     ) : (
-                        <TableRow label="Nothing yet" subLabel="Trust a plugin from the log to stop alerts about it." />
+                        <TableRow label="Nothing yet" subLabel="Trust a plugin from the log to allow everything it does, with no alerts." />
                     )}
                 </TableRowGroup>
                 <TableRowGroup title={`Log (${s.log.length})`}>
@@ -63,7 +65,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                         s.log.map((h, i) => (
                             <TableRow
                                 key={`${h.p}|${h.k}|${h.d ?? ''}|${i}`}
-                                label={`${nameOf(h.p)}, ${LABEL[h.k] ?? h.k}`}
+                                label={`${h.b ? 'Blocked, ' : ''}${nameOf(h.p)}, ${LABEL[h.k] ?? h.k}`}
                                 subLabel={[ago(h.at), h.n > 1 ? `${h.n} times` : '', h.d ?? ''].filter(Boolean).join(', ')}
                                 trailing={h.p && !s.trusted.includes(h.p) ? <Button size="sm" variant="secondary" text="Trust" onPress={() => trust(h.p)} /> : undefined}
                             />

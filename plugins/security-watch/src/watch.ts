@@ -58,6 +58,13 @@ export function nameOf(id: string) {
 }
 
 // ── 알리기 ───────────────────────────────────────────────────────────────
+const BLOCKED: Record<Kind, string> = {
+    read: 'reading your token',
+    send: 'sending your token outside Discord',
+    copy: 'copying your token',
+    files: "reading Discord's app files",
+    account: 'changing your login token',
+}
 const WHAT: Record<Kind, string> = {
     read: 'read your token',
     send: 'sent your token outside Discord',
@@ -68,20 +75,27 @@ const WHAT: Record<Kind, string> = {
 
 let seq = 0
 const lastToast = new Map<string, number>()
-function alert(p: string, k: Kind, d?: string) {
+/** 알리고, 막아야 하면 true 를 돌려준다 */
+function alert(p: string, k: Kind, d?: string): boolean {
     const s = settings()
-    if (!s.watch[k] || s.trusted.includes(p)) return
-    record(p, k, d)
-    if (!s.toasts) return
+    const mode = s.watch[k]
+    if (mode === 'off' || (p && s.trusted.includes(p))) return false
+    const block = mode === 'block'
+    record(p, k, d, block)
+    if (!s.toasts) return block
     // 같은 플러그인, 같은 일은 30초에 한 번만 띄운다 (보내기는 매번)
-    const key = `${p}|${k}`
+    const key = `${p}|${k}|${block}`
     const now = Date.now()
-    if (k !== 'send' && now - (lastToast.get(key) ?? 0) < 30_000) return
+    if (k !== 'send' && now - (lastToast.get(key) ?? 0) < 30_000) return block
     lastToast.set(key, now)
+    const where = d && k !== 'files' ? `, ${d}` : ''
     try {
-        ToastActionCreators.open(`security-watch-${now}-${seq++}`, { text: `${nameOf(p)} ${WHAT[k]}${d && k !== 'files' ? `, ${d}` : ''}` } as any)
+        ToastActionCreators.open(`security-watch-${now}-${seq++}`, { text: block ? `Blocked ${nameOf(p)} from ${BLOCKED[k]}${where}` : `${nameOf(p)} ${WHAT[k]}${where}` } as any)
     } catch {}
+    return block
 }
+
+export const BLOCK_ERROR = 'Blocked by Security Watch'
 
 // ── 토큰 값 (비교용으로 메모리에만 둔다. 저장하거나 보여 주지 않는다) ───────────
 let token = ''
@@ -99,8 +113,10 @@ function hostOf(url: unknown) {
 }
 
 // ── 토큰 읽기, 바꾸기 ──────────────────────────────────────────────────────
+const done = new WeakSet<object>()
 function patchTokenModule(cleanup: (...f: Array<() => void>) => void, mod: any, label: string) {
-    if (typeof mod?.getToken !== 'function') return
+    if (typeof mod?.getToken !== 'function' || done.has(mod)) return
+    done.add(mod)
     try {
         cleanup(
             instead(mod, 'getToken', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
@@ -109,7 +125,7 @@ function patchTokenModule(cleanup: (...f: Array<() => void>) => void, mod: any, 
                 if (probing) calibrate()
                 else {
                     const p = directCaller()
-                    if (p) alert(p, 'read')
+                    if (p && alert(p, 'read')) return undefined
                 }
                 return v
             }),
@@ -119,7 +135,7 @@ function patchTokenModule(cleanup: (...f: Array<() => void>) => void, mod: any, 
             cleanup(
                 instead(mod, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                     const p = directCaller()
-                    if (p) alert(p, 'account', key === 'removeToken' ? 'removed' : undefined)
+                    if (p && alert(p, 'account', key === 'removeToken' ? 'removed' : undefined)) return undefined
                     return orig.apply(this, args)
                 }),
             )
@@ -168,10 +184,13 @@ function patchNetwork(cleanup: (...f: Array<() => void>) => void) {
                     return orig.apply(this, args)
                 }),
                 instead(XHR, 'send', function (this: any, args: any[], orig: (...a: any[]) => any) {
+                    let block = false
                     try {
                         const host = hostOf(this.__swUrl)
-                        if (host && !DISCORD.test(host) && (hasToken(String(this.__swUrl)) || (this.__swHeaders ?? []).some(hasToken) || hasToken(args[0]))) alert(anyCaller(), 'send', host)
+                        if (host && !DISCORD.test(host) && (hasToken(String(this.__swUrl)) || (this.__swHeaders ?? []).some(hasToken) || hasToken(args[0]))) block = alert(anyCaller(), 'send', host)
                     } catch {}
+                    // fetch 는 이 오류로 실패한다 (요청은 나가지 않는다)
+                    if (block) throw new Error(BLOCK_ERROR)
                     return orig.apply(this, args)
                 }),
             )
@@ -182,10 +201,12 @@ function patchNetwork(cleanup: (...f: Array<() => void>) => void) {
         try {
             cleanup(
                 instead(WS, 'send', function (this: any, args: any[], orig: (...a: any[]) => any) {
+                    let block = false
                     try {
                         const host = hostOf(this.url)
-                        if (host && !DISCORD.test(host) && hasToken(args[0])) alert(anyCaller(), 'send', host)
+                        if (host && !DISCORD.test(host) && hasToken(args[0])) block = alert(anyCaller(), 'send', host)
                     } catch {}
+                    if (block) throw new Error(BLOCK_ERROR)
                     return orig.apply(this, args)
                 }),
             )
@@ -201,9 +222,11 @@ function patchClipboard(cleanup: (...f: Array<() => void>) => void) {
             try {
                 cleanup(
                     instead(mod, 'setString', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        let block = false
                         try {
-                            if (hasToken(args[0])) alert(anyCaller(), 'copy')
+                            if (hasToken(args[0])) block = alert(anyCaller(), 'copy')
                         } catch {}
+                        if (block) return undefined
                         return orig.apply(this, args)
                     }),
                 )
@@ -220,15 +243,19 @@ function patchBridge(cleanup: (...f: Array<() => void>) => void) {
         const sym = Symbol.for(name)
         const orig = g[sym]
         if (typeof orig !== 'function') continue
+        const isAsync = name.endsWith('async')
         const wrapped = function (this: unknown, payload: any) {
+            let block = false
             try {
                 const m = payload?.valenced?.method
                 const path = payload?.valenced?.args?.[0]
                 if (typeof m === 'string' && /^valenced\.fs\./.test(m) && typeof path === 'string' && SECRET_PATH.test(path) && !/\/valenced\/|plugins?\//i.test(path)) {
                     const p = anyCaller()
-                    if (p) alert(p, 'files', path)
+                    if (p) block = alert(p, 'files', path)
                 }
             } catch {}
+            // callNativeMethod 는 { error } 를 받으면 실패로 던진다
+            if (block) return isAsync ? Promise.resolve({ error: BLOCK_ERROR }) : { error: BLOCK_ERROR }
             return orig.call(this, payload)
         }
         try {
@@ -238,14 +265,20 @@ function patchBridge(cleanup: (...f: Array<() => void>) => void) {
     }
 }
 
-export function startWatching(cleanup: (...f: Array<() => void>) => void) {
-    cleanup(
-        getModules(withProps('getToken', 'setToken') as any, (mod: any) => patchTokenModule(cleanup, mod, 'token module')) as any,
-    )
+/** 스토어는 디스코드가 뜬 뒤에야 있으니 start 에서 한 번 더 부른다 */
+export function patchStores(cleanup: (...f: Array<() => void>) => void) {
     try {
         const A: any = (Stores as any).AuthenticationStore
         if (A && typeof A.getToken === 'function') patchTokenModule(cleanup, A, 'AuthenticationStore')
     } catch {}
+}
+
+/** preInit 에서 부른다: 다른 플러그인의 init, start 보다 먼저 */
+export function startWatching(cleanup: (...f: Array<() => void>) => void) {
+    cleanup(
+        getModules(withProps('getToken', 'setToken') as any, (mod: any) => patchTokenModule(cleanup, mod, 'token module')) as any,
+    )
+    patchStores(cleanup)
     patchNetwork(cleanup)
     patchClipboard(cleanup)
     patchBridge(cleanup)
