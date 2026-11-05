@@ -38,6 +38,11 @@ function SettingsPage({ api }: { api?: any }) {
     const remembered = Object.keys(seen()).length
     const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TableRow, Button } = Design as any
     const set = (patch: Partial<Settings>) => {
+        // 알림 기억하기를 끄면 알림으로만 알던 메시지도 잊는다
+        if (patch.rememberPushes === false) {
+            const sn = seen() as any
+            for (const k of Object.keys(sn)) if (sn[k]?.p) delete sn[k]
+        }
         setSettings(patch)
         force(n => n + 1)
     }

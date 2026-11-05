@@ -3,7 +3,9 @@ import { Stores } from '@valenced/discord/flux'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { useState } from 'react'
+import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { useEffect, useRef, useState } from 'react'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 import { removeOne } from './logger'
 import { logs, seen, type Entry } from './store'
@@ -230,10 +232,38 @@ function facets(id: string, e: Entry) {
     return { author: a, place: guild ? String(guild) : DM, channel: String(e.c), user: a?.id ? String(a.id) : '', userName: a?.globalName ?? a?.global_name ?? a?.username ?? '', channelName: ch?.name ? `#${ch.name}` : ch ? 'DM' : String(e.c) }
 }
 
+// ── 검색 (디스코드 검색처럼: 낱말, from:, in:, has:, is:) ──────────
+const TOKEN = /^(from|in|has|is):(.*)$/i
+function parseQuery(q: string) {
+    const words: string[] = [],
+        from: string[] = [],
+        inn: string[] = [],
+        has: string[] = [],
+        is: string[] = []
+    for (const raw of q.trim().split(/\s+/).filter(Boolean)) {
+        const m = TOKEN.exec(raw)
+        if (!m || !m[2]) {
+            words.push(raw.toLowerCase())
+            continue
+        }
+        const v = m[2].toLowerCase()
+        const k = m[1].toLowerCase()
+        ;(k === 'from' ? from : k === 'in' ? inn : k === 'has' ? has : is).push(v)
+    }
+    return { words, from, inn, has, is }
+}
+const SEARCH_HINTS: Array<[string, string]> = [
+    ['from:', 'from: user'],
+    ['in:', 'in: channel'],
+    ['has:', 'has: link, file'],
+    ['is:', 'is: deleted, edited'],
+]
+
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
 
 export function LogsView({ onBack }: { onBack(): void }) {
-    const { Text, Button } = Design as any
+    const { Text, Button, TextInput } = Design as any
+    const search = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
     const [shown, setShown] = useState(PAGE)
     const [, force] = useState(0)
     let nav: any
@@ -242,10 +272,35 @@ export function LogsView({ onBack }: { onBack(): void }) {
     } catch {}
     const [f, setF] = useState<Filters>(EMPTY)
     const [showFilters, setShowFilters] = useState(false)
+    const [q, setQ] = useState('')
+    const [focused, setFocused] = useState(false)
+    // 위쪽 화살표(와 폰의 뒤로 가기)로 설정으로 돌아간다. 메시지로 이동할 때만 그대로 나간다
+    const leaving = useRef(false)
+    const backRef = useRef(onBack)
+    backRef.current = onBack
+    useEffect(() => {
+        const off = nav?.addListener?.('beforeRemove', (ev: any) => {
+            if (leaving.current) return
+            ev?.preventDefault?.()
+            backRef.current()
+        })
+        return () => {
+            try {
+                typeof off === 'function' ? off() : off?.remove?.()
+            } catch {}
+        }
+    }, [nav])
     const all = Object.entries(logs())
         .filter(([, e]) => e.d || e.e?.length)
         .sort((a, b) => (b[1].d ?? b[1].at) - (a[1].d ?? a[1].at))
         .map(([id, e]) => ({ id, e, k: facets(id, e) }))
+    const guildName = (v: string) => {
+        try {
+            return v === DM ? 'DMs' : String((Stores as any).GuildStore?.getGuild?.(v)?.name ?? '')
+        } catch {
+            return ''
+        }
+    }
     // 고를 수 있는 값 (지금 로그에 있는 것만, 많은 순)
     const S: any = Stores
     const count = (pick: (x: (typeof all)[number]) => string) => {
@@ -271,7 +326,54 @@ export function LogsView({ onBack }: { onBack(): void }) {
         { v: 'deleted', label: 'Deleted', n: all.filter(x => x.e.d).length },
         { v: 'edited', label: 'Edited', n: all.filter(x => !x.e.d).length },
     ]
+    const pq = parseQuery(q)
+    const textOf = (x: (typeof all)[number]) => {
+        const now = (S.MessageStore?.getMessage?.(x.e.c, x.id) as any)?.content
+        return [x.e.m?.content ?? now ?? '', ...(x.e.e ?? []).map(h => h.t)].join('\n').toLowerCase()
+    }
+    const searched = (x: (typeof all)[number]) => {
+        const text = textOf(x)
+        const name = `${x.k.userName} ${x.k.author?.username ?? ''}`.toLowerCase()
+        const place = `${x.k.channelName} ${guildName(x.k.place)}`.toLowerCase()
+        if (!pq.words.every(w => text.includes(w) || name.includes(w))) return false
+        if (pq.from.length && !pq.from.some(v => name.includes(v))) return false
+        if (pq.inn.length && !pq.inn.some(v => place.includes(v.replace(/^#/, '')))) return false
+        for (const h of pq.has) {
+            if (/^link/.test(h) && !/https?:\/\//.test(text)) return false
+            if (/^(file|attachment|image|video)/.test(h) && !(x.e.m?.attachments ?? []).length) return false
+        }
+        for (const v of pq.is) {
+            if (/^del/.test(v) && !x.e.d) return false
+            if (/^edit/.test(v) && x.e.d) return false
+        }
+        return true
+    }
+    // 입력 중인 from: / in: 뒤에 맞는 사람, 채널 (누르면 필터로 들어간다)
+    const lastTok = /(\S*)$/.exec(q)?.[1] ?? ''
+    const tm = TOKEN.exec(lastTok)
+    const kind = tm?.[1].toLowerCase()
+    const sv = (tm?.[2] ?? '').toLowerCase().replace(/^#/, '')
+    const suggestions: Array<{ key: string; label: string; sub?: string; img?: string; pick(): void }> = []
+    const dropLast = () => setQ(q.slice(0, q.length - lastTok.length).replace(/\s+$/, '') + (q.length - lastTok.length > 0 ? ' ' : ''))
+    if (kind === 'from')
+        for (const u of users.filter(u => u.label.toLowerCase().includes(sv)).slice(0, 8))
+            suggestions.push({ key: 'u' + u.v, label: u.label, sub: `${u.n} log(s)`, img: u.img, pick: () => (setF({ ...f, users: f.users.includes(u.v) ? f.users : [...f.users, u.v] }), dropLast()) })
+    if (kind === 'in')
+        for (const c of channels.filter(c => `${c.label} ${guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')}`.toLowerCase().includes(sv)).slice(0, 8)) {
+            const g = guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')
+            suggestions.push({ key: 'c' + c.v, label: c.label, sub: [g, `${c.n} log(s)`].filter(Boolean).join(', '), pick: () => (setF({ ...f, channels: f.channels.includes(c.v) ? f.channels : [...f.channels, c.v] }), dropLast()) })
+        }
+    if (kind === 'is')
+        for (const k of kinds.filter(k => k.label.toLowerCase().includes(sv)))
+            suggestions.push({ key: 'k' + k.v, label: k.label, sub: `${k.n} log(s)`, pick: () => (setF({ ...f, kinds: f.kinds.includes(k.v) ? f.kinds : [...f.kinds, k.v] }), dropLast()) })
+    if (kind === 'has')
+        for (const [v, l] of [
+            ['link', 'Link'],
+            ['file', 'File'],
+        ].filter(([v]) => v.includes(sv)))
+            suggestions.push({ key: 'h' + v, label: l, pick: () => setQ(q.slice(0, q.length - lastTok.length) + `has:${v} `) })
     const entries = all
+        .filter(searched)
         .filter(x => !f.kinds.length || f.kinds.includes(x.e.d ? 'deleted' : 'edited'))
         .filter(x => !f.places.length || f.places.includes(x.k.place))
         .filter(x => !f.channels.length || f.channels.includes(x.k.channel))
@@ -279,6 +381,7 @@ export function LogsView({ onBack }: { onBack(): void }) {
         .map(x => [x.id, x.e] as [string, Entry])
     const active = f.kinds.length + f.places.length + f.channels.length + f.users.length
     const open = (id: string, e: Entry) => {
+        leaving.current = true
         closeSettings(nav)
         setTimeout(() => {
             try {
@@ -289,14 +392,65 @@ export function LogsView({ onBack }: { onBack(): void }) {
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 12, paddingBottom: 48 }}>
             <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-                <View style={{ flexDirection: 'row' }}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                        <Button text="Back" variant="secondary" size="sm" onPress={onBack} />
-                    </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <View style={{ flex: 1 }}>
-                        <Button text={`${showFilters ? 'Hide filters' : 'Filters'}${active ? ` (${active})` : ''}`} variant={active ? 'primary' : 'secondary'} size="sm" onPress={() => setShowFilters(v => !v)} />
+                        <TextInput
+                            value={q}
+                            placeholder="Search logs"
+                            leadingIcon={search}
+                            isClearable
+                            onClear={() => setQ('')}
+                            onChange={(v: string) => setQ(v)}
+                            onFocus={() => setFocused(true)}
+                            onBlur={() => setTimeout(() => setFocused(false), 150)}
+                            returnKeyType="search"
+                        />
                     </View>
+                    <Pressable
+                        onPress={() => setShowFilters(v => !v)}
+                        hitSlop={8}
+                        style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: showFilters || active ? 'rgba(88,101,242,0.24)' : 'rgba(148,155,164,0.12)' }}
+                    >
+                        <TableRowAssetIcon name="FiltersHorizontalIcon" />
+                        {active ? (
+                            <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: '#5865f2', alignItems: 'center', justifyContent: 'center' }}>
+                                <Text variant="text-xs/bold" style={{ color: '#ffffff' }}>
+                                    {String(active)}
+                                </Text>
+                            </View>
+                        ) : null}
+                    </Pressable>
                 </View>
+                {focused && !q.trim() ? (
+                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(148,155,164,0.08)' }}>
+                        {SEARCH_HINTS.map(([prefix, label]) => (
+                            <Pressable key={prefix} onPress={() => setQ(prefix)} style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
+                                <Text variant="text-sm/medium" color="text-normal">
+                                    {label}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                ) : null}
+                {suggestions.length ? (
+                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(148,155,164,0.08)' }}>
+                        {suggestions.map(sg => (
+                            <Pressable key={sg.key} onPress={sg.pick} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12 }}>
+                                {sg.img ? <Image source={{ uri: sg.img }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 10 }} /> : null}
+                                <View style={{ flex: 1 }}>
+                                    <Text variant="text-sm/semibold" color="text-normal" numberOfLines={1}>
+                                        {sg.label}
+                                    </Text>
+                                    {sg.sub ? (
+                                        <Text variant="text-xs/medium" color="text-muted" numberOfLines={1}>
+                                            {sg.sub}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            </Pressable>
+                        ))}
+                    </View>
+                ) : null}
                 {showFilters ? (
                     <View style={{ marginTop: 10, padding: 12, paddingTop: 2, borderRadius: 12, backgroundColor: 'rgba(148,155,164,0.08)' }}>
                         <ChipRow title="Type" items={kinds} selected={f.kinds} onToggle={v => setF({ ...f, kinds: toggle(f.kinds, v) })} />
@@ -314,6 +468,7 @@ export function LogsView({ onBack }: { onBack(): void }) {
                 ) : null}
                 <Text variant="text-xs/medium" color="text-muted" style={{ marginTop: 10 }}>
                     {all.length ? `${entries.length} of ${all.length} log(s), tap a message to go to it` : 'No logs yet.'}
+                    {all.length && !entries.length && (q.trim() || active) ? ', nothing matches' : ''}
                 </Text>
             </View>
             {entries.slice(0, shown).map(([id, e]) => (

@@ -14,6 +14,7 @@ const bypassed = new Set<string>()
 
 /** 알림으로만 받은 메시지: 알림 글이 그대로 비교 가능할 때만 (멘션·이모지 표기가 없을 때) */
 function pushedComparable(u: any) {
+    if (!settings().rememberPushes) return
     const x = seen()[u?.id]
     if (!x?.p || typeof u.content !== 'string' || u.content.includes('<')) return
     const t = x.m.content
@@ -106,7 +107,9 @@ function entryOf(record: any, guildId?: string): Entry {
 function keepDeleted(channelId: string, id: string, guildId?: string): 'store' | 'seen' | false {
     if (bypassed.has(id)) return false
     const record = getMessage(channelId, id)
-    const remembered = record ? undefined : seen()[id]?.m
+    const sx = record ? undefined : seen()[id]
+    // 알림으로만 알던 메시지는 "알림 기억하기"를 켰을 때만
+    const remembered = sx && (!sx.p || settings().rememberPushes) ? sx.m : undefined
     if (!record && !remembered) return false
     // 내가 지운 건 게이트웨이가 확인하면서 한 번 더 온다
     if (logs()[id]?.d) return logs()[id].h ? false : record ? 'store' : 'seen'

@@ -131,7 +131,13 @@ function fromPush(o: any) {
 
 /** 네이티브가 적어 둔 알림 메시지를 가져온다 */
 export async function importPushes(me?: string) {
-    if (!settings().rememberPushes) return 0
+    if (!settings().rememberPushes) {
+        // 꺼져 있으면 그동안 쌓인 알림은 버린다 (나중에 켜도 꺼져 있던 동안의 것은 안 들어오게)
+        try {
+            await (callNativeMethod as any)(NATIVE, [])
+        } catch {}
+        return 0
+    }
     let text = ''
     try {
         const r: any = await (callNativeMethod as any)(NATIVE, [])
