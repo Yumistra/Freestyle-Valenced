@@ -2,6 +2,7 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { after, instead } from '@valenced/patcher'
+import { bindPicker } from './picker'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, settings, update } from './store'
 
@@ -80,6 +81,7 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
+        bindPicker(cleanup)
         const greet = function (this: unknown, args: any[], orig: (...a: any[]) => any) {
             try {
                 if (settings().enabled) {
