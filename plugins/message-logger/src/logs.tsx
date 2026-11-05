@@ -1,3 +1,4 @@
+import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
@@ -5,8 +6,8 @@ import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { useLayoutEffect, useState } from 'react'
-import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
 import { removeOne } from './logger'
 import { logs, seen, type Entry } from './store'
 
@@ -16,7 +17,62 @@ import { logs, seen, type Entry } from './store'
  */
 
 const PAGE = 40
-const RED = '#f23f43'
+
+// ── 테마 색 (지금 디스코드 테마의 색 토큰을 읽는다. 라이트, 다크, 다른 테마 모두 맞게) ──────────
+function tokenColor(names: string[], fallback: string) {
+    try {
+        const t: any = (Tokens as any).default
+        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
+        for (const n of names) {
+            const key = t?.colors?.[n]
+            if (!key) continue
+            const c = t.internal.resolveSemanticColor(theme, key)
+            if (typeof c === 'string' && c) return c
+        }
+    } catch {}
+    return fallback
+}
+
+/** 색에 투명도를 덧씌운다 (#rgb, #rrggbb(aa), rgb(a)) */
+function alpha(color: string, a: number) {
+    let r = 0,
+        g = 0,
+        b = 0
+    const h = /^#([0-9a-f]{3,8})$/i.exec(color)
+    const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(color)
+    if (h) {
+        let x = h[1]
+        if (x.length <= 4) x = x.split('').map(c => c + c).join('')
+        r = parseInt(x.slice(0, 2), 16)
+        g = parseInt(x.slice(2, 4), 16)
+        b = parseInt(x.slice(4, 6), 16)
+    } else if (m) {
+        r = +m[1]
+        g = +m[2]
+        b = +m[3]
+    } else return color
+    return `rgba(${r},${g},${b},${a})`
+}
+
+function palette() {
+    const brand = tokenColor(['BACKGROUND_BRAND', 'BRAND_500', 'TEXT_BRAND'], '#5865f2')
+    const danger = tokenColor(['TEXT_FEEDBACK_CRITICAL', 'TEXT_DANGER', 'STATUS_DANGER'], '#f23f43')
+    const muted = tokenColor(['TEXT_MUTED'], '#949ba4')
+    return {
+        brand,
+        brandSoft: alpha(brand, 0.22),
+        danger,
+        dangerSoft: alpha(danger, 0.1),
+        text: tokenColor(['TEXT_DEFAULT', 'TEXT_NORMAL'], '#dbdee1'),
+        muted,
+        mutedSoft: alpha(muted, 0.1),
+        border: alpha(muted, 0.3),
+        input: tokenColor(['INPUT_BACKGROUND_DEFAULT', 'INPUT_BACKGROUND', 'BACKGROUND_TERTIARY', 'BACKGROUND_BASE_LOWEST'], alpha(muted, 0.14)),
+        surface: tokenColor(['BACKGROUND_SURFACE_HIGH', 'BACKGROUND_FLOATING', 'BACKGROUND_SECONDARY'], alpha(muted, 0.1)),
+        link: tokenColor(['TEXT_LINK'], '#00a8fc'),
+        onBrand: tokenColor(['WHITE', 'TEXT_ON_BRAND'], '#ffffff'),
+    }
+}
 
 /** 디스코드 이동 함수 (transitionToMessage(channelId, messageId)) */
 let toMessage: ((channelId: string, messageId: string, opts?: any) => void) | undefined
@@ -89,6 +145,22 @@ function closeSettings(nav: any) {
 
 function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void; onDelete(): void; key?: string }) {
     const { Text, Button } = Design as any
+    const P = palette()
+    // 삭제는 두 번 눌러야 한다 (첫 번째는 확인, 3초 안에 다시 누르면 지운다)
+    const [armed, setArmed] = useState(false)
+    const timer = useRef<any>(undefined)
+    useEffect(() => () => clearTimeout(timer.current), [])
+    const del = () => {
+        if (armed) {
+            clearTimeout(timer.current)
+            setArmed(false)
+            onDelete()
+            return
+        }
+        setArmed(true)
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => setArmed(false), 3000)
+    }
     const S: any = Stores
     const a = authorOf(id, e)
     const name = a?.globalName ?? a?.global_name ?? a?.username ?? 'Unknown'
@@ -105,8 +177,8 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
                 paddingHorizontal: 12,
                 marginVertical: 2,
                 borderLeftWidth: 2,
-                borderLeftColor: deleted ? RED : 'rgba(148,155,164,0.9)',
-                backgroundColor: deleted ? 'rgba(242,63,67,0.08)' : 'rgba(148,155,164,0.08)',
+                borderLeftColor: deleted ? P.danger : P.muted,
+                backgroundColor: deleted ? P.dangerSoft : P.mutedSoft,
             }}
         >
             <Image source={{ uri: avatarUrl(a) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
@@ -128,7 +200,7 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
                             </Text>
                         </Text>
                     ))}
-                <Text variant="text-md/normal" color={deleted ? undefined : 'text-normal'} style={deleted ? { color: RED } : undefined}>
+                <Text variant="text-md/normal" color={deleted ? undefined : 'text-normal'} style={deleted ? { color: P.danger } : undefined}>
                     {current || (files ? '' : ' ')}
                     {!deleted && now?.editedTimestamp ? (
                         <Text variant="text-xs/medium" color="text-muted">
@@ -145,7 +217,7 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
                     <Text variant="text-xs/medium" color="text-muted" style={{ flex: 1 }}>
                         {[deleted ? `Deleted ${when(e.d!)}` : `Edited ${e.e?.length ?? 0} time(s)`, e.h ? "Hidden in chat" : "", where(e)].filter(Boolean).join(', ')}
                     </Text>
-                    <Button text="Delete log" variant="destructive" size="sm" onPress={onDelete} />
+                    <Button text={armed ? 'Tap again to delete' : 'Delete log'} variant={armed ? 'destructive' : 'secondary'} size="sm" onPress={del} />
                 </View>
             </View>
         </Pressable>
@@ -171,6 +243,7 @@ interface Item {
 
 function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void; key?: string }) {
     const { Text } = Design as any
+    const P = palette()
     return (
         <Pressable
             onPress={onPress}
@@ -183,8 +256,8 @@ function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void;
                 borderRadius: 16,
                 marginRight: 6,
                 borderWidth: 1,
-                borderColor: on ? '#5865f2' : 'rgba(148,155,164,0.28)',
-                backgroundColor: on ? 'rgba(88,101,242,0.24)' : 'transparent',
+                borderColor: on ? P.brand : P.border,
+                backgroundColor: on ? P.brandSoft : 'transparent',
             }}
         >
             {item.img ? <Image source={{ uri: item.img }} style={{ width: 22, height: 22, borderRadius: 11, marginRight: 6 }} /> : null}
@@ -274,8 +347,11 @@ export function LogsScreen({ navigation }: { navigation?: any }) {
 }
 
 export function LogsView() {
-    const { Text, Button, TextInput } = Design as any
-    const search = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
+    const { Text, Button } = Design as any
+    const P = palette()
+    const SearchIcon: any = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
+    const XIcon: any = lookupGeneratedIconComponent('XSmallIcon' as any) ?? lookupGeneratedIconComponent('CloseSmallIcon' as any)
+    const input = useRef<any>(null)
     const [shown, setShown] = useState(PAGE)
     const [, force] = useState(0)
     let nav: any
@@ -354,15 +430,15 @@ export function LogsView() {
     const dropLast = () => setQ(q.slice(0, q.length - lastTok.length).replace(/\s+$/, '') + (q.length - lastTok.length > 0 ? ' ' : ''))
     if (kind === 'from')
         for (const u of users.filter(u => u.label.toLowerCase().includes(sv)).slice(0, 8))
-            suggestions.push({ key: 'u' + u.v, label: u.label, sub: `${u.n} log(s)`, img: u.img, pick: () => (setF({ ...f, users: f.users.includes(u.v) ? f.users : [...f.users, u.v] }), dropLast()) })
+            suggestions.push({ key: 'u' + u.v, label: u.label, sub: `${u.n} log(s)`, img: u.img, pick: () => (setF({ ...f, users: f.users.includes(u.v) ? f.users : [...f.users, u.v] }), (anim(), dropLast(), input.current?.focus?.())) })
     if (kind === 'in')
         for (const c of channels.filter(c => `${c.label} ${guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')}`.toLowerCase().includes(sv)).slice(0, 8)) {
             const g = guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')
-            suggestions.push({ key: 'c' + c.v, label: c.label, sub: [g, `${c.n} log(s)`].filter(Boolean).join(', '), pick: () => (setF({ ...f, channels: f.channels.includes(c.v) ? f.channels : [...f.channels, c.v] }), dropLast()) })
+            suggestions.push({ key: 'c' + c.v, label: c.label, sub: [g, `${c.n} log(s)`].filter(Boolean).join(', '), pick: () => (setF({ ...f, channels: f.channels.includes(c.v) ? f.channels : [...f.channels, c.v] }), (anim(), dropLast(), input.current?.focus?.())) })
         }
     if (kind === 'is')
         for (const k of kinds.filter(k => k.label.toLowerCase().includes(sv)))
-            suggestions.push({ key: 'k' + k.v, label: k.label, sub: `${k.n} log(s)`, pick: () => (setF({ ...f, kinds: f.kinds.includes(k.v) ? f.kinds : [...f.kinds, k.v] }), dropLast()) })
+            suggestions.push({ key: 'k' + k.v, label: k.label, sub: `${k.n} log(s)`, pick: () => (setF({ ...f, kinds: f.kinds.includes(k.v) ? f.kinds : [...f.kinds, k.v] }), (anim(), dropLast(), input.current?.focus?.())) })
     if (kind === 'has')
         for (const [v, l] of [
             ['link', 'Link'],
@@ -377,6 +453,23 @@ export function LogsView() {
         .filter(x => !f.users.length || f.users.includes(x.k.user))
         .map(x => [x.id, x.e] as [string, Entry])
     const active = f.kinds.length + f.places.length + f.channels.length + f.users.length
+    // 필터 패널에서 고른 것도 검색창 안에 알약으로 보인다 (누르면 빠진다)
+    const pills: Array<{ key: string; label: string; img?: string; drop(): void }> = [
+        ...f.kinds.map(v => ({ key: 'k' + v, label: `is: ${kinds.find(k => k.v === v)?.label ?? v}`, drop: () => setF(o => ({ ...o, kinds: o.kinds.filter(x => x !== v) })) })),
+        ...f.places.map(v => ({ key: 'p' + v, label: v === DM ? 'in: DMs' : `server: ${guildName(v) || 'Server'}`, img: places.find(x => x.v === v)?.img, drop: () => setF(o => ({ ...o, places: o.places.filter(x => x !== v), channels: [] })) })),
+        ...f.channels.map(v => ({ key: 'c' + v, label: `in: ${all.find(x => x.k.channel === v)?.k.channelName ?? v}`, drop: () => setF(o => ({ ...o, channels: o.channels.filter(x => x !== v) })) })),
+        ...f.users.map(v => {
+            const k = all.find(x => x.k.user === v)?.k
+            return { key: 'u' + v, label: `from: ${k?.userName || 'Unknown'}`, img: k?.author ? avatarUrl(k.author) : undefined, drop: () => setF(o => ({ ...o, users: o.users.filter(x => x !== v) })) }
+        }),
+    ]
+    const showHints = focused && !kind
+    const addPrefix = (prefix: string) => {
+        anim()
+        const base = q.slice(0, q.length - lastTok.length)
+        setQ(base + prefix)
+        setTimeout(() => input.current?.focus?.(), 0)
+    }
     const open = (id: string, e: Entry) => {
         closeSettings(nav)
         setTimeout(() => {
@@ -386,55 +479,91 @@ export function LogsView() {
         }, 350)
     }
     return (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 12, paddingBottom: 48 }}>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 12, paddingBottom: 48 }}>
             <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ flex: 1 }}>
-                        <TextInput
+                    <Pressable
+                        onPress={() => input.current?.focus?.()}
+                        style={{ flex: 1, minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingVertical: 4, paddingLeft: 10, paddingRight: 6, borderRadius: 12, backgroundColor: P.input, borderWidth: 1, borderColor: focused ? P.brand : 'transparent' }}
+                    >
+                        {SearchIcon ? <SearchIcon size="sm" color={P.muted} style={{ marginRight: 6 }} /> : null}
+                        {pills.map(pl => (
+                            <Pressable
+                                key={pl.key}
+                                onPress={() => (anim(), pl.drop())}
+                                style={{ flexDirection: 'row', alignItems: 'center', height: 26, marginVertical: 3, marginRight: 6, paddingLeft: pl.img ? 3 : 10, paddingRight: 6, borderRadius: 13, backgroundColor: P.brandSoft }}
+                            >
+                                {pl.img ? <Image source={{ uri: pl.img }} style={{ width: 20, height: 20, borderRadius: 10, marginRight: 5 }} /> : null}
+                                <Text variant="text-sm/medium" numberOfLines={1} style={{ color: P.text, maxWidth: 160 }}>
+                                    {pl.label}
+                                </Text>
+                                {XIcon ? <XIcon size="xs" color={P.muted} style={{ marginLeft: 3 }} /> : <Text variant="text-sm/bold" style={{ color: P.muted, marginLeft: 4 }}>×</Text>}
+                            </Pressable>
+                        ))}
+                        <RNTextInput
+                            ref={input}
                             value={q}
-                            placeholder="Search logs"
-                            leadingIcon={search}
-                            isClearable
-                            onClear={() => setQ('')}
-                            onChange={(v: string) => setQ(v)}
+                            placeholder={pills.length ? '' : 'Search logs'}
+                            placeholderTextColor={P.muted}
+                            onChangeText={(v: string) => setQ(v)}
                             onFocus={() => (anim(), setFocused(true))}
-                            onBlur={() => setTimeout(() => (anim(), setFocused(false)), 150)}
+                            onBlur={() => (anim(), setFocused(false))}
+                            onKeyPress={(ev: any) => {
+                                // 빈 칸에서 지우기를 누르면 마지막 알약이 빠진다
+                                if (ev?.nativeEvent?.key === 'Backspace' && !q && pills.length) {
+                                    anim()
+                                    pills[pills.length - 1].drop()
+                                }
+                            }}
+                            autoCorrect={false}
+                            autoCapitalize="none"
                             returnKeyType="search"
+                            style={{ flexGrow: 1, minWidth: 90, paddingVertical: 6, fontSize: 16, color: P.text }}
                         />
-                    </View>
+                        {q || pills.length ? (
+                            <Pressable onPress={() => (anim(), setQ(''), setF(EMPTY))} hitSlop={8} style={{ padding: 4 }}>
+                                {XIcon ? <XIcon size="sm" color={P.muted} /> : <Text variant="text-md/bold" style={{ color: P.muted }}>×</Text>}
+                            </Pressable>
+                        ) : null}
+                    </Pressable>
                     <Pressable
                         onPress={() => (anim(), setShowFilters(v => !v))}
                         hitSlop={8}
-                        style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: showFilters || active ? 'rgba(88,101,242,0.24)' : 'rgba(148,155,164,0.12)' }}
+                        style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: showFilters || active ? P.brandSoft : P.input }}
                     >
                         <TableRowAssetIcon name="FiltersHorizontalIcon" />
                         {active ? (
-                            <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: '#5865f2', alignItems: 'center', justifyContent: 'center' }}>
-                                <Text variant="text-xs/bold" style={{ color: '#ffffff' }}>
+                            <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: P.brand, alignItems: 'center', justifyContent: 'center' }}>
+                                <Text variant="text-xs/bold" style={{ color: P.onBrand }}>
                                     {String(active)}
                                 </Text>
                             </View>
                         ) : null}
                     </Pressable>
                 </View>
-                {focused && !q.trim() ? (
-                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(148,155,164,0.08)' }}>
+                {showHints ? (
+                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: P.surface }}>
                         {SEARCH_HINTS.map(([prefix, label]) => (
-                            <Pressable key={prefix} onPress={() => setQ(prefix)} style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
-                                <Text variant="text-sm/medium" color="text-normal">
-                                    {label}
+                            <Pressable key={prefix} onPress={() => addPrefix(prefix)} style={{ paddingVertical: 11, paddingHorizontal: 12 }}>
+                                <Text variant="text-sm/medium" style={{ color: P.text }}>
+                                    <Text variant="text-sm/semibold" style={{ color: P.text }}>
+                                        {prefix}
+                                    </Text>
+                                    <Text variant="text-sm/medium" style={{ color: P.muted }}>
+                                        {label.slice(prefix.length)}
+                                    </Text>
                                 </Text>
                             </Pressable>
                         ))}
                     </View>
                 ) : null}
                 {suggestions.length ? (
-                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(148,155,164,0.08)' }}>
+                    <View style={{ marginTop: 8, borderRadius: 12, overflow: 'hidden', backgroundColor: P.surface }}>
                         {suggestions.map(sg => (
                             <Pressable key={sg.key} onPress={sg.pick} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12 }}>
                                 {sg.img ? <Image source={{ uri: sg.img }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 10 }} /> : null}
                                 <View style={{ flex: 1 }}>
-                                    <Text variant="text-sm/semibold" color="text-normal" numberOfLines={1}>
+                                    <Text variant="text-sm/semibold" numberOfLines={1} style={{ color: P.text }}>
                                         {sg.label}
                                     </Text>
                                     {sg.sub ? (
@@ -448,14 +577,14 @@ export function LogsView() {
                     </View>
                 ) : null}
                 {showFilters ? (
-                    <View style={{ marginTop: 10, padding: 12, paddingTop: 2, borderRadius: 12, backgroundColor: 'rgba(148,155,164,0.08)' }}>
+                    <View style={{ marginTop: 10, padding: 12, paddingTop: 2, borderRadius: 12, backgroundColor: P.surface }}>
                         <ChipRow title="Type" items={kinds} selected={f.kinds} onToggle={v => (anim(), setF({ ...f, kinds: toggle(f.kinds, v) }))} />
                         <ChipRow title="Server or DMs" items={places} selected={f.places} onToggle={v => (anim(), setF({ ...f, places: toggle(f.places, v), channels: [] }))} />
                         <ChipRow title="Channel" items={channels} selected={f.channels} onToggle={v => (anim(), setF({ ...f, channels: toggle(f.channels, v) }))} />
                         <ChipRow title="User" items={users} selected={f.users} onToggle={v => (anim(), setF({ ...f, users: toggle(f.users, v) }))} />
                         {active ? (
                             <Pressable onPress={() => (anim(), setF(EMPTY))} style={{ marginTop: 12, alignSelf: 'flex-start' }}>
-                                <Text variant="text-sm/semibold" style={{ color: '#00a8fc' }}>
+                                <Text variant="text-sm/semibold" style={{ color: P.link }}>
                                     Clear filters
                                 </Text>
                             </Pressable>
