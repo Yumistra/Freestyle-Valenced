@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.security-watch",
+	"name": "Security Watch",
+	"description": "Tells you whenever a plugin touches your token or other sensitive things: reading the token, sending it outside Discord, copying it, or reading Discord's app files.",
+	"author": "Yumistra",
+	"icon": "ShieldIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
