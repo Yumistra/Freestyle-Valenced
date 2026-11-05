@@ -1,15 +1,17 @@
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
+import { refreshSettings, registerSettingsItem } from '@valenced/discord/modules/settings'
+import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
-import { AppState, ScrollView } from 'react-native'
+import { AppState, LayoutAnimation, ScrollView } from 'react-native'
 import { trim } from './away'
 import { bindNotes, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
-import { bindNavigation, LogsView } from './logs'
+import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
 import { patchSheet } from './sheet'
 import { styleRow } from './rows'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
@@ -23,7 +25,10 @@ import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings,
 function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const [, force] = useState(0)
-    const [view, setView] = useState<'settings' | 'logs'>('settings')
+    let nav: any
+    try {
+        nav = (ReactNavigationNative as any)?.useNavigation?.()
+    } catch {}
     useEffect(() => {
         const off = onChange(() => force(n => n + 1))
         return () => {
@@ -38,10 +43,15 @@ function SettingsPage({ api }: { api?: any }) {
     const remembered = Object.keys(seen()).length
     const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TableRow, Button } = Design as any
     const set = (patch: Partial<Settings>) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+        // 알림 기억하기를 끄면 알림으로만 알던 메시지도 잊는다
+        if (patch.rememberPushes === false) {
+            const sn = seen() as any
+            for (const k of Object.keys(sn)) if (sn[k]?.p) delete sn[k]
+        }
         setSettings(patch)
         force(n => n + 1)
     }
-    if (view === 'logs') return <LogsView onBack={() => setView('settings')} />
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
             <Stack spacing={24}>
@@ -85,7 +95,7 @@ function SettingsPage({ api }: { api?: any }) {
                         label="View logs"
                         subLabel="Deleted and edited messages, shown like in chat. Tap one to go to it."
                         arrow
-                        onPress={() => setView('logs')}
+                        onPress={() => nav?.navigate?.(LOGS_ROUTE)}
                     />
                 </TableRowGroup>
                 <TableRowGroup title="Saved">
@@ -125,6 +135,25 @@ export default plugin({
         }
         bindNotes(notes)
         bindNavigation(cleanup)
+        // 로그 보기는 디스코드 설정 화면처럼 새 화면으로 넘어간다 (목록에는 안 보이는 경로)
+        try {
+            cleanup(
+                registerSettingsItem(LOGS_ROUTE, {
+                    type: 'route',
+                    parent: 'yumistra.message-logger',
+                    unsearchable: true,
+                    usePredicate: () => false,
+                    useTitle: () => 'Logs',
+                    screen: { route: LOGS_ROUTE, getComponent: () => LogsScreen },
+                } as any),
+                () => {
+                    try {
+                        refreshSettings()
+                    } catch {}
+                },
+            )
+            refreshSettings()
+        } catch {}
         patchSheet(cleanup)
         const pull = () => {
             importPushes(me()).catch(() => {})
