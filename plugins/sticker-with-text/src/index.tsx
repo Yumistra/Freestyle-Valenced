@@ -3,8 +3,11 @@ import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModules, lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
-import { instead } from '@valenced/patcher'
+import { withName, withProps } from '@valenced/modules/finders/filters'
+import { after, instead } from '@valenced/patcher'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { View } from 'react-native'
+import { addPending, clearAllPending, getPending, PendingStickers, setStickerModule, takePending } from './preview'
 
 /**
  * Sticker With Text: 글을 써 두거나 파일을 붙여 둔 채로 스티커를 고르면 전부 한 메시지로 보낸다.
@@ -14,10 +17,12 @@ import { instead } from '@valenced/patcher'
 
 interface Settings {
     enabled: boolean
+    /** wait: 입력창 위에 올려 두고 보낼 때 같이, now: 고르면 바로 (글, 파일과 함께) */
+    mode: 'wait' | 'now'
     /** 붙여 둔 사진, 영상, 파일도 같이 */
     files: boolean
 }
-const DEFAULTS: Settings = { enabled: true, files: true }
+const DEFAULTS: Settings = { enabled: true, mode: 'wait', files: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 
@@ -82,33 +87,79 @@ function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) storage = api.jsonStorage
     storage?.use?.()
     const s = settings()
-    const { TableRowGroup, TableSwitchRow } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
+    const set = (patch: Partial<Settings>) => storage?.set({ ...settings(), ...patch }, true)
     return (
         <Page>
-            <TableRowGroup>
-                <TableSwitchRow
-                    icon={<TableRowAssetIcon name="StickerIcon" />}
-                    label="Send text with stickers"
-                    subLabel="Type a message, then pick a sticker: both go out as one message. With nothing typed, the sticker is sent alone as usual."
-                    value={s.enabled}
-                    onValueChange={(enabled: boolean) => storage?.set({ ...settings(), enabled }, true)}
-                />
-                <TableSwitchRow
-                    icon={<TableRowAssetIcon name="AttachmentIcon" />}
-                    label="Send attached files with stickers"
-                    subLabel="Photos, videos and files you attached go out in the same message as the sticker."
-                    value={s.files}
-                    onValueChange={(files: boolean) => storage?.set({ ...settings(), files }, true)}
-                />
-            </TableRowGroup>
+            <Stack spacing={24}>
+                <TableRowGroup>
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="StickerIcon" />}
+                        label="Sticker With Text"
+                        subLabel="Stickers go out together with your text and attached files."
+                        value={s.enabled}
+                        onValueChange={(enabled: boolean) => set({ enabled })}
+                    />
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="AttachmentIcon" />}
+                        label="Include attached files"
+                        subLabel="Photos, videos and files you attached go out in the same message as the sticker."
+                        value={s.files}
+                        onValueChange={(files: boolean) => set({ files })}
+                    />
+                </TableRowGroup>
+                <TableRadioGroup title="When you pick a sticker" defaultValue={s.mode} onChange={(mode: Settings['mode']) => set({ mode })}>
+                    <TableRadioRow
+                        label="Put it above the chat bar"
+                        subLabel="Like a photo: it waits above the chat bar and goes out when you press send. Tap × to take it off, or the send button next to it to send just the sticker. Up to 3 stickers."
+                        value="wait"
+                    />
+                    <TableRadioRow label="Send right away" subLabel="It goes out at once, with whatever you typed or attached." value="now" />
+                </TableRadioGroup>
+            </Stack>
         </Page>
     )
+}
+
+/** 스티커를 보낸다: 써 둔 글, 붙여 둔 파일도 같이 (sendStickers 원래 함수로) */
+function sendCombined(orig: (...a: any[]) => any, self: unknown, args: any[]) {
+    const [channelId] = args
+    const text = draftOf(channelId)
+    const files = settings().files ? uploadsOf(channelId) : []
+    const next = [...args]
+    if (text.trim()) next[2] = parse(channelId, text)
+    // 붙여 둔 사진, 영상, 파일도 같은 메시지로 (디스코드가 파일 보낼 때 쓰는 그 자리)
+    if (files.length) next[3] = { ...(args[3] ?? {}), attachmentsToUpload: files }
+    const r = orig.apply(self, next)
+    if (text.trim()) clearInput(channelId)
+    if (files.length) clearUploads(channelId)
+    return r
+}
+
+/** 메시지를 보낼 때 올려 둔 스티커를 붙인다 */
+function withPending(channelId: unknown, options: any) {
+    if (typeof channelId !== 'string') return options
+    const p = takePending(channelId)
+    if (!p) return options
+    const ids = [...(options?.stickerIds ?? []), ...p.ids].filter((x, i, a) => a.indexOf(x) === i).slice(0, 3)
+    return { ...(p.options ?? {}), ...(options ?? {}), stickerIds: ids }
+}
+
+let sendStickersOrig: ((...a: any[]) => any) | undefined
+let sendStickersThis: unknown
+function sendPendingNow(channelId: string) {
+    const p = takePending(channelId)
+    if (!p || !sendStickersOrig) return
+    try {
+        sendCombined(sendStickersOrig, sendStickersThis, [channelId, p.ids, '', p.options ?? {}])
+    } catch {}
 }
 
 export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
+        cleanup(() => clearAllPending())
         const done = new WeakSet<object>()
         cleanup(
             getModules(withProps('sendStickers') as any, (mod: any) => {
@@ -119,26 +170,80 @@ export default plugin({
                         try {
                             const [channelId, stickerIds, content] = args
                             const empty = content == null || content === '' || (typeof content === 'object' && !String(content.content ?? '').trim())
-                            if (settings().enabled && typeof channelId === 'string' && Array.isArray(stickerIds) && empty) {
-                                const text = draftOf(channelId)
-                                const files = settings().files ? uploadsOf(channelId) : []
-                                if (text.trim() || files.length) {
-                                    const next = [...args]
-                                    if (text.trim()) next[2] = parse(channelId, text)
-                                    // 붙여 둔 사진, 영상, 파일도 같은 메시지로 (디스코드가 파일 보낼 때 쓰는 그 자리)
-                                    if (files.length) next[3] = { ...(args[3] ?? {}), attachmentsToUpload: files }
-                                    const r = orig.apply(this, next)
-                                    if (text.trim()) clearInput(channelId)
-                                    if (files.length) clearUploads(channelId)
-                                    return r
+                            const s = settings()
+                            if (s.enabled && typeof channelId === 'string' && Array.isArray(stickerIds) && empty) {
+                                sendStickersOrig = orig
+                                sendStickersThis = this
+                                if (s.mode === 'wait') {
+                                    // 바로 보내지 않고 입력창 위에 올려 둔다
+                                    addPending(channelId, stickerIds, args[3])
+                                    return Promise.resolve()
                                 }
+                                const files = s.files ? uploadsOf(channelId) : []
+                                if (draftOf(channelId).trim() || files.length) return sendCombined(orig, this, args)
                             }
                         } catch {}
                         return orig.apply(this, args)
                     }),
                 )
+                // 보내기 버튼으로 글, 파일을 보낼 때 올려 둔 스티커도 같이
+                if (typeof mod.sendMessage === 'function')
+                    cleanup(
+                        instead(mod, 'sendMessage', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                            try {
+                                if (getPending(args[0])) {
+                                    const next = [...args]
+                                    next[3] = withPending(args[0], args[3])
+                                    return orig.apply(this, next)
+                                }
+                            } catch {}
+                            return orig.apply(this, args)
+                        }),
+                    )
+                if (typeof mod._sendMessage === 'function')
+                    cleanup(
+                        instead(mod, '_sendMessage', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                            try {
+                                if (getPending(args[0])) {
+                                    const next = [...args]
+                                    next[2] = withPending(args[0], args[2])
+                                    return orig.apply(this, next)
+                                }
+                            } catch {}
+                            return orig.apply(this, args)
+                        }),
+                    )
             }) as any,
         )
+        // 스티커 그리는 디스코드 부품 ({ default: Sticker, getStickerAssetUrl })
+        cleanup(
+            getModules(withProps('getStickerAssetUrl') as any, (m: any) => {
+                if (typeof m?.default === 'function') setStickerModule(m)
+            }) as any,
+        )
+        // 입력창 위 사진 칸 앞에 올려 둔 스티커를 그린다
+        cleanup(
+            getModuleWithImportedPath('modules/chat_input/native/accessories/ChatInputImageCarousel.tsx', (m: any) => patchCarousel(m)) as any,
+            getModules(withName('ChatInputImageCarousel') as any, (m: any) => patchCarousel(m), { returnNamespace: true } as any) as any,
+        )
+        function patchCarousel(m: any) {
+            if (!m || typeof m.default !== 'function' || patched.has(m)) return
+            patched.add(m)
+            cleanup(
+                after(m, 'default', (args: any[], tree: any) => {
+                    const channelId = args?.[0]?.channelId
+                    if (!channelId) return tree
+                    return (
+                        <View>
+                            <PendingStickers channelId={String(channelId)} onSend={() => sendPendingNow(String(channelId))} />
+                            {tree}
+                        </View>
+                    )
+                }),
+            )
+        }
     },
     SettingsComponent: SettingsPage,
 } as any)
+
+const patched = new WeakSet<object>()
