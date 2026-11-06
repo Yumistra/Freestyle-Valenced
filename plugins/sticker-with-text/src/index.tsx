@@ -234,6 +234,24 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
     if (draftOf(channelId).trim() || files.length) return Promise.resolve(sendTogether(channelId, ids, rest))
 }
 
+/** 디스코드가 비운 입력창에 글을 다시 넣는다 (비우는 일이 끝난 뒤) */
+function restoreText(channelId: string, text: string) {
+    const put = () => {
+        try {
+            find('saveDraft', 'clearDraft')?.saveDraft?.(channelId, text, CHANNEL_MESSAGE)
+        } catch {}
+        try {
+            const ref = find('getBestActiveInputForChannelId')?.getBestActiveInputForChannelId?.(channelId)
+            if (typeof ref?.setText === 'function') ref.setText(text)
+        } catch {}
+    }
+    setTimeout(put, 0)
+    // 키보드가 닫히며 한 번 더 비울 수 있어 조금 뒤에 다시 확인
+    setTimeout(() => {
+        if (!draftOf(channelId).trim()) put()
+    }, 250)
+}
+
 /** 메시지를 보낼 때 올려 둔 스티커를 붙인다 */
 function withPending(channelId: unknown, options: any) {
     if (typeof channelId !== 'string') return options
@@ -305,10 +323,30 @@ export default plugin({
                         instead(mod, 'sendStickers', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                             try {
                                 const [channelId, stickerIds, content, options] = args
-                                if (typeof channelId === 'string' && Array.isArray(stickerIds) && emptyMessage(content) && !ours(options)) {
+                                // 디스코드는 스티커를 고르면 입력창 글을 같이 넣어 sendStickers 를 부르고, 입력창을 비운다
+                                if (typeof channelId === 'string' && Array.isArray(stickerIds) && !ours(options) && settings().enabled) {
                                     seenPath.last = 'sendStickers'
-                                    const r = onPick(channelId, stickerIds.map(String), options)
-                                    if (r) return r
+                                    const s = settings()
+                                    if (s.mode === 'wait') {
+                                        // 글은 입력창에 그대로 돌려 두고, 스티커만 올려 둔다
+                                        const text = draftOf(channelId) || (typeof content === 'string' ? content : String(content?.content ?? ''))
+                                        const r = onPick(channelId, stickerIds.map(String), options)
+                                        if (text.trim()) restoreText(channelId, text)
+                                        if (r) return r
+                                    } else {
+                                        // 바로 보내기: 디스코드가 글은 이미 넣었으니 붙여 둔 파일만 더한다
+                                        const all = s.files ? uploadsOf(channelId) : []
+                                        const { rest: files, ids: more } = splitFakes(all)
+                                        if (files.length || more.length) {
+                                            const next = [...args]
+                                            next[1] = [...stickerIds.map(String), ...more].filter((x, i, a) => a.indexOf(x) === i).slice(0, 3)
+                                            const o: any = { ...(options ?? {}), [OURS]: true }
+                                            if (files.length) o.attachmentsToUpload = files
+                                            next[3] = o
+                                            clearUploads(channelId)
+                                            return orig.apply(this, next)
+                                        }
+                                    }
                                 }
                             } catch {}
                             return orig.apply(this, args)
