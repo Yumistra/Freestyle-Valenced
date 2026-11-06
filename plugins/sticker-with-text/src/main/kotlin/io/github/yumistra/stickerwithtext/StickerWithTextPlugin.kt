@@ -67,6 +67,17 @@ private object RLottie {
             inst = f?.get(null)
         } catch (_: Throwable) {
         }
+        // 이 Companion 에는 생성자가 없다 (R8 이 지웠다). 네이티브 함수는 this 를 쓰지 않으니 빈 객체를 만든다
+        if (inst == null) {
+            try {
+                val unsafeCls = Class.forName("sun.misc.Unsafe")
+                val f = unsafeCls.getDeclaredField("theUnsafe")
+                f.isAccessible = true
+                val unsafe = f.get(null)
+                inst = unsafeCls.getMethod("allocateInstance", Class::class.java).invoke(unsafe, comp)
+            } catch (_: Throwable) {
+            }
+        }
         if (inst == null) {
             val cs = comp.declaredConstructors
             var i = 0
@@ -82,7 +93,7 @@ private object RLottie {
         create = method(comp, "createWithJson", 4)
         frame = method(comp, "getFrame", 7)
         destroy = method(comp, "destroy", 1)
-        if (inst == null || create == null || frame == null) throw IllegalStateException("rlottie not found")
+        if (inst == null || create == null || frame == null) throw IllegalStateException("rlottie not found (" + (if (inst == null) "no instance" else "no methods") + ")")
         companion = inst
     }
 }
