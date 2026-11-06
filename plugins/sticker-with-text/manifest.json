@@ -5,7 +5,7 @@
 	"description": "When you pick a sticker while you have text typed or photos, videos or files attached, they all go out together as one message.",
 	"author": "Yumistra",
 	"icon": "StickerIcon",
-	"version": "1.0.13",
+	"version": "1.0.14",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

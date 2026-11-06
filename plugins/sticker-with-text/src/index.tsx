@@ -7,7 +7,7 @@ import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { addPending, clearAllPending, getPending, setStickerModule, takePending } from './preview'
-import { addToTray, fakeStickerId, setTrayStickerModule, trayStatus } from './tray'
+import { addToTray, fakeStickerId, removeFromTray, setTrayStickerModule, trayStatus } from './tray'
 
 /**
  * Sticker With Text: 글을 써 두거나 파일을 붙여 둔 채로 스티커를 고르면 전부 한 메시지로 보낸다.
@@ -23,8 +23,10 @@ interface Settings {
     files: boolean
     /** 스티커를 고른 뒤 키보드를 올리지 않는다 */
     noKeyboard: boolean
+    /** 사진 고르기처럼 스티커 고르기 창을 열어 둔다 (여러 개 고르기, 다시 누르면 빼기) */
+    keepOpen: boolean
 }
-const DEFAULTS: Settings = { enabled: true, mode: 'wait', files: true, noKeyboard: true }
+const DEFAULTS: Settings = { enabled: true, mode: 'wait', files: true, noKeyboard: true, keepOpen: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 
@@ -110,6 +112,13 @@ function SettingsPage({ api }: { api?: any }) {
                         onValueChange={(files: boolean) => set({ files })}
                     />
                     <TableSwitchRow
+                        icon={<TableRowAssetIcon name="StickerIcon" />}
+                        label="Keep the sticker picker open"
+                        subLabel="Like picking photos: pick several stickers in a row, tap one again to take it off."
+                        value={s.keepOpen}
+                        onValueChange={(keepOpen: boolean) => set({ keepOpen })}
+                    />
+                    <TableSwitchRow
                         icon={<TableRowAssetIcon name="KeyboardIcon" />}
                         label="Keep the keyboard closed"
                         subLabel="After you pick a sticker, the keyboard doesn't pop up."
@@ -180,7 +189,7 @@ function splitFakes(list: any): { rest: any[]; ids: string[] } {
 }
 
 /** 스티커를 골랐을 때. 디스코드 대신 우리가 처리했으면 true */
-function onPick(channelId: string, ids: string[], options: any): Promise<any> | undefined {
+function onPick(channelId: string, ids: string[], options: any, held = false): Promise<any> | undefined {
     const s = settings()
     if (!s.enabled || !ids.length) return
     const rest = { ...(options ?? {}) }
@@ -188,14 +197,17 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
     if (s.mode === 'wait') {
         // 바로 보내지 않고 사진처럼 "보낼 파일" 줄에 올려 둔다.
         // 못 올리면 안 보이는 대기열에 두고 다음 메시지에 붙인다.
-        if (s.noKeyboard) dismissKeyboard(channelId)
+        // 고르기 창을 열어 둔 채면 키보드가 올라오지 않으니 닫을 것도 없다
+        if (!held && s.noKeyboard) dismissKeyboard(channelId)
         ;(async () => {
             for (const id of ids) {
+                // 사진 고르기처럼: 이미 올린 스티커를 다시 누르면 뺀다
+                if (held && removeFromTray(channelId, id)) continue
                 const ok = await addToTray(channelId, id)
                 if (!ok) addPending(channelId, [id], rest)
             }
             seenPath.shown = trayStatus.last
-            if (settings().noKeyboard) dismissKeyboard(channelId)
+            if (!held && settings().noKeyboard) dismissKeyboard(channelId)
         })()
         return Promise.resolve()
     }
@@ -204,6 +216,47 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
 }
 
 /** 디스코드가 비운 입력창에 글을 다시 넣는다 (비우는 일이 끝난 뒤) */
+/** 디스코드 입력창 (getBestActiveInputForChannelId) */
+const inputOf = (channelId: string): any => {
+    try {
+        return find('getBestActiveInputForChannelId')?.getBestActiveInputForChannelId?.(channelId)
+    } catch {}
+}
+
+/**
+ * 스티커를 고른 바로 그 순간에만 입력창의 비우기(clearText)와 닫기(dismissKeyboard)를 아무 일도 안 하게 한다.
+ * 디스코드가 스티커를 보낸 뒤 같은 흐름 안에서 부르므로, 다음 틱에 원래대로 돌린다.
+ */
+function holdInput(channelId: string): boolean {
+    const ref = inputOf(channelId)
+    if (!ref || typeof ref.dismissKeyboard !== 'function') return false
+    const saved: Array<[string, any]> = []
+    for (const key of ['dismissKeyboard', 'clearText']) {
+        if (typeof ref[key] !== 'function') continue
+        saved.push([key, ref[key]])
+        try {
+            ref[key] = () => {}
+        } catch {}
+    }
+    if (ref.dismissKeyboard === saved[0]?.[1]) return false
+    setTimeout(() => {
+        for (const [key, fn] of saved)
+            try {
+                ref[key] = fn
+            } catch {}
+    }, 0)
+    return true
+}
+
+/** 디스코드가 비운 임시 글만 다시 저장한다 (입력창 글은 그대로 남아 있다) */
+function keepDraft(channelId: string, text: string) {
+    setTimeout(() => {
+        try {
+            find('saveDraft', 'clearDraft')?.saveDraft?.(channelId, text, CHANNEL_MESSAGE)
+        } catch {}
+    }, 0)
+}
+
 /**
  * 스티커를 고른 뒤 키보드가 올라오지 않게 한다 (디스코드가 스티커를 보낸 뒤 하는 것처럼 닫는다).
  * 글을 다시 넣거나 사진 칸이 바뀌면 입력창이 다시 키보드를 올리므로 몇 번 나눠 닫는다.
@@ -318,8 +371,13 @@ export default plugin({
                                     if (s.mode === 'wait') {
                                         // 글은 입력창에 그대로 돌려 두고, 스티커만 올려 둔다
                                         const text = draftOf(channelId) || (typeof content === 'string' ? content : String(content?.content ?? ''))
-                                        const r = onPick(channelId, stickerIds.map(String), options)
-                                        if (text.trim()) restoreText(channelId, text)
+                                        // 디스코드는 이 다음에 입력창을 비우고(clearText) 고르기 창을 닫는다(dismissKeyboard). 이번만 막는다
+                                        const held = s.keepOpen && holdInput(channelId)
+                                        const r = onPick(channelId, stickerIds.map(String), options, held)
+                                        if (text.trim()) {
+                                            if (held) keepDraft(channelId, text)
+                                            else restoreText(channelId, text)
+                                        }
                                         if (r) return r
                                     } else {
                                         // 바로 보내기: 디스코드가 글은 이미 넣었으니 붙여 둔 파일만 더한다

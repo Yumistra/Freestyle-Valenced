@@ -232,3 +232,14 @@ export async function addToTray(channelId: string, id: string): Promise<boolean>
         return false
     }
 }
+
+/** 이미 올린 이 스티커를 뺀다. 뺐으면 true */
+export function removeFromTray(channelId: string, id: string): boolean {
+    const u = uploads(channelId).find(x => fakeStickerId(x) === id)
+    if (!u) return false
+    const uid = u?.id ?? u?.item?.id
+    if (uid == null) return false
+    Dispatcher.dispatch({ type: 'UPLOAD_ATTACHMENT_REMOVE_FILE', channelId, id: uid, draftType: CHANNEL_MESSAGE } as any)
+    trayStatus.last = 'Taken off again'
+    return true
+}
