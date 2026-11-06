@@ -2,7 +2,10 @@
 
 package io.github.yumistra.stickerwithtext
 
+import android.app.Activity
+import android.content.Context
 import android.graphics.Bitmap
+import android.view.inputmethod.InputMethodManager
 import android.util.Base64
 import app.valenced.plugins.PluginBuilder
 import app.valenced.plugins.PluginScope
@@ -18,6 +21,36 @@ import java.io.ByteArrayOutputStream
  */
 private object State {
     var loader: ClassLoader? = null
+    var scope: PluginScope? = null
+}
+
+/**
+ * 글자 키보드(IME)만 내린다. 입력창 포커스는 그대로 두므로 스티커 고르기 창은 남는다.
+ * 스티커를 고른 뒤 디스코드가 키보드 종류는 그대로(EXPRESSION) 둔 채 IME 를 띄우는 경우가 있어서 쓴다.
+ */
+private class HideRun(val a: Activity) : Runnable {
+    override fun run() {
+        try {
+            val v = a.currentFocus ?: a.window?.decorView ?: return
+            val imm = a.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+            imm.hideSoftInputFromWindow(v.windowToken, 0)
+        } catch (_: Throwable) {
+        }
+    }
+}
+
+private object HideOn : Function1<Activity, Unit> {
+    override fun invoke(a: Activity) {
+        a.runOnUiThread(HideRun(a))
+    }
+}
+
+private object HideIme : Function1<List<Any?>, Any?> {
+    override fun invoke(args: List<Any?>): Any? {
+        val sc = State.scope ?: return false
+        sc.withAppActivity(HideOn)
+        return true
+    }
 }
 
 private fun method(cls: Class<*>, name: String, argc: Int): java.lang.reflect.Method? {
@@ -153,13 +186,16 @@ private object RenderLottie : Function1<List<Any?>, Any?> {
 private object OnStart : Function1<PluginScope, Unit> {
     override fun invoke(scope: PluginScope) {
         State.loader = scope.classLoader
+        State.scope = scope
         scope.registerNativeMethod("yumistra.sticker-with-text.renderLottie", RenderLottie)
+        scope.registerNativeMethod("yumistra.sticker-with-text.hideIme", HideIme)
     }
 }
 
 private object OnStop : Function1<PluginScope, Unit> {
     override fun invoke(scope: PluginScope) {
         State.loader = null
+        State.scope = null
     }
 }
 
