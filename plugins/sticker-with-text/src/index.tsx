@@ -1,13 +1,12 @@
-import React from 'react'
 import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after, instead } from '@valenced/patcher'
-import { getModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { addPending, clearAllPending, getPending, PendingStickers, setStickerModule, takePending } from './preview'
+import { instead } from '@valenced/patcher'
+import { addPending, clearAllPending, getPending, setStickerModule, takePending } from './preview'
+import { addToTray, fakeStickerId, trayStatus } from './tray'
 
 /**
  * Sticker With Text: 글을 써 두거나 파일을 붙여 둔 채로 스티커를 고르면 전부 한 메시지로 보낸다.
@@ -120,13 +119,9 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableRow
                         icon={<TableRowAssetIcon name="InfoIcon" />}
                         label="Last sticker pick"
-                        subLabel={seenPath.last ? `Caught through ${seenPath.last}${seenPath.shown ? `, shown ${seenPath.shown}` : ''}` : 'No sticker picked yet since Discord started.'}
+                        subLabel={seenPath.last ? `Caught through ${seenPath.last}${seenPath.shown ? `. ${seenPath.shown}` : ''}` : 'No sticker picked yet since Discord started.'}
                     />
-                    <TableRow
-                        icon={<TableRowAssetIcon name={status.carousel ? 'CheckmarkLargeIcon' : 'WarningIcon'} />}
-                        label="Chat bar"
-                        subLabel={`${status.carousel ? 'Sticker spot found' : 'Sticker spot not found yet (open a chat once)'}, send button ${status.sendButton ? 'found' : 'not found yet'}`}
-                    />
+
                 </TableRowGroup>
             </Stack>
         </Page>
@@ -139,7 +134,6 @@ const ours = (o: any) => !!o?.[OURS]
 
 /** 진단: 스티커를 고르면 디스코드가 어느 함수로 보내는지 */
 export const seenPath = { last: '', shown: '' }
-const status = { carousel: false, sendButton: false }
 
 const emptyMessage = (m: any) => m == null || m === '' || (typeof m === 'string' ? !m.trim() : !String(m?.content ?? '').trim())
 
@@ -163,48 +157,6 @@ function sendTogether(channelId: string, ids: string[], options: any, fallback?:
     return actions.sendMessage(channelId, message, undefined, opts)
 }
 
-// ── 스티커를 사진처럼 입력창 위 "보낼 파일" 칸에 올리기 ─────────────────────────
-// 디스코드 사진 고르기와 같은 모양의 항목(mediaNodeToUploadItem)을 addFile 로 넣는다.
-// 그림 주소 끝에 표시(swt=1)를 달아 두고, 보낼 때 그 항목은 빼고 스티커 ID 로 바꾼다.
-const MARK = 'swt=1'
-const FAKE = /\/stickers\/(\d+)\.\w+\?[^#]*swt=1/
-
-function stickerUri(id: string) {
-    let format: number | undefined
-    try {
-        format = (Stores as any).StickersStore?.getStickerById?.(id)?.format_type
-    } catch {}
-    return { uri: `https://media.discordapp.net/stickers/${id}.${format === 4 ? 'gif' : 'png'}?size=160&${MARK}`, mime: format === 4 ? 'image/gif' : 'image/png' }
-}
-
-/** 올려 둔 파일 하나가 우리 스티커면 그 ID */
-function fakeStickerId(u: any): string | undefined {
-    for (const v of [u?.item?.uri, u?.item?.originalUri, u?.uri, u?.item?.file?.uri, u?.file?.uri]) {
-        const m = typeof v === 'string' ? FAKE.exec(v) : null
-        if (m) return m[1]
-    }
-}
-
-function addStickerUploads(channelId: string, ids: string[]): boolean {
-    const add = find('addFile', 'addFiles')
-    if (typeof add?.addFile !== 'function') return false
-    const platform = find('UploadPlatform')?.UploadPlatform?.REACT_NATIVE ?? 1
-    const origin = find('UploadOrigin')?.UploadOrigin?.IMAGE_PICKER
-    // 이미 올린 스티커는 다시 안 넣는다, 한 메시지에 3개까지
-    const have = uploadsOf(channelId).map(fakeStickerId).filter(Boolean) as string[]
-    let added = false
-    for (const id of ids) {
-        if (have.includes(id) || have.length >= 3) continue
-        const { uri, mime } = stickerUri(id)
-        const item: any = { id: `swt-${id}-${Date.now()}`, uri, originalUri: uri, mimeType: mime, width: 160, height: 160, filename: `sticker-${id}.${mime === 'image/gif' ? 'gif' : 'png'}`, platform }
-        if (origin != null) item.origin = origin
-        add.addFile({ file: item, channelId, draftType: CHANNEL_MESSAGE, allowOptimization: false })
-        have.push(id)
-        added = true
-    }
-    return added || have.length > 0
-}
-
 /** 보낼 파일 목록에서 우리 스티커를 빼내 스티커 ID 로 */
 function splitFakes(list: any): { rest: any[]; ids: string[] } {
     const rest: any[] = []
@@ -224,10 +176,15 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
     const rest = { ...(options ?? {}) }
     delete rest.stickerIds
     if (s.mode === 'wait') {
-        // 바로 보내지 않고 사진처럼 입력창 위에 올려 둔다 (안 되면 우리 칸에)
-        // (디스코드 파일 칸에 넣는 방식은 폰에서 안 보여서 쓰지 않는다: addStickerUploads)
-        addPending(channelId, ids, rest)
-        seenPath.shown = status.carousel ? 'above the chat bar' : 'nowhere yet (chat bar part not found)'
+        // 바로 보내지 않고 사진처럼 "보낼 파일" 줄에 올려 둔다.
+        // 못 올리면 안 보이는 대기열에 두고 다음 메시지에 붙인다.
+        ;(async () => {
+            for (const id of ids) {
+                const ok = await addToTray(channelId, id)
+                if (!ok) addPending(channelId, [id], rest)
+            }
+            seenPath.shown = trayStatus.last
+        })()
         return Promise.resolve()
     }
     const files = s.files ? uploadsOf(channelId) : []
@@ -363,79 +320,6 @@ export default plugin({
                 if (typeof m?.default === 'function') setStickerModule(m)
             }) as any,
         )
-        // 입력창 위 사진 칸 앞에 올려 둔 스티커를 그린다.
-        // 디스코드는 이 부품들을 React.memo 로 감싸 내보내므로 안쪽 함수(type)를 바꾼다.
-        // 아직 안 불린 모듈이면 불릴 때까지 기다린다.
-        const onModule = (path: string, fn: (m: any) => void) =>
-            cleanup(
-                getModuleWithImportedPath(path, (m: any) => {
-                    if (m) fn(m)
-                    else cleanup(waitForModuleWithImportedPath(path, (x: any) => fn(x)) as any)
-                }) as any,
-            )
-        /** 내보낸 부품(함수 또는 memo)의 렌더 함수를 감싼다 */
-        const wrapRender = (m: any, wrap: (args: any[], tree: any) => any) => {
-            const d = m?.default
-            if (!d || patched.has(d)) return false
-            patched.add(d)
-            if (typeof d === 'function') cleanup(after(m, 'default', wrap))
-            else if (typeof d.type === 'function') cleanup(after(d, 'type', wrap))
-            else if (typeof d.type?.render === 'function') cleanup(after(d.type, 'render', wrap))
-            else return false
-            return true
-        }
-        onModule('modules/chat_input/native/accessories/ChatInputImageCarousel.tsx', m => {
-            status.carousel = wrapRender(m, (args: any[], tree: any) => {
-                const channelId = args?.[0]?.channelId
-                if (!channelId) return tree
-                // 감싸는 View 를 두면 디스코드 사진 칸 배치가 깨진다 (사진도 안 보였다) → 형제로만 둔다
-                return (
-                    <>
-                        <Safe>
-                            <PendingStickers channelId={String(channelId)} onSend={() => sendPendingNow(String(channelId))} />
-                        </Safe>
-                        {tree}
-                    </>
-                )
-            })
-        })
-        // 스티커만 올려 둬도 보내기 버튼이 켜지게 (사진을 올려 뒀을 때처럼)
-        onModule('modules/chat_input/native/accessories/ChatInputSendButton.tsx', m => {
-            const d = m?.default
-            const target = typeof d === 'function' ? m : typeof d?.type === 'function' ? d : undefined
-            const key = typeof d === 'function' ? 'default' : 'type'
-            if (!target || patched.has(target[key])) return
-            patched.add(target[key])
-            cleanup(
-                instead(target, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                    try {
-                        const props = args[0]
-                        const id = props?.channel?.id
-                        if (id && getPending(String(id)) && !props.hasPendingAttachments) {
-                            const next = [...args]
-                            next[0] = { ...props, hasPendingAttachments: true }
-                            return orig.apply(this, next)
-                        }
-                    } catch {}
-                    return orig.apply(this, args)
-                }),
-            )
-            status.sendButton = true
-        })
     },
     SettingsComponent: SettingsPage,
 } as any)
-
-const patched = new WeakSet<object>()
-
-/** 우리 칸에서 오류가 나도 디스코드 입력창은 그대로 그려지게 */
-class Safe extends (React as any).Component {
-    state = { failed: false }
-    static getDerivedStateFromError() {
-        return { failed: true }
-    }
-    componentDidCatch() {}
-    render() {
-        return (this as any).state.failed ? null : (this as any).props.children
-    }
-}
