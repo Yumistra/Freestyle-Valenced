@@ -27,6 +27,16 @@ function themeColor(name: string, fallback: string) {
     }
 }
 
+/**
+ * 아래 표시 글자(\uE000…)는 이 플러그인의 네이티브 부분(Markers.kt)이 꾸밈으로 바꾼다.
+ * 네이티브 부분이 안 켜진 기기(네이티브 플러그인을 못 쓰는 설치 등)에서는 표시 글자가 그대로
+ * 한자 같은 이상한 글자로 보이므로, 네이티브가 대답한 뒤에만 쓰고 그 전에는 꾸밈 없이 보여 준다.
+ */
+let native = false
+export function setNative(v: boolean) {
+    native = v
+}
+
 const red = () => themeColor('TEXT_FEEDBACK_CRITICAL', '#f23f43')
 const gray = () => themeColor('TEXT_MUTED', '#949ba4')
 
@@ -103,6 +113,11 @@ function timeOf(at: number, args: any, generate: (a: any) => any, fallback?: str
 function history(edits: Array<{ t: string; at: number }>, edited: string, row: any, args: any, generate: (a: any) => any, full: (a: any) => any) {
     const out: any[] = []
     for (const { t, at } of edits) {
+        if (!native) {
+            // 꾸밈 없이: "예전 내용 (수정됨) 시간"
+            out.push(...(contentOf(t, args, generate) ?? [text(t)]), text(` ${edited} ${timeOf(at, args, full)}`), text('\n'))
+            continue
+        }
         out.push(
             text(FADE_START),
             ...(contentOf(t, args, generate) ?? [text(t)]),
@@ -134,7 +149,7 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
         const edited = raw.startsWith('(') ? raw : `(${raw})`
         const lines = history(e.e, edited, row, args, generate, full)
         // 지워진 게 아니면 수정 기록 줄들에만 핑처럼 회색 배경 (지금 내용은 그대로)
-        if (!e.d) {
+        if (!e.d && native) {
             const g = gray()
             lines.unshift(text(`${BG_START}${argb(g, bgAlpha)},${argb(g, 0xff)}${BG_SEPARATOR}`))
             lines.push(text(BG_END))
