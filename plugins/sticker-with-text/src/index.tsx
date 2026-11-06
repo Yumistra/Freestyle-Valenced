@@ -1,3 +1,4 @@
+import React from 'react'
 import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
@@ -6,7 +7,6 @@ import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { after, instead } from '@valenced/patcher'
 import { getModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { View } from 'react-native'
 import { addPending, clearAllPending, getPending, PendingStickers, setStickerModule, takePending } from './preview'
 
 /**
@@ -388,11 +388,14 @@ export default plugin({
             status.carousel = wrapRender(m, (args: any[], tree: any) => {
                 const channelId = args?.[0]?.channelId
                 if (!channelId) return tree
+                // 감싸는 View 를 두면 디스코드 사진 칸 배치가 깨진다 (사진도 안 보였다) → 형제로만 둔다
                 return (
-                    <View>
-                        <PendingStickers channelId={String(channelId)} onSend={() => sendPendingNow(String(channelId))} />
+                    <>
+                        <Safe>
+                            <PendingStickers channelId={String(channelId)} onSend={() => sendPendingNow(String(channelId))} />
+                        </Safe>
                         {tree}
-                    </View>
+                    </>
                 )
             })
         })
@@ -424,3 +427,15 @@ export default plugin({
 } as any)
 
 const patched = new WeakSet<object>()
+
+/** 우리 칸에서 오류가 나도 디스코드 입력창은 그대로 그려지게 */
+class Safe extends (React as any).Component {
+    state = { failed: false }
+    static getDerivedStateFromError() {
+        return { failed: true }
+    }
+    componentDidCatch() {}
+    render() {
+        return (this as any).state.failed ? null : (this as any).props.children
+    }
+}
