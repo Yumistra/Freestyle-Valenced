@@ -3,8 +3,6 @@
 package io.github.yumistra.stickerwithtext
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.Drawable
 import android.util.Base64
 import app.valenced.plugins.PluginBuilder
 import app.valenced.plugins.PluginScope
@@ -13,7 +11,7 @@ import app.valenced.xposed.api.registerNativeMethod
 import java.io.ByteArrayOutputStream
 
 /**
- * 움직이는(Lottie) 스티커의 한 장면을 디스코드 앱 안의 Lottie 그리기(com.airbnb.lottie)로
+ * 움직이는(Lottie) 스티커의 한 장면을 디스코드 앱이 스티커를 그릴 때 쓰는 rlottie 로
  * 그려 PNG(base64)로 돌려준다. 디스코드가 채팅에서 그리는 것과 똑같이 보인다.
  * 디스코드 앱의 클래스를 직접 부르므로 이름은 리플렉션으로 찾는다.
  * (람다 대신 객체로 써서 kotlin.jvm.internal.Lambda 에 기대지 않는다)
@@ -39,40 +37,101 @@ private fun method(cls: Class<*>, name: String, argc: Int): java.lang.reflect.Me
     return null
 }
 
-/** args: [json, size, progress] → base64 PNG */
+/**
+ * 디스코드는 스티커를 com.discord.rlottie(텔레그램 rlottie) 로 그린다. 바깥 클래스 이름은 줄여져 있지만
+ * 네이티브 함수들이 붙은 RLottieDrawable$Companion 은 이름이 그대로라 이것을 쓴다.
+ *   createWithJson(json, name, params[3], colors) → 포인터, params[0] = 프레임 수
+ *   getFrame(포인터, 프레임, bitmap, w, h, stride, clear)
+ *   destroy(포인터)
+ */
+private object RLottie {
+    var companion: Any? = null
+    var create: java.lang.reflect.Method? = null
+    var frame: java.lang.reflect.Method? = null
+    var destroy: java.lang.reflect.Method? = null
+
+    fun ready(cl: ClassLoader) {
+        if (companion != null) return
+        val comp = cl.loadClass("com.discord.rlottie.RLottieDrawable\$Companion")
+        // 바깥 클래스를 초기화하면 네이티브 라이브러리가 올라온다
+        var outer: Class<*>? = null
+        try {
+            outer = comp.declaringClass ?: comp.enclosingClass
+            if (outer != null) Class.forName(outer.name, true, cl)
+        } catch (_: Throwable) {
+        }
+        var inst: Any? = null
+        try {
+            val f = outer?.getDeclaredField("Companion")
+            f?.isAccessible = true
+            inst = f?.get(null)
+        } catch (_: Throwable) {
+        }
+        if (inst == null) {
+            val cs = comp.declaredConstructors
+            var i = 0
+            while (inst == null && i < cs.size) {
+                val c = cs[i++]
+                c.isAccessible = true
+                try {
+                    inst = if (c.parameterTypes.isEmpty()) c.newInstance() else c.newInstance(*arrayOfNulls<Any>(c.parameterTypes.size))
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        create = method(comp, "createWithJson", 4)
+        frame = method(comp, "getFrame", 7)
+        destroy = method(comp, "destroy", 1)
+        if (inst == null || create == null || frame == null) throw IllegalStateException("rlottie not found")
+        companion = inst
+    }
+}
+
+private fun empty(b: Bitmap): Boolean {
+    val w = b.width
+    val h = b.height
+    var seen = 0
+    var y = 0
+    while (y < h) {
+        var x = 0
+        while (x < w) {
+            if ((b.getPixel(x, y) ushr 24) > 20) seen++
+            x += 4
+        }
+        y += 4
+    }
+    return seen < 4
+}
+
+/** args: [json, size, progress] → base64 PNG (디스코드가 그리는 것과 같은 모양) */
 private object RenderLottie : Function1<List<Any?>, Any?> {
     override fun invoke(args: List<Any?>): Any? {
         val json = args.getOrNull(0) as? String ?: throw IllegalArgumentException("no json")
         val size = (args.getOrNull(1) as? Number)?.toInt()?.coerceIn(32, 512) ?: 160
-        val progress = (args.getOrNull(2) as? Number)?.toFloat()?.coerceIn(0f, 1f) ?: 0.4f
+        val progress = (args.getOrNull(2) as? Number)?.toFloat()?.coerceIn(0f, 1f) ?: 0f
         val cl = State.loader ?: throw IllegalStateException("not started")
-
-        val factory = cl.loadClass("com.airbnb.lottie.LottieCompositionFactory")
-        val fromJson = method(factory, "fromJsonStringSync", 2) ?: throw IllegalStateException("fromJsonStringSync missing")
-        val result = fromJson.invoke(null, json, "swt-" + json.length + "-" + json.hashCode())
-            ?: throw IllegalStateException("no result")
-        val composition = method(result.javaClass, "getValue", 0)?.invoke(result)
-            ?: throw IllegalStateException("bad lottie: " + method(result.javaClass, "getException", 0)?.invoke(result))
-
-        val drawableCls = cl.loadClass("com.airbnb.lottie.LottieDrawable")
-        val drawable = drawableCls.getDeclaredConstructor().newInstance() as Drawable
-        val setComposition = method(drawableCls, "setComposition", 1) ?: throw IllegalStateException("setComposition missing")
-        setComposition.invoke(drawable, composition)
-        method(drawableCls, "setProgress", 1)?.invoke(drawable, progress)
-
+        RLottie.ready(cl)
+        val params = IntArray(3)
+        val ptr = (RLottie.create!!.invoke(RLottie.companion, json, "swt-" + json.hashCode(), params, null) as Number).toLong()
+        if (ptr == 0L) throw IllegalStateException("bad lottie")
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        // 원래 크기 비율을 지키며 가운데에
-        val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: size
-        val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: size
-        val scale = minOf(size.toFloat() / w, size.toFloat() / h)
-        val dw = (w * scale).toInt()
-        val dh = (h * scale).toInt()
-        val left = (size - dw) / 2
-        val top = (size - dh) / 2
-        drawable.setBounds(left, top, left + dw, top + dh)
-        drawable.draw(canvas)
-
+        try {
+            val frames = if (params[0] > 0) params[0] else 1
+            // 처음 장면, 비어 있으면 몇 군데 더
+            val tries = intArrayOf((frames * progress).toInt(), 0, frames * 2 / 5, frames / 2, frames / 4)
+            var i = 0
+            while (i < tries.size) {
+                val f = tries[i++].coerceIn(0, frames - 1)
+                bitmap.eraseColor(0)
+                RLottie.frame!!.invoke(RLottie.companion, ptr, f, bitmap, size, size, bitmap.rowBytes, true)
+                if (!empty(bitmap)) break
+            }
+        } finally {
+            try {
+                RLottie.destroy?.invoke(RLottie.companion, ptr)
+            } catch (_: Throwable) {
+            }
+        }
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
         bitmap.recycle()
