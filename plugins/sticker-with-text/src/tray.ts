@@ -139,7 +139,7 @@ async function lottiePng(sticker: any, id: string): Promise<string | undefined> 
     if (!json) return
     // 1) 디스코드 앱의 Lottie 로 그린다 (네이티브 부분): 채팅에서 보이는 것과 똑같다
     try {
-        const r: any = await (callNativeMethod as any)('yumistra.sticker-with-text.renderLottie', [JSON.stringify(json), 160, 0.4])
+        const r: any = await (callNativeMethod as any)('yumistra.sticker-with-text.renderLottie', [JSON.stringify(json), 160, 0])
         const b64 = String(unwrap(r) ?? '')
         if (b64.length > 100) {
             trayStatus.renderer = 'Discord'
