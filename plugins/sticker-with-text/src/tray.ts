@@ -2,6 +2,7 @@ import { FileModule } from '@valenced/discord/native'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
+import { callNativeMethod } from '@valenced/modules/native'
 import { renderLottie } from './lottie'
 
 /**
@@ -13,7 +14,7 @@ import { renderLottie } from './lottie'
 const CHANNEL_MESSAGE = 0
 export const FAKE = /swt-sticker-(\d+)/
 
-export const trayStatus = { last: '' }
+export const trayStatus = { last: '', renderer: '' }
 
 const find = (...props: string[]): any => {
     try {
@@ -130,10 +131,25 @@ async function lottieJson(sticker: any, id: string): Promise<any> {
     }
 }
 
+const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
+
 /** 움직이는(Lottie) 스티커 한 장면을 그려 PNG 로 */
 async function lottiePng(sticker: any, id: string): Promise<string | undefined> {
     const json = await lottieJson(sticker, id)
     if (!json) return
+    // 1) 디스코드 앱의 Lottie 로 그린다 (네이티브 부분): 채팅에서 보이는 것과 똑같다
+    try {
+        const r: any = await (callNativeMethod as any)('yumistra.sticker-with-text.renderLottie', [JSON.stringify(json), 160, 0.4])
+        const b64 = String(unwrap(r) ?? '')
+        if (b64.length > 100) {
+            trayStatus.renderer = 'Discord'
+            return b64
+        }
+    } catch (e: any) {
+        trayStatus.renderer = `built-in (Discord's: ${e?.message ?? e})`
+    }
+    // 2) 네이티브가 없으면 플러그인 안의 작은 그리기로 (비슷하게)
+    if (!trayStatus.renderer.startsWith('built-in')) trayStatus.renderer = 'built-in'
     for (const at of [0.4, 0.6, 0.25, 0.8, 0]) {
         try {
             const rgba = renderLottie(json, 160, at)

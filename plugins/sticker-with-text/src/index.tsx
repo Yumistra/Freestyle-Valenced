@@ -119,7 +119,7 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableRow
                         icon={<TableRowAssetIcon name="InfoIcon" />}
                         label="Last sticker pick"
-                        subLabel={seenPath.last ? `Caught through ${seenPath.last}${seenPath.shown ? `. ${seenPath.shown}` : ''}` : 'No sticker picked yet since Discord started.'}
+                        subLabel={seenPath.last ? `Caught through ${seenPath.last}${seenPath.shown ? `. ${seenPath.shown}` : ''}${trayStatus.renderer ? `. Animated sticker drawn by ${trayStatus.renderer}` : ''}` : 'No sticker picked yet since Discord started.'}
                     />
 
                 </TableRowGroup>
