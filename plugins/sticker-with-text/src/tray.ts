@@ -1,4 +1,5 @@
 import { FileModule } from '@valenced/discord/native'
+import { Dispatcher } from '@valenced/discord/common/flux'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -205,11 +206,6 @@ function uploads(channelId: string): any[] {
 
 /** 스티커를 보낼 파일 줄에 올린다. 올라가면 true */
 export async function addToTray(channelId: string, id: string): Promise<boolean> {
-    const add = find('addFile', 'addFiles')
-    if (typeof add?.addFile !== 'function') {
-        trayStatus.last = 'Discord upload list not found'
-        return false
-    }
     const have = uploads(channelId).map(fakeStickerId).filter(Boolean) as string[]
     if (have.includes(id)) return true
     if (have.length >= 3) {
@@ -218,12 +214,14 @@ export async function addToTray(channelId: string, id: string): Promise<boolean>
     }
     try {
         const f = await stickerFile(id)
+        // UploadPlatform.REACT_NATIVE = 0 (디스코드 코드에서 확인)
         const platform = find('UploadPlatform')?.UploadPlatform?.REACT_NATIVE ?? 0
         const origin = find('UploadOrigin')?.UploadOrigin?.IMAGE_PICKER
         const item: any = { id: f.uri, uri: f.uri, originalUri: f.uri, mimeType: f.mime, width: 160, height: 160, filename: f.name, platform }
         if (origin != null) item.origin = origin
         const before = uploads(channelId).length
-        add.addFile({ file: item, channelId, draftType: CHANNEL_MESSAGE, allowOptimization: false })
+        // 사진 고르기의 addFile 이 하는 일 그대로 (그 모듈은 사진 고르기를 한 번 열어야 불려서, 직접 보낸다)
+        Dispatcher.dispatch({ type: 'UPLOAD_ATTACHMENT_ADD_FILES', channelId, files: [item], draftType: CHANNEL_MESSAGE, allowOptimization: false } as any)
         // 사진 고를 때처럼 바로 목록에 들어갔는지 확인
         await new Promise(r => setTimeout(r, 50))
         const after = uploads(channelId).length
