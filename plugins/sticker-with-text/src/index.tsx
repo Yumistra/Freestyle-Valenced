@@ -120,7 +120,7 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableRow
                         icon={<TableRowAssetIcon name="InfoIcon" />}
                         label="Last sticker pick"
-                        subLabel={seenPath.last ? `Caught through ${seenPath.last}` : 'No sticker picked yet since Discord started.'}
+                        subLabel={seenPath.last ? `Caught through ${seenPath.last}${seenPath.shown ? `, shown ${seenPath.shown}` : ''}` : 'No sticker picked yet since Discord started.'}
                     />
                 </TableRowGroup>
             </Stack>
@@ -133,7 +133,7 @@ const OURS = '__stickerWithText'
 const ours = (o: any) => !!o?.[OURS]
 
 /** 진단: 스티커를 고르면 디스코드가 어느 함수로 보내는지 */
-export const seenPath = { last: '' }
+export const seenPath = { last: '', shown: '' }
 
 const emptyMessage = (m: any) => m == null || m === '' || (typeof m === 'string' ? !m.trim() : !String(m?.content ?? '').trim())
 
@@ -143,16 +143,72 @@ let actions: any
 /** 써 둔 글 + 붙여 둔 파일 + 스티커를 한 메시지로 (디스코드 채팅 보내기와 같은 방식: sendMessage 에 attachmentsToUpload) */
 function sendTogether(channelId: string, ids: string[], options: any, fallback?: () => any) {
     const text = draftOf(channelId)
-    const files = settings().files ? uploadsOf(channelId) : []
+    const all = settings().files ? uploadsOf(channelId) : []
+    const { rest: files, ids: more } = splitFakes(all)
+    ids = [...ids, ...more].filter((x, i, a) => a.indexOf(x) === i)
     if (!actions?.sendMessage) return fallback?.()
     // 디스코드도 보내기 전에 파일 목록과 입력창을 먼저 비운다
-    if (files.length) clearUploads(channelId)
+    if (all.length) clearUploads(channelId)
     if (text.trim()) clearInput(channelId)
     const message = text.trim() ? parse(channelId, text) : { content: '', tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }
     const opts: any = { ...(options ?? {}), stickerIds: ids.slice(0, 3), [OURS]: true }
     delete opts.attachmentsToUpload
     if (files.length) opts.attachmentsToUpload = files
     return actions.sendMessage(channelId, message, undefined, opts)
+}
+
+// ── 스티커를 사진처럼 입력창 위 "보낼 파일" 칸에 올리기 ─────────────────────────
+// 디스코드 사진 고르기와 같은 모양의 항목(mediaNodeToUploadItem)을 addFile 로 넣는다.
+// 그림 주소 끝에 표시(swt=1)를 달아 두고, 보낼 때 그 항목은 빼고 스티커 ID 로 바꾼다.
+const MARK = 'swt=1'
+const FAKE = /\/stickers\/(\d+)\.\w+\?[^#]*swt=1/
+
+function stickerUri(id: string) {
+    let format: number | undefined
+    try {
+        format = (Stores as any).StickersStore?.getStickerById?.(id)?.format_type
+    } catch {}
+    return { uri: `https://media.discordapp.net/stickers/${id}.${format === 4 ? 'gif' : 'png'}?size=160&${MARK}`, mime: format === 4 ? 'image/gif' : 'image/png' }
+}
+
+/** 올려 둔 파일 하나가 우리 스티커면 그 ID */
+function fakeStickerId(u: any): string | undefined {
+    for (const v of [u?.item?.uri, u?.item?.originalUri, u?.uri, u?.item?.file?.uri, u?.file?.uri]) {
+        const m = typeof v === 'string' ? FAKE.exec(v) : null
+        if (m) return m[1]
+    }
+}
+
+function addStickerUploads(channelId: string, ids: string[]): boolean {
+    const add = find('addFile', 'addFiles')
+    if (typeof add?.addFile !== 'function') return false
+    const platform = find('UploadPlatform')?.UploadPlatform?.REACT_NATIVE ?? 1
+    const origin = find('UploadOrigin')?.UploadOrigin?.IMAGE_PICKER
+    // 이미 올린 스티커는 다시 안 넣는다, 한 메시지에 3개까지
+    const have = uploadsOf(channelId).map(fakeStickerId).filter(Boolean) as string[]
+    let added = false
+    for (const id of ids) {
+        if (have.includes(id) || have.length >= 3) continue
+        const { uri, mime } = stickerUri(id)
+        const item: any = { id: `swt-${id}-${Date.now()}`, uri, originalUri: uri, mimeType: mime, width: 160, height: 160, filename: `sticker-${id}.${mime === 'image/gif' ? 'gif' : 'png'}`, platform }
+        if (origin != null) item.origin = origin
+        add.addFile({ file: item, channelId, draftType: CHANNEL_MESSAGE, allowOptimization: false })
+        have.push(id)
+        added = true
+    }
+    return added || have.length > 0
+}
+
+/** 보낼 파일 목록에서 우리 스티커를 빼내 스티커 ID 로 */
+function splitFakes(list: any): { rest: any[]; ids: string[] } {
+    const rest: any[] = []
+    const ids: string[] = []
+    for (const u of Array.isArray(list) ? list : []) {
+        const id = fakeStickerId(u)
+        if (id) ids.push(id)
+        else rest.push(u)
+    }
+    return { rest, ids }
 }
 
 /** 스티커를 골랐을 때. 디스코드 대신 우리가 처리했으면 true */
@@ -162,8 +218,13 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
     const rest = { ...(options ?? {}) }
     delete rest.stickerIds
     if (s.mode === 'wait') {
-        // 바로 보내지 않고 입력창 위에 올려 둔다
-        addPending(channelId, ids, rest)
+        // 바로 보내지 않고 사진처럼 입력창 위에 올려 둔다 (안 되면 우리 칸에)
+        let ok = false
+        try {
+            ok = addStickerUploads(channelId, ids)
+        } catch {}
+        if (!ok) addPending(channelId, ids, rest)
+        seenPath.shown = ok ? 'with your photos' : 'in its own row'
         return Promise.resolve()
     }
     const files = s.files ? uploadsOf(channelId) : []
@@ -194,6 +255,18 @@ function sendHook(name: string, msgAt: number, optAt: number) {
         try {
             const channelId = args[0]
             const opt = args[optAt]
+            // 보낼 파일 중 우리 스티커 → 스티커 ID 로 바꿔서 보낸다
+            const fakes = typeof channelId === 'string' && !ours(opt) ? splitFakes(opt?.attachmentsToUpload) : { rest: [], ids: [] }
+            if (fakes.ids.length) {
+                const next = [...args]
+                const o: any = withPending(channelId, opt) ?? {}
+                const ids = [...(o.stickerIds ?? []), ...fakes.ids].map(String).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3)
+                const merged: any = { ...o, stickerIds: ids, [OURS]: true }
+                if (fakes.rest.length) merged.attachmentsToUpload = fakes.rest
+                else delete merged.attachmentsToUpload
+                next[optAt] = merged
+                return orig.apply(this, next)
+            }
             if (typeof channelId === 'string' && !ours(opt) && settings().enabled) {
                 const ids: string[] = Array.isArray(opt?.stickerIds) ? opt.stickerIds.map(String) : []
                 // 스티커만 보내는 것 = 스티커를 고른 것
