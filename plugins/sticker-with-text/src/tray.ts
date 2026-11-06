@@ -2,6 +2,7 @@ import { FileModule } from '@valenced/discord/native'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
+import { renderLottie } from './lottie'
 
 /**
  * 고른 스티커를 디스코드의 "보낼 파일" 줄(사진 고를 때 입력창 위에 뜨는 그 줄)에 올린다.
@@ -52,19 +53,26 @@ function toBase64(bytes: number[]) {
 }
 /** 둥근 보라색 판에 흰 점 세 개 (스티커 자리) */
 function placeholderPng(size = 96) {
-    const raw: number[] = []
+    const rgba = new Uint8Array(size * size * 4)
     const r = size / 2
-    for (let y = 0; y < size; y++) {
-        raw.push(0)
+    for (let y = 0; y < size; y++)
         for (let x = 0; x < size; x++) {
             const dx = x - r + 0.5
             const dy = y - r + 0.5
             const inside = dx * dx + dy * dy <= r * r
             const dot = [-0.3, 0, 0.3].some(o => (dx - o * size) ** 2 + dy * dy <= (size * 0.07) ** 2)
-            if (!inside) raw.push(0, 0, 0, 0)
-            else if (dot) raw.push(255, 255, 255, 255)
-            else raw.push(88, 101, 242, 255)
+            const c = !inside ? [0, 0, 0, 0] : dot ? [255, 255, 255, 255] : [88, 101, 242, 255]
+            rgba.set(c, (y * size + x) * 4)
         }
+    return encodePng(rgba, size)
+}
+
+/** RGBA → PNG (base64) */
+export function encodePng(rgba: Uint8Array, size: number) {
+    const raw: number[] = []
+    for (let y = 0; y < size; y++) {
+        raw.push(0)
+        for (let x = 0; x < size * 4; x++) raw.push(rgba[y * size * 4 + x])
     }
     // 압축 없이 (stored) deflate
     const z: number[] = [0x78, 0x01]
@@ -104,33 +112,62 @@ async function download(url: string): Promise<string | undefined> {
     } catch {}
 }
 
+/** 스티커 JSON (Lottie) 받기 */
+async function lottieJson(sticker: any, id: string): Promise<any> {
+    const urls: string[] = []
+    try {
+        const u = stickerModule?.getStickerAssetUrl?.(sticker)
+        if (typeof u === 'string') urls.push(u)
+    } catch {}
+    urls.push(`https://discord.com/stickers/${id}.json`, `https://media.discordapp.net/stickers/${id}.json`, `https://cdn.discordapp.com/stickers/${id}.json`)
+    for (const u of urls) {
+        try {
+            const res = await fetch(u)
+            if (!res.ok) continue
+            const j = await res.json()
+            if (j && Array.isArray(j.layers)) return j
+        } catch {}
+    }
+}
+
+/** 움직이는(Lottie) 스티커 한 장면을 그려 PNG 로 */
+async function lottiePng(sticker: any, id: string): Promise<string | undefined> {
+    const json = await lottieJson(sticker, id)
+    if (!json) return
+    for (const at of [0.4, 0.6, 0.25, 0.8, 0]) {
+        try {
+            const rgba = renderLottie(json, 160, at)
+            if (rgba) return encodePng(rgba, 160)
+        } catch {}
+    }
+}
+
+let stickerModule: any
+export const setTrayStickerModule = (m: any) => (stickerModule ??= m)
+
+/** 한 번 만든 그림 파일은 다시 쓴다 */
+const files = new Map<string, { uri: string; mime: string; name: string }>()
+
 /** 스티커를 폰 캐시에 파일로 저장하고 file:// 주소를 돌려준다 */
 async function stickerFile(id: string): Promise<{ uri: string; mime: string; name: string }> {
+    const cached = files.get(id)
+    if (cached) return cached
     let s: any
     try {
         s = (Stores as any).StickersStore?.getStickerById?.(id)
     } catch {}
     const gif = s?.format_type === 4
-    const ext = gif ? 'gif' : 'png'
-    // 움직이는(Lottie) 스티커도 디스코드 미디어 서버가 정지 그림으로 바꿔 주는지 차례로 시도한다
-    const urls = gif
-        ? [`https://media.discordapp.net/stickers/${id}.gif?size=160`]
-        : [
-              `https://media.discordapp.net/stickers/${id}.png?size=160&passthrough=false`,
-              `https://media.discordapp.net/stickers/${id}.png?size=160`,
-              `https://cdn.discordapp.com/stickers/${id}.png?size=160`,
-              `https://media.discordapp.net/stickers/${id}.webp?size=160`,
-          ]
     let b64: string | undefined
-    for (const u of urls) {
-        b64 = await download(u)
-        if (b64) break
-    }
+    if (s?.format_type === 3) b64 = await lottiePng(s, id)
+    else b64 = await download(`https://media.discordapp.net/stickers/${id}.${gif ? 'gif' : 'png'}?size=160`)
+    const real = !!b64
     b64 ??= placeholderPng()
-    const name = `swt-sticker-${id}.${b64 && gif ? 'gif' : 'png'}`
+    const name = `swt-sticker-${id}.${real && gif ? 'gif' : 'png'}`
     const path: string = await (FileModule as any).writeFile('cache', `sticker-with-text/${name}`, b64, 'base64')
     const uri = String(path).startsWith('file://') ? String(path) : `file://${path}`
-    return { uri, mime: name.endsWith('.gif') ? 'image/gif' : 'image/png', name }
+    const f = { uri, mime: name.endsWith('.gif') ? 'image/gif' : 'image/png', name }
+    if (real) files.set(id, f)
+    return f
 }
 
 /** 올린 파일 하나가 우리 스티커면 그 ID */

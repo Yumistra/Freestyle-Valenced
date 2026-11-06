@@ -6,7 +6,7 @@ import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { addPending, clearAllPending, getPending, setStickerModule, takePending } from './preview'
-import { addToTray, fakeStickerId, trayStatus } from './tray'
+import { addToTray, fakeStickerId, setTrayStickerModule, trayStatus } from './tray'
 
 /**
  * Sticker With Text: 글을 써 두거나 파일을 붙여 둔 채로 스티커를 고르면 전부 한 메시지로 보낸다.
@@ -317,7 +317,10 @@ export default plugin({
         // 스티커 그리는 디스코드 부품 ({ default: Sticker, getStickerAssetUrl })
         cleanup(
             getModules(withProps('getStickerAssetUrl') as any, (m: any) => {
-                if (typeof m?.default === 'function') setStickerModule(m)
+                if (typeof m?.default === 'function') {
+                    setStickerModule(m)
+                    setTrayStickerModule(m)
+                }
             }) as any,
         )
     },
