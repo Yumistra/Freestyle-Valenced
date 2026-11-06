@@ -6,6 +6,8 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.view.inputmethod.InputMethodManager
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import android.util.Base64
 import app.valenced.plugins.PluginBuilder
 import app.valenced.plugins.PluginScope
@@ -22,6 +24,23 @@ import java.io.ByteArrayOutputStream
 private object State {
     var loader: ClassLoader? = null
     var scope: PluginScope? = null
+    @Volatile var suppressUntil = 0L
+    var unhooks: Set<XC_MethodHook.Unhook> = emptySet()
+}
+
+/** 스티커를 고른 직후 잠깐은 폰 글자 키보드(IME)가 아예 뜨지 않게 showSoftInput 을 막는다 */
+private object BlockShow : XC_MethodHook() {
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        if (System.currentTimeMillis() < State.suppressUntil) param.result = false
+    }
+}
+
+private object SuppressIme : Function1<List<Any?>, Any?> {
+    override fun invoke(args: List<Any?>): Any? {
+        val ms = (args.getOrNull(0) as? Number)?.toLong()?.coerceIn(0L, 3000L) ?: 1000L
+        State.suppressUntil = System.currentTimeMillis() + ms
+        return State.unhooks.isNotEmpty()
+    }
 }
 
 /**
@@ -189,6 +208,11 @@ private object OnStart : Function1<PluginScope, Unit> {
         State.scope = scope
         scope.registerNativeMethod("yumistra.sticker-with-text.renderLottie", RenderLottie)
         scope.registerNativeMethod("yumistra.sticker-with-text.hideIme", HideIme)
+        scope.registerNativeMethod("yumistra.sticker-with-text.suppressIme", SuppressIme)
+        try {
+            State.unhooks = XposedBridge.hookAllMethods(InputMethodManager::class.java, "showSoftInput", BlockShow)
+        } catch (_: Throwable) {
+        }
     }
 }
 
@@ -196,6 +220,12 @@ private object OnStop : Function1<PluginScope, Unit> {
     override fun invoke(scope: PluginScope) {
         State.loader = null
         State.scope = null
+        State.suppressUntil = 0L
+        for (u in State.unhooks) try {
+            u.unhook()
+        } catch (_: Throwable) {
+        }
+        State.unhooks = emptySet()
     }
 }
 
