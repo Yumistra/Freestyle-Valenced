@@ -112,7 +112,21 @@ async function stickerFile(id: string): Promise<{ uri: string; mime: string; nam
     } catch {}
     const gif = s?.format_type === 4
     const ext = gif ? 'gif' : 'png'
-    const b64 = (s?.format_type === 3 ? undefined : await download(`https://media.discordapp.net/stickers/${id}.${ext}?size=160`)) ?? placeholderPng()
+    // 움직이는(Lottie) 스티커도 디스코드 미디어 서버가 정지 그림으로 바꿔 주는지 차례로 시도한다
+    const urls = gif
+        ? [`https://media.discordapp.net/stickers/${id}.gif?size=160`]
+        : [
+              `https://media.discordapp.net/stickers/${id}.png?size=160&passthrough=false`,
+              `https://media.discordapp.net/stickers/${id}.png?size=160`,
+              `https://cdn.discordapp.com/stickers/${id}.png?size=160`,
+              `https://media.discordapp.net/stickers/${id}.webp?size=160`,
+          ]
+    let b64: string | undefined
+    for (const u of urls) {
+        b64 = await download(u)
+        if (b64) break
+    }
+    b64 ??= placeholderPng()
     const name = `swt-sticker-${id}.${b64 && gif ? 'gif' : 'png'}`
     const path: string = await (FileModule as any).writeFile('cache', `sticker-with-text/${name}`, b64, 'base64')
     const uri = String(path).startsWith('file://') ? String(path) : `file://${path}`
