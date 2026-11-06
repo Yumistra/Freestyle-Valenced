@@ -35,6 +35,20 @@ private object BlockShow : XC_MethodHook() {
     }
 }
 
+/** 안드로이드 11 부터는 RN 입력창이 WindowInsetsController.show(ime) 로 키보드를 띄운다. 그것도 막는다 */
+private object BlockInsetsShow : XC_MethodHook() {
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        if (System.currentTimeMillis() >= State.suppressUntil) return
+        val types = param.args.getOrNull(0) as? Int ?: return
+        val ime = try {
+            android.view.WindowInsets.Type.ime()
+        } catch (_: Throwable) {
+            8
+        }
+        if (types and ime != 0) param.result = null
+    }
+}
+
 private object SuppressIme : Function1<List<Any?>, Any?> {
     override fun invoke(args: List<Any?>): Any? {
         val ms = (args.getOrNull(0) as? Number)?.toLong()?.coerceIn(0L, 3000L) ?: 1000L
@@ -209,10 +223,18 @@ private object OnStart : Function1<PluginScope, Unit> {
         scope.registerNativeMethod("yumistra.sticker-with-text.renderLottie", RenderLottie)
         scope.registerNativeMethod("yumistra.sticker-with-text.hideIme", HideIme)
         scope.registerNativeMethod("yumistra.sticker-with-text.suppressIme", SuppressIme)
+        val hooks = HashSet<XC_MethodHook.Unhook>()
         try {
-            State.unhooks = XposedBridge.hookAllMethods(InputMethodManager::class.java, "showSoftInput", BlockShow)
+            hooks.addAll(XposedBridge.hookAllMethods(InputMethodManager::class.java, "showSoftInput", BlockShow))
         } catch (_: Throwable) {
         }
+        for (name in arrayOf("android.view.InsetsController", "android.view.PendingInsetsController")) {
+            try {
+                hooks.addAll(XposedBridge.hookAllMethods(Class.forName(name), "show", BlockInsetsShow))
+            } catch (_: Throwable) {
+            }
+        }
+        State.unhooks = hooks
     }
 }
 
