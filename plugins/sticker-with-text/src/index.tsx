@@ -1,3 +1,4 @@
+import { Keyboard } from 'react-native'
 import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
@@ -20,8 +21,10 @@ interface Settings {
     mode: 'wait' | 'now'
     /** 붙여 둔 사진, 영상, 파일도 같이 */
     files: boolean
+    /** 스티커를 고른 뒤 키보드를 올리지 않는다 */
+    noKeyboard: boolean
 }
-const DEFAULTS: Settings = { enabled: true, mode: 'wait', files: true }
+const DEFAULTS: Settings = { enabled: true, mode: 'wait', files: true, noKeyboard: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 
@@ -106,6 +109,13 @@ function SettingsPage({ api }: { api?: any }) {
                         value={s.files}
                         onValueChange={(files: boolean) => set({ files })}
                     />
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="KeyboardIcon" />}
+                        label="Keep the keyboard closed"
+                        subLabel="After you pick a sticker, the keyboard doesn't pop up."
+                        value={s.noKeyboard}
+                        onValueChange={(noKeyboard: boolean) => set({ noKeyboard })}
+                    />
                 </TableRowGroup>
                 <TableRadioGroup title="When you pick a sticker" defaultValue={s.mode} onChange={(mode: Settings['mode']) => set({ mode })}>
                     <TableRadioRow
@@ -178,12 +188,14 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
     if (s.mode === 'wait') {
         // 바로 보내지 않고 사진처럼 "보낼 파일" 줄에 올려 둔다.
         // 못 올리면 안 보이는 대기열에 두고 다음 메시지에 붙인다.
+        if (s.noKeyboard) dismissKeyboard(channelId)
         ;(async () => {
             for (const id of ids) {
                 const ok = await addToTray(channelId, id)
                 if (!ok) addPending(channelId, [id], rest)
             }
             seenPath.shown = trayStatus.last
+            if (settings().noKeyboard) dismissKeyboard(channelId)
         })()
         return Promise.resolve()
     }
@@ -192,6 +204,24 @@ function onPick(channelId: string, ids: string[], options: any): Promise<any> | 
 }
 
 /** 디스코드가 비운 입력창에 글을 다시 넣는다 (비우는 일이 끝난 뒤) */
+/**
+ * 스티커를 고른 뒤 키보드가 올라오지 않게 한다 (디스코드가 스티커를 보낸 뒤 하는 것처럼 닫는다).
+ * 글을 다시 넣거나 사진 칸이 바뀌면 입력창이 다시 키보드를 올리므로 몇 번 나눠 닫는다.
+ */
+function dismissKeyboard(channelId: string) {
+    const close = () => {
+        try {
+            const ref = find('getBestActiveInputForChannelId')?.getBestActiveInputForChannelId?.(channelId)
+            if (typeof ref?.dismissKeyboard === 'function') ref.dismissKeyboard()
+            else ref?.blur?.()
+        } catch {}
+        try {
+            Keyboard.dismiss()
+        } catch {}
+    }
+    for (const ms of [0, 80, 250, 600]) setTimeout(close, ms)
+}
+
 function restoreText(channelId: string, text: string) {
     const put = () => {
         try {
@@ -201,6 +231,7 @@ function restoreText(channelId: string, text: string) {
             const ref = find('getBestActiveInputForChannelId')?.getBestActiveInputForChannelId?.(channelId)
             if (typeof ref?.setText === 'function') ref.setText(text)
         } catch {}
+        if (settings().noKeyboard) dismissKeyboard(channelId)
     }
     setTimeout(put, 0)
     // 키보드가 닫히며 한 번 더 비울 수 있어 조금 뒤에 다시 확인
