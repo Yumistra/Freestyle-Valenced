@@ -87,7 +87,7 @@ function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) storage = api.jsonStorage
     storage?.use?.()
     const s = settings()
-    const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
     const set = (patch: Partial<Settings>) => storage?.set({ ...settings(), ...patch }, true)
     return (
         <Page>
@@ -116,24 +116,58 @@ function SettingsPage({ api }: { api?: any }) {
                     />
                     <TableRadioRow label="Send right away" subLabel="It goes out at once, with whatever you typed or attached." value="now" />
                 </TableRadioGroup>
+                <TableRowGroup title="Status">
+                    <TableRow
+                        icon={<TableRowAssetIcon name="InfoIcon" />}
+                        label="Last sticker pick"
+                        subLabel={seenPath.last ? `Caught through ${seenPath.last}` : 'No sticker picked yet since Discord started.'}
+                    />
+                </TableRowGroup>
             </Stack>
         </Page>
     )
 }
 
-/** 스티커를 보낸다: 써 둔 글, 붙여 둔 파일도 같이 (sendStickers 원래 함수로) */
-function sendCombined(orig: (...a: any[]) => any, self: unknown, args: any[]) {
-    const [channelId] = args
+/** 우리가 만든 보내기에 붙이는 표시 (우리 훅이 다시 건드리지 않게) */
+const OURS = '__stickerWithText'
+const ours = (o: any) => !!o?.[OURS]
+
+/** 진단: 스티커를 고르면 디스코드가 어느 함수로 보내는지 */
+export const seenPath = { last: '' }
+
+const emptyMessage = (m: any) => m == null || m === '' || (typeof m === 'string' ? !m.trim() : !String(m?.content ?? '').trim())
+
+/** 디스코드 보내기 함수들 (MessageActionCreators) */
+let actions: any
+
+/** 써 둔 글 + 붙여 둔 파일 + 스티커를 한 메시지로 (디스코드 채팅 보내기와 같은 방식: sendMessage 에 attachmentsToUpload) */
+function sendTogether(channelId: string, ids: string[], options: any, fallback?: () => any) {
     const text = draftOf(channelId)
     const files = settings().files ? uploadsOf(channelId) : []
-    const next = [...args]
-    if (text.trim()) next[2] = parse(channelId, text)
-    // 붙여 둔 사진, 영상, 파일도 같은 메시지로 (디스코드가 파일 보낼 때 쓰는 그 자리)
-    if (files.length) next[3] = { ...(args[3] ?? {}), attachmentsToUpload: files }
-    const r = orig.apply(self, next)
-    if (text.trim()) clearInput(channelId)
+    if (!actions?.sendMessage) return fallback?.()
+    // 디스코드도 보내기 전에 파일 목록과 입력창을 먼저 비운다
     if (files.length) clearUploads(channelId)
-    return r
+    if (text.trim()) clearInput(channelId)
+    const message = text.trim() ? parse(channelId, text) : { content: '', tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }
+    const opts: any = { ...(options ?? {}), stickerIds: ids.slice(0, 3), [OURS]: true }
+    delete opts.attachmentsToUpload
+    if (files.length) opts.attachmentsToUpload = files
+    return actions.sendMessage(channelId, message, undefined, opts)
+}
+
+/** 스티커를 골랐을 때. 디스코드 대신 우리가 처리했으면 true */
+function onPick(channelId: string, ids: string[], options: any): Promise<any> | undefined {
+    const s = settings()
+    if (!s.enabled || !ids.length) return
+    const rest = { ...(options ?? {}) }
+    delete rest.stickerIds
+    if (s.mode === 'wait') {
+        // 바로 보내지 않고 입력창 위에 올려 둔다
+        addPending(channelId, ids, rest)
+        return Promise.resolve()
+    }
+    const files = s.files ? uploadsOf(channelId) : []
+    if (draftOf(channelId).trim() || files.length) return Promise.resolve(sendTogether(channelId, ids, rest))
 }
 
 /** 메시지를 보낼 때 올려 둔 스티커를 붙인다 */
@@ -142,17 +176,41 @@ function withPending(channelId: unknown, options: any) {
     const p = takePending(channelId)
     if (!p) return options
     const ids = [...(options?.stickerIds ?? []), ...p.ids].filter((x, i, a) => a.indexOf(x) === i).slice(0, 3)
-    return { ...(p.options ?? {}), ...(options ?? {}), stickerIds: ids }
+    return { ...(p.options ?? {}), ...(options ?? {}), stickerIds: ids, [OURS]: true }
 }
 
-let sendStickersOrig: ((...a: any[]) => any) | undefined
-let sendStickersThis: unknown
+/** 올려 둔 스티커 옆 보내기 버튼 (글이나 파일이 있으면 같이) */
 function sendPendingNow(channelId: string) {
     const p = takePending(channelId)
-    if (!p || !sendStickersOrig) return
+    if (!p) return
     try {
-        sendCombined(sendStickersOrig, sendStickersThis, [channelId, p.ids, '', p.options ?? {}])
+        sendTogether(channelId, p.ids, p.options)
     } catch {}
+}
+
+/** 보내기 함수 훅 하나: msgAt 은 메시지, optAt 은 옵션 자리 */
+function sendHook(name: string, msgAt: number, optAt: number) {
+    return function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+        try {
+            const channelId = args[0]
+            const opt = args[optAt]
+            if (typeof channelId === 'string' && !ours(opt) && settings().enabled) {
+                const ids: string[] = Array.isArray(opt?.stickerIds) ? opt.stickerIds.map(String) : []
+                // 스티커만 보내는 것 = 스티커를 고른 것
+                if (ids.length && emptyMessage(args[msgAt]) && !opt?.attachmentsToUpload?.length) {
+                    seenPath.last = name
+                    const r = onPick(channelId, ids, opt)
+                    if (r) return r
+                } else if (getPending(channelId)) {
+                    // 보내기 버튼으로 글, 파일을 보낼 때 올려 둔 스티커도 같이
+                    const next = [...args]
+                    next[optAt] = withPending(channelId, opt)
+                    return orig.apply(this, next)
+                }
+            }
+        } catch {}
+        return orig.apply(this, args)
+    }
 }
 
 export default plugin({
@@ -162,57 +220,27 @@ export default plugin({
         cleanup(() => clearAllPending())
         const done = new WeakSet<object>()
         cleanup(
-            getModules(withProps('sendStickers') as any, (mod: any) => {
-                if (typeof mod?.sendStickers !== 'function' || done.has(mod)) return
+            getModules(withProps('sendStickers', 'sendMessage') as any, (mod: any) => {
+                if (done.has(mod)) return
                 done.add(mod)
-                cleanup(
-                    instead(mod, 'sendStickers', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                        try {
-                            const [channelId, stickerIds, content] = args
-                            const empty = content == null || content === '' || (typeof content === 'object' && !String(content.content ?? '').trim())
-                            const s = settings()
-                            if (s.enabled && typeof channelId === 'string' && Array.isArray(stickerIds) && empty) {
-                                sendStickersOrig = orig
-                                sendStickersThis = this
-                                if (s.mode === 'wait') {
-                                    // 바로 보내지 않고 입력창 위에 올려 둔다
-                                    addPending(channelId, stickerIds, args[3])
-                                    return Promise.resolve()
-                                }
-                                const files = s.files ? uploadsOf(channelId) : []
-                                if (draftOf(channelId).trim() || files.length) return sendCombined(orig, this, args)
-                            }
-                        } catch {}
-                        return orig.apply(this, args)
-                    }),
-                )
-                // 보내기 버튼으로 글, 파일을 보낼 때 올려 둔 스티커도 같이
-                if (typeof mod.sendMessage === 'function')
+                actions ??= mod
+                if (typeof mod.sendStickers === 'function')
                     cleanup(
-                        instead(mod, 'sendMessage', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        instead(mod, 'sendStickers', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                             try {
-                                if (getPending(args[0])) {
-                                    const next = [...args]
-                                    next[3] = withPending(args[0], args[3])
-                                    return orig.apply(this, next)
+                                const [channelId, stickerIds, content, options] = args
+                                if (typeof channelId === 'string' && Array.isArray(stickerIds) && emptyMessage(content) && !ours(options)) {
+                                    seenPath.last = 'sendStickers'
+                                    const r = onPick(channelId, stickerIds.map(String), options)
+                                    if (r) return r
                                 }
                             } catch {}
                             return orig.apply(this, args)
                         }),
                     )
-                if (typeof mod._sendMessage === 'function')
-                    cleanup(
-                        instead(mod, '_sendMessage', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                            try {
-                                if (getPending(args[0])) {
-                                    const next = [...args]
-                                    next[2] = withPending(args[0], args[2])
-                                    return orig.apply(this, next)
-                                }
-                            } catch {}
-                            return orig.apply(this, args)
-                        }),
-                    )
+                // sendMessage(채널, 메시지, 기다리기, 옵션), _sendMessage(채널, 메시지, 옵션)
+                if (typeof mod.sendMessage === 'function') cleanup(instead(mod, 'sendMessage', sendHook('sendMessage', 1, 3)))
+                if (typeof mod._sendMessage === 'function') cleanup(instead(mod, '_sendMessage', sendHook('_sendMessage', 1, 2)))
             }) as any,
         )
         // 스티커 그리는 디스코드 부품 ({ default: Sticker, getStickerAssetUrl })
