@@ -1,7 +1,7 @@
 {
 	"format": 1,
-	"id": "yumistra.hide-disabled-emojis",
-	"name": "Hide Disabled Emojis",
+	"id": "yumistra.clean-emoji",
+	"name": "Clean Emoji",
 	"description": "Hides emojis and stickers you can't use from the pickers.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",

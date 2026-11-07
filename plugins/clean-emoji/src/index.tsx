@@ -8,7 +8,7 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 
 /**
- * Hide Disabled Emojis: 이모지, 스티커 고르기에서 쓸 수 없는(흐리게, 자물쇠로 보이는) 것을 숨긴다.
+ * Clean Emoji: 이모지, 스티커 고르기에서 쓸 수 없는(흐리게, 자물쇠로 보이는) 것을 숨긴다.
  * 스티커: useStickerCategories 결과와 검색(searchAllStickers)에서 니트로 없이 못 보내는 다른 서버 스티커를 뺀다.
  * BetterDiscord 의 HideDisabledEmojis 를 옮긴 것.
  *
