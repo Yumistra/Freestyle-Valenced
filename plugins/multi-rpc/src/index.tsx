@@ -371,7 +371,6 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                 <TableRowGroup>
                     <TableRow
                         label={a.name || 'Activity'}
-                        subLabel={showing ? typeName : `${typeName}, off`}
                         trailing={
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                 <DeleteButton onDelete={onRemove} />
