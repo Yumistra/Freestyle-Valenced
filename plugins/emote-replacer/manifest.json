@@ -5,7 +5,7 @@
 	"description": "Type ;name to send emotes with effects, and send emojis or stickers you can't use as images.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.4",
+	"version": "1.0.3",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
