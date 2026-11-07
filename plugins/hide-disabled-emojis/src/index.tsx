@@ -1,5 +1,9 @@
+import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
-import { getModules } from '@valenced/modules/finders'
+import { getModules, lookupModule } from '@valenced/modules/finders'
+import { useEffect, useState } from 'react'
+import { ScrollView } from 'react-native'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 
@@ -50,16 +54,38 @@ function locked(e: any, nitro: boolean, guild: string | undefined) {
 }
 const inSet = (s: any, id: any) => (s instanceof Set ? s.has(id) : Array.isArray(s) ? s.includes(id) : false)
 
+/** 설정 화면 Status 에 보여 줄 값 */
+const status = {
+    found: 0,
+    patched: [] as string[],
+    errors: [] as string[],
+    calls: 0,
+    searches: 0,
+    lastSections: 0,
+    lastEmojis: 0,
+    lastNitro: false as boolean,
+    lastGuild: undefined as string | undefined,
+}
+const err = (where: string, e: any) => {
+    const m = `${where}: ${e?.message ?? e}`
+    if (!status.errors.includes(m)) status.errors.push(m)
+}
+
 const cache = new WeakMap<object, { key: string; out: any }>()
 
 function filterCategories(cats: any[], guild: string | undefined): any[] {
     if (!Array.isArray(cats)) return cats
     const nitro = hasNitro()
     const key = `${nitro}|${guild}`
+    status.calls++
+    status.lastNitro = nitro
+    status.lastGuild = guild
     const hit = cache.get(cats)
     if (hit?.key === key) return hit.out
     const out: any[] = []
     let changed = false
+    let sections = 0
+    let hidden = 0
     for (const c of cats) {
         const emojis = c?.emojis
         if (!c || !Array.isArray(emojis)) {
@@ -70,6 +96,8 @@ function filterCategories(cats: any[], guild: string | undefined): any[] {
         // 니트로가 없으면 다른 서버 묶음은 통째로, 통째로 잠긴 묶음도 뺀다
         if (c.guild && ((!nitro && gid !== guild) || c.isNitroLocked === true)) {
             changed = true
+            sections++
+            hidden += emojis.length
             continue
         }
         const hide: string[] = []
@@ -86,7 +114,11 @@ function filterCategories(cats: any[], guild: string | undefined): any[] {
             continue
         }
         changed = true
-        if (!kept.length) continue
+        hidden += hide.length
+        if (!kept.length) {
+            sections++
+            continue
+        }
         const next: any = { ...c, emojis: kept, isNitroLocked: false }
         if (c.guild) {
             const was = c.emojisHidden
@@ -95,6 +127,8 @@ function filterCategories(cats: any[], guild: string | undefined): any[] {
         }
         out.push(next)
     }
+    status.lastSections = sections
+    status.lastEmojis = hidden
     const res = changed ? out : cats
     cache.set(cats, { key, out: res })
     return res
@@ -104,6 +138,7 @@ function filterSearch(res: any, guild: string | undefined): any {
     if (!res || typeof res !== 'object') return res
     const nitro = hasNitro()
     const key = `${nitro}|${guild}`
+    status.searches++
     const hit = cache.get(res)
     if (hit?.key === key) return hit.out
     const keep = (list: any) => (Array.isArray(list) ? list.filter((e: any) => !locked(e, nitro, guild)) : list)
@@ -114,36 +149,80 @@ function filterSearch(res: any, guild: string | undefined): any {
     return out
 }
 
+function patchModule(mod: any, cleanup: (...f: any[]) => void, patched: WeakSet<object>) {
+    if (!mod || typeof mod !== 'object' || patched.has(mod)) return
+    patched.add(mod)
+    status.found++
+    const hook = (name: string, wrap: (res: any, args: any[]) => any) => {
+        if (typeof mod[name] !== 'function') return
+        try {
+            cleanup(
+                instead(mod, name, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    const res = orig.apply(this, args)
+                    try {
+                        return wrap(res, args)
+                    } catch (e) {
+                        err(name, e)
+                        return res
+                    }
+                }),
+            )
+            if (!status.patched.includes(name)) status.patched.push(name)
+        } catch (e) {
+            err(`patch ${name}`, e)
+        }
+    }
+    hook('useEmojiCategories', (res, args) => filterCategories(res, guildOf(args[1], args[2])))
+    hook('useEmojiSearchResults', (res, args) => filterSearch(res, guildOf(args[1], undefined)))
+}
+
+function SettingsPage() {
+    const { Stack, TableRowGroup, TableRow } = Design as any
+    const [, tick] = useState(0)
+    useEffect(() => {
+        const t = setInterval(() => tick(n => n + 1), 1000)
+        return () => clearInterval(t)
+    }, [])
+    const nitro = hasNitro()
+    return (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
+            <Stack spacing={24}>
+                <TableRowGroup title="Status">
+                    <TableRow
+                        icon={<TableRowAssetIcon name="InfoIcon" />}
+                        label="Emoji list"
+                        subLabel={status.patched.length ? `Hooked, ${status.patched.join(', ')}` : status.found ? 'Found, but not hooked' : 'Not found yet'}
+                    />
+                    <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Nitro" subLabel={nitro ? 'Yes, nothing is hidden' : 'No'} />
+                    <TableRow
+                        icon={<TableRowAssetIcon name="ReactionIcon" />}
+                        label="Emoji picker"
+                        subLabel={
+                            status.calls
+                                ? `Opened, last time hid ${status.lastSections} servers and ${status.lastEmojis} emojis${status.lastGuild ? '' : ', outside a server'}`
+                                : 'Not opened since Discord started'
+                        }
+                    />
+                    {status.errors.length ? <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Errors" subLabel={status.errors.slice(-3).join('\n')} /> : null}
+                </TableRowGroup>
+            </Stack>
+        </ScrollView>
+    )
+}
+
 export default plugin({
     start({ cleanup }: any) {
         const patched = new WeakSet<object>()
-        cleanup(
-            getModules(withProps('useEmojiCategories') as any, (mod: any) => {
-                if (patched.has(mod)) return
-                patched.add(mod)
-                if (typeof mod?.useEmojiCategories === 'function')
-                    cleanup(
-                        instead(mod, 'useEmojiCategories', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                            const res = orig.apply(this, args)
-                            try {
-                                return filterCategories(res, guildOf(args[1], args[2]))
-                            } catch {
-                                return res
-                            }
-                        }),
-                    )
-                if (typeof mod?.useEmojiSearchResults === 'function')
-                    cleanup(
-                        instead(mod, 'useEmojiSearchResults', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                            const res = orig.apply(this, args)
-                            try {
-                                return filterSearch(res, guildOf(args[1], undefined))
-                            } catch {
-                                return res
-                            }
-                        }),
-                    )
-            }) as any,
-        )
+        try {
+            patchModule((lookupModule(withProps('useEmojiCategories') as any) as any)?.[0], cleanup, patched)
+        } catch (e) {
+            err('lookup', e)
+        }
+        try {
+            cleanup(getModules(withProps('useEmojiCategories') as any, (mod: any) => patchModule(mod, cleanup, patched)) as any)
+        } catch (e) {
+            err('getModules', e)
+        }
     },
+    SettingsComponent: SettingsPage,
 } as any)
