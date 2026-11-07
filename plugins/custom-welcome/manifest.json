@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.custom-welcome",
+	"name": "Custom Welcome",
+	"description": "Your own message or sticker for Wave buttons.",
+	"author": "Yumistra",
+	"icon": "HandRequestSpeakIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

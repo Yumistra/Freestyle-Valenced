@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.better-animations",
 	"name": "Better Animations",
-	"description": "Animations everywhere.",
+	"description": "Animations everywhere, or none at all.",
 	"author": "Yumistra",
 	"icon": "MagicWandIcon",
-	"version": "1.0.26",
+	"version": "1.0.27",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

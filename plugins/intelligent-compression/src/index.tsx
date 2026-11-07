@@ -156,31 +156,25 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="ImageIcon" />}
                         label="Images"
-                        subLabel="Original quality if it fits. Otherwise the best quality that still fits."
                         value={s.images}
                         onValueChange={(images: boolean) => set({ images })}
                     />
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="VideoIcon" />}
                         label="Videos"
-                        subLabel="Original if it fits. Otherwise re-encoded to just under your limit."
                         value={s.videos}
                         onValueChange={(videos: boolean) => set({ videos })}
                     />
                 </TableRowGroup>
                 <TableRadioGroup title="Video encoder (when compressing)" defaultValue={s.codec} onChange={(codec: Codec) => set({ codec })}>
-                    {CODECS.map(([value, label, sub]) => (
-                        <TableRadioRow key={value} label={label} subLabel={sub} value={value} />
+                    {CODECS.map(([value, label]) => (
+                        <TableRadioRow key={value} label={label} value={value} />
                     ))}
                 </TableRadioGroup>
                 <TableRowGroup title="Upload limit">
                     <TableRow
                         label={`${fmt(limit)} here`}
-                        subLabel={
-                            ready
-                                ? "Your account or this server's boost level, whichever is higher. Files that can't fit even at the lowest quality are refused."
-                                : 'Not active yet — fully close and reopen Discord.'
-                        }
+                        subLabel={ready ? undefined : 'Not active yet, fully close and reopen Discord.'}
                     />
                 </TableRowGroup>
                 <TableRowGroup title="Diagnostics">
@@ -254,52 +248,13 @@ export default plugin({
         // 압축 결과·거부·오류 알림 (네이티브 → 디스코드 토스트)
         const toastTimer = setInterval(pullToasts, 700)
         cleanup(() => clearInterval(toastTimer))
-        // 업로드·전송 요청이 서버에서 거부되면 그 응답을 보여 준다 (원인 찾기용)
-        try {
-            const X: any = (globalThis as any).XMLHttpRequest?.prototype
-            if (X && !X.__icPatched) {
-                const open = X.open
-                const send = X.send
-                X.__icPatched = true
-                X.open = function (this: any, method: string, url: string, ...rest: any[]) {
-                    this.__ic = { method, url: String(url) }
-                    return open.call(this, method, url, ...rest)
-                }
-                X.send = function (this: any, ...args: any[]) {
-                    const info = this.__ic
-                    if (info && /\/messages|attachments|upload|storage\.googleapis|discord-attachments/i.test(info.url)) {
-                        try {
-                            this.addEventListener?.('loadend', () => {
-                                try {
-                                    if (this.status >= 400 || this.status === 0) {
-                                        let body = ''
-                                        try {
-                                            body = String(this.responseText ?? '').replace(/\s+/g, ' ').slice(0, 160)
-                                        } catch {}
-                                        const path = info.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*$/, '').replace(/\d{15,}/g, '#')
-                                        lastUploadError = `HTTP ${this.status} ${info.method} ${path} ${body}`.trim()
-                                        toast(`Upload failed — ${lastUploadError}`)
-                                    }
-                                } catch {}
-                            })
-                        } catch {}
-                    }
-                    return send.apply(this, args)
-                }
-                cleanup(() => {
-                    X.open = open
-                    X.send = send
-                    X.__icPatched = false
-                })
-            }
-        } catch {}
         // 첨부 업로드 오류 코드 (디스코드가 전송 실패로 넘기기 전에)
         const record = (where: string, a: any) => {
             try {
                 const code = a?.code ?? a?.body?.code ?? a?.status
                 const reason = a?.reason ?? a?.body?.message ?? a?.message
+                // 설정의 Diagnostics 에만 남긴다 (토스트는 띄우지 않는다)
                 lastUploadError = `${where}: code ${JSON.stringify(code)} ${reason == null ? '' : JSON.stringify(reason).slice(0, 600)}`.trim()
-                toast(`Upload failed — ${lastUploadError}`)
             } catch {}
         }
         cleanup(
@@ -351,15 +306,13 @@ export default plugin({
             }) as any,
         )
         // 업로드가 실패하면 이유를 보여 준다 (원인 찾기용)
-        for (const type of ['UPLOAD_FAIL', 'UPLOAD_FAILED', 'MESSAGE_SEND_FAILED']) {
+        for (const type of ['UPLOAD_FAIL', 'UPLOAD_FAILED']) {
             try {
                 cleanup(
                     onFluxEventDispatched(type as any, (p: any) => {
                         try {
                             const r = why(p)
-                            if (type === 'MESSAGE_SEND_FAILED' && /code/.test(lastUploadError)) return p
                             lastUploadError = `${type}${r ? `: ${r}` : ''}`
-                            toast(`Upload failed — ${lastUploadError}`)
                         } catch {}
                         return p
                     }) as any,

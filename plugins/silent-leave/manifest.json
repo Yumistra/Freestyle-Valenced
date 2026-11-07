@@ -5,7 +5,7 @@
 	"description": "Leave group DMs silently.",
 	"author": "Yumistra",
 	"icon": "DoorExitIcon",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

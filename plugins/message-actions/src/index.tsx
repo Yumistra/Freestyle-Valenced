@@ -9,7 +9,7 @@ import { withDependencies, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { useState } from 'react'
-import { Image, ScrollView, View } from 'react-native'
+import { Image, LayoutAnimation, ScrollView, View } from 'react-native'
 
 /**
  * 내 메시지를 두 번 누르면 (기본: 반응 달기) 대신 가운데 작은 창으로 수정·삭제를 고르게 한다.
@@ -409,8 +409,8 @@ function Choice<T extends string>({ title, value, options, onChange }: { title: 
     const { TableRadioGroup, TableRadioRow } = D()
     return (
         <TableRadioGroup title={title} value={value} onChange={onChange}>
-            {options.map(([v, label, sub]) => (
-                <TableRadioRow key={v} value={v} label={label} subLabel={sub} />
+            {options.map(([v, label]) => (
+                <TableRadioRow key={v} value={v} label={label} />
             ))}
         </TableRadioGroup>
     )
@@ -453,7 +453,7 @@ function SettingsPage({ api }: { api: any }) {
                 />
                 <TableRowGroup title="Delete">
                     <TableSwitchRow label="Confirm" value={s.confirmDelete} onValueChange={(confirmDelete: boolean) => save({ confirmDelete })} />
-                    <TableSwitchRow label="Edit before delete" value={s.editBeforeDelete} onValueChange={(editBeforeDelete: boolean) => save({ editBeforeDelete })} />
+                    <TableSwitchRow label="Edit before delete" value={s.editBeforeDelete} onValueChange={(editBeforeDelete: boolean) => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), save({ editBeforeDelete }))} />
                 </TableRowGroup>
                 {s.editBeforeDelete && (
                     <Stack spacing={12}>

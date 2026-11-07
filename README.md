@@ -11,6 +11,8 @@ Plugins for Valenced.
 | Overlay Background | `yumistra.overlay-background` |
 | Silent Messages | `yumistra.silent-messages` |
 | Silent Leave | `yumistra.silent-leave` |
+| Sticker With Text | `yumistra.sticker-with-text` |
+| Custom Welcome | `yumistra.custom-welcome` |
 
 ## Install
 

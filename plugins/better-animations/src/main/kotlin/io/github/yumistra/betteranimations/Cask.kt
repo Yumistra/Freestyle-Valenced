@@ -181,7 +181,7 @@ internal fun loadListsConfig(dir: File): ListsConfig? {
         val file = File(dir, "storage.json")
         if (!file.isFile) return null
         val root = org.json.JSONObject(file.readText())
-        if (!root.optBoolean("enabled", true)) return null
+        if (!root.optBoolean("enabled", true) || root.optBoolean("noAnimations", false)) return null
         val m = root.optJSONObject("modules")?.optJSONObject("lists") ?: return null
         val style = Cask.styleOf(m.optString("effect", "default")) ?: return null
         return ListsConfig(style, m.optLong("duration", 500L).coerceIn(50L, 3000L), m.optBoolean("always", false))

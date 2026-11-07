@@ -1,7 +1,7 @@
 import { AlertActionCreators, ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { useEffect, useMemo, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import {
     AMOUNT_RANGE,
     decodeEasing,
@@ -594,20 +594,25 @@ export default function SettingsPage({ api }: { api?: any }) {
                         value={s.enabled}
                         onValueChange={(enabled: boolean) => commit({ ...s, enabled })}
                     />
+                    <TableSwitchRow
+                        label="No animations"
+                        value={!!s.noAnimations}
+                        onValueChange={(noAnimations: boolean) => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), commit({ ...s, noAnimations }))}
+                    />
                 </TableRowGroup>
 
+                {s.noAnimations ? null : (
+                <>
                 <Section title="Scrolling">
                     <TableRowGroup>
                         <TableSwitchRow
                             label="iOS bounce"
-                            subLabel="Lists stretch and spring back at their ends"
                             value={s.modules.messages.bounce !== false}
                             onValueChange={(bounce: boolean) => commit({ ...s, modules: { ...s.modules, messages: { ...s.modules.messages, bounce } } })}
                         />
                         {s.modules.messages.bounce !== false && (
                             <TableSwitchRow
                                 label="Everywhere"
-                                subLabel="Every scrolling list, not just the chat"
                                 value={s.modules.messages.bounceAll !== false}
                                 onValueChange={(bounceAll: boolean) => commit({ ...s, modules: { ...s.modules, messages: { ...s.modules.messages, bounceAll } } })}
                             />
@@ -630,6 +635,8 @@ export default function SettingsPage({ api }: { api?: any }) {
                         ))}
                     </Section>
                 ))}
+                </>
+                )}
 
                 <StatusRows />
 

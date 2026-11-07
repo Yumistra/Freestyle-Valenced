@@ -56,8 +56,8 @@ function SettingsPage({ api }: { api?: any }) {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
             <Stack spacing={24}>
                 <TableRowGroup title="Log">
-                    <TableSwitchRow icon={<TableRowAssetIcon name="TrashIcon" />} label="Deleted messages" subLabel="Kept with a red highlight." value={s.logDeletes} onValueChange={(logDeletes: boolean) => set({ logDeletes })} />
-                    <TableSwitchRow icon={<TableRowAssetIcon name="PencilIcon" />} label="Edited messages" subLabel="Light gray highlight, old versions shown above." value={s.logEdits} onValueChange={(logEdits: boolean) => set({ logEdits })} />
+                    <TableSwitchRow icon={<TableRowAssetIcon name="TrashIcon" />} label="Deleted messages" value={s.logDeletes} onValueChange={(logDeletes: boolean) => set({ logDeletes })} />
+                    <TableSwitchRow icon={<TableRowAssetIcon name="PencilIcon" />} label="Edited messages" value={s.logEdits} onValueChange={(logEdits: boolean) => set({ logEdits })} />
                     <TableSwitchRow label="Ignore my messages" value={s.ignoreSelf} onValueChange={(ignoreSelf: boolean) => set({ ignoreSelf })} />
                     <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
                 </TableRowGroup>
@@ -65,14 +65,12 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="BellIcon" />}
                         label="Remember notifications"
-                        subLabel="Messages that arrive as notifications are saved, even when Discord is closed."
                         value={s.rememberPushes}
                         onValueChange={(rememberPushes: boolean) => set({ rememberPushes })}
                     />
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="ClockIcon" />}
                         label="Find changes when you come back"
-                        subLabel="When a channel loads, saved messages that are gone or changed are shown as deleted or edited."
                         value={s.detectAway}
                         onValueChange={(detectAway: boolean) => set({ detectAway })}
                     />
@@ -93,13 +91,12 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableRow
                         icon={<TableRowAssetIcon name="ChatXIcon" />}
                         label="View logs"
-                        subLabel="Deleted and edited messages, shown like in chat. Tap one to go to it."
                         arrow
                         onPress={() => nav?.navigate?.(LOGS_ROUTE)}
                     />
                 </TableRowGroup>
                 <TableRowGroup title="Saved">
-                    <TableRow label={`${deleted} deleted, ${edited} edited`} subLabel={`${away} found after coming back, ${remembered} messages remembered. Older than the time above are removed automatically.`} />
+                    <TableRow label={`${deleted} deleted, ${edited} edited`} subLabel={`${away} found after coming back, ${remembered} messages remembered`} />
                 </TableRowGroup>
                 <Button text="Clear all logs" variant="destructive" size="md" disabled={!all.length} onPress={() => clearAll()} />
             </Stack>

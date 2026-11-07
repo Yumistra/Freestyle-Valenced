@@ -5,7 +5,7 @@
 	"description": "See-through overlay screens.",
 	"author": "Yumistra",
 	"icon": "ImageIcon",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
