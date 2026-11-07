@@ -305,6 +305,8 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
         </Pressable>
     )
 }
+/** 설정 화면 바탕색 (테마) */
+const pageBg = () => tokenColor(['BACKGROUND_BASE_LOWEST', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
 function alpha(color: string, a: number) {
     const h = /^#([0-9a-f]{6})/i.exec(color)
     const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(color)
@@ -416,12 +418,14 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                 })}
                                 {left.length ? (
                                     adding ? (
-                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                                            {left.map(([k, label]) => (
-                                                <Button key={k} size="sm" variant="secondary" text={label} onPress={() => add(k)} />
-                                            ))}
-                                            <Button size="sm" variant="tertiary" text="Cancel" onPress={() => (animate(), setAdding(false))} />
-                                        </View>
+                                        <Stack spacing={12}>
+                                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                                {left.map(([k, label]) => (
+                                                    <Button key={k} size="sm" variant="secondary" text={label} onPress={() => add(k)} />
+                                                ))}
+                                            </View>
+                                            <Button size="md" variant="primary" text="Cancel" onPress={() => (animate(), setAdding(false))} />
+                                        </Stack>
                                     ) : (
                                         <Button size="sm" variant="secondary" text="+ Add" onPress={() => (animate(), setAdding(true))} />
                                     )
@@ -489,7 +493,8 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                     />
                 </TableRowGroup>
             </View>
-            <View style={{ paddingVertical: 8 }}>
+            {/* 떠 있을 때 뒤가 비치지 않게 화면 바탕색을 깐다 */}
+            <View style={{ paddingVertical: 8, marginHorizontal: -16, paddingHorizontal: 16, backgroundColor: pageBg() }}>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
             </View>
             <Stack spacing={16} style={{ marginTop: 8 }}>
