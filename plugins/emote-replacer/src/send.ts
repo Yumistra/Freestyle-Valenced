@@ -41,23 +41,98 @@ function outsideCode(text: string, fn: (part: string) => string) {
         .join('')
 }
 
-function replaceNamed(text: string): { text: string; count: number } {
+/** 내가 들어가 있는 모든 서버의 커스텀 이모지 (이름 → 이모지 목록) */
+export function discordEmojis(channelId?: string): Map<string, any[]> {
+    const out = new Map<string, any[]>()
+    const push = (e: any) => {
+        if (!e?.id || !e?.name) return
+        const list = out.get(e.name) ?? []
+        if (!list.some(x => x.id === e.id)) list.push(e)
+        out.set(e.name, list)
+    }
+    const eat = (v: any) => {
+        if (!v) return
+        const vals = v instanceof Map ? [...v.values()] : Array.isArray(v) ? v : Object.values(v)
+        for (const x of vals) {
+            if (Array.isArray(x)) x.forEach(push)
+            else if (x && Array.isArray(x.emojis)) x.emojis.forEach(push)
+            else if (x && typeof x.getEmojis === 'function') x.getEmojis().forEach?.(push)
+            else push(x)
+        }
+    }
+    try {
+        const store = S().EmojiStore
+        const ctx = store?.getDisambiguatedEmojiContext?.(channelId ? guildOf(channelId) : undefined)
+        eat(ctx?.getGroupedCustomEmoji?.())
+        if (!out.size) eat(store?.getGuilds?.())
+    } catch {}
+    return out
+}
+
+/** 이 채널에서 니트로 없이 쓸 수 있는 이모지인지 */
+function usable(e: any, here: string | undefined) {
+    if (e?.available === false) return false
+    if (hasNitro()) return true
+    const g = e?.guildId ?? e?.guild_id
+    return !e?.animated && g != null && String(g) === here
+}
+
+const emojiUrl = (e: any) =>
+    `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? 'gif' : 'webp'}?size=${settings().emoteSize}&quality=lossless&name=${encodeURIComponent(e.name)}`
+
+/** 디스코드 이모지를 이 채널에 맞게: 쓸 수 있으면 진짜 이모지, 아니면 이미지 */
+function emojiOut(list: any[], here: string | undefined): string {
+    const ok = list.find(e => usable(e, here))
+    if (ok) return `<${ok.animated ? 'a' : ''}:${ok.name}:${ok.id}>`
+    return link(emojiUrl(list[0]))
+}
+
+function replaceNamed(text: string, channelId: string): { text: string; count: number } {
     const s = settings()
     const emotes = allEmotes()
     const lower: Record<string, string> = {}
     for (const k of Object.keys(emotes)) lower[k.toLowerCase()] ??= k
-    const find = (name: string) => emotes[name] ?? emotes[lower[name.toLowerCase()] ?? '']
+    const here = guildOf(channelId)
+    let discord: Map<string, any[]> | undefined
+    const discordLower = new Map<string, string>()
+    const discordFind = (name: string) => {
+        if (!discord) {
+            discord = discordEmojis(channelId)
+            for (const k of discord.keys()) if (!discordLower.has(k.toLowerCase())) discordLower.set(k.toLowerCase(), k)
+        }
+        return discord.get(name) ?? discord.get(discordLower.get(name.toLowerCase()) ?? '')
+    }
+    // 순서: 내 이모트, 같은 이름의 디스코드 이모지, Yentis 이모트 (대소문자까지 같은 것 먼저)
+    const resolve = (name: string): string | undefined => {
+        if (s.customEmotes[name]) return link(s.customEmotes[name])
+        const exact = discordFind(name)
+        if (exact?.length && exact[0].name === name) return emojiOut(exact, here)
+        if (emotes[name]) return link(emotes[name])
+        if (exact?.length) return emojiOut(exact, here)
+        const k = lower[name.toLowerCase()]
+        return k ? link(emotes[k]) : undefined
+    }
     let count = 0
     const prefix = s.prefix || ''
-    const re = s.requirePrefix && prefix ? new RegExp(`(^|[^\\w/:])${esc(prefix)}([\\w-]{2,})`, 'g') : /(^|[^\w/:<])([\w-]{2,})(?![\w:>])/g
-    const out = outsideCode(text, part =>
+    const re = s.requirePrefix && prefix ? new RegExp(`(^|[^\\w/:])${esc(prefix)}([\\w~-]{2,})`, 'g') : /(^|[^\w/:<])([\w~-]{2,})(?![\w:>])/g
+    let out = outsideCode(text, part =>
         part.replace(re, (all, before: string, name: string) => {
-            const url = find(name)
-            if (!url) return all
+            const r = resolve(name)
+            if (!r) return all
             count++
-            return before + link(url)
+            return before + r
         }),
     )
+    // :이름: 으로 쓴 것 중 디스코드가 못 바꾼 (니트로가 없어 잠긴) 이모지
+    if (s.lockedEmojis)
+        out = outsideCode(out, part =>
+            part.replace(/(^|[^\w<])(:([\w~-]{2,}):)(?!\d)/g, (all, before: string, _w: string, name: string) => {
+                const list = discordFind(name)
+                if (!list?.length) return all
+                count++
+                return before + emojiOut(list, here)
+            }),
+        )
     return { text: out, count }
 }
 
@@ -120,7 +195,7 @@ export function rewrite(args: any[]): any[] {
     let text = message.content
     let changed = false
 
-    const named = replaceNamed(text)
+    const named = replaceNamed(text, channelId)
     const locked = replaceLockedEmojis(named.text, channelId)
     if (named.count || locked.count) {
         text = locked.text

@@ -8,6 +8,7 @@ import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useMemo, useState } from 'react'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 import { emoteStatus, loadEmotes, onEmotesChange, search } from './emotes'
+import { discordEmojis } from './send'
 import { settings } from './store'
 
 /**
@@ -64,7 +65,21 @@ function Grid({ channelId }: { channelId: string }) {
     const [, tick] = useState(0)
     const [added, setAdded] = useState<string | undefined>()
     useEffect(() => onEmotesChange(() => tick(n => n + 1)), [])
-    const list = useMemo(() => search(query, 60), [query, emoteStatus().count])
+    // 내가 들어가 있는 서버의 이모지도 같이 (니트로 없이 못 쓰는 것은 보낼 때 이미지로 바뀐다)
+    const mine = useMemo(() => {
+        const out: Array<[string, string]> = []
+        for (const [name, list] of discordEmojis(channelId)) {
+            const e = list[0]
+            out.push([name, `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? 'gif' : 'webp'}?size=48&quality=lossless`])
+        }
+        return out
+    }, [channelId])
+    const list = useMemo(() => {
+        const q = query.trim().toLowerCase().replace(/^[^\w]+/, '')
+        const fromDiscord = mine.filter(([n]) => !q || n.toLowerCase().includes(q)).slice(0, 60)
+        const seen = new Set(fromDiscord.map(([n]) => n))
+        return [...fromDiscord, ...search(query, 60).filter(([n]) => !seen.has(n))].slice(0, 90)
+    }, [query, mine, emoteStatus().count])
     const prefix = settings().prefix || ''
     return (
         <View style={{ alignSelf: 'stretch', gap: 8 }}>
