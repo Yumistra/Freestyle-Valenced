@@ -342,7 +342,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
 function SettingsPage({ api }: { api?: any }) {
     if (!storage && api?.jsonStorage) storage = api.jsonStorage
     storage?.use?.()
-    const { Stack, Button, TableRowGroup, TableRadioGroup, TableRadioRow } = Design as any
+    const { Stack, Button, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
     const [items, setItems] = useState<Activity[]>(list)
     const [g, setG] = useState(gap)
     const [on, setOnState] = useState(isOn)
