@@ -72,6 +72,7 @@ export default function SettingsPage() {
                     </View>
                     <TableSwitchRow label="Require prefix" subLabel="Off, plain emote names are replaced too" value={s.requirePrefix} onValueChange={(requirePrefix: boolean) => update({ requirePrefix })} />
                     <TableSwitchRow label="Suggestions" subLabel="Shows matching emotes and effects above the chat bar while you type" value={s.suggestions} onValueChange={(suggestions: boolean) => update({ suggestions })} />
+                    <TableSwitchRow label="Small on phones" subLabel="Puts image files on a wide clear canvas so phones don't blow them up" value={s.phoneSize} onValueChange={(phoneSize: boolean) => update({ phoneSize })} />
                     <TableSwitchRow label="Send plain emotes as files" subLabel="Off, plain emotes go as small image links. Emotes with effects are always sent as files" value={s.plainAsFile} onValueChange={(plainAsFile: boolean) => update({ plainAsFile })} />
                     <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Emote button" subLabel="Adds a button to the chat bar to search and add emotes" value={s.button} onValueChange={(button: boolean) => update({ button })} />
                 </TableRowGroup>

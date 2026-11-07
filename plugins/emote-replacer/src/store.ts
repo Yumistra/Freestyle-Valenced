@@ -17,6 +17,8 @@ export interface Settings {
     button: boolean
     /** 효과 없는 이모트도 파일로 보내기 (폰에서는 크게 보인다). 효과가 있으면 늘 파일 */
     plainAsFile: boolean
+    /** 파일을 가로로 긴 투명한 판에 놓아 폰에서 작게 보이게 */
+    phoneSize: boolean
     /** 입력할 때 위에 이모트 미리보기 */
     suggestions: boolean
 }
@@ -31,6 +33,7 @@ export const DEFAULTS: Settings = {
     emoteSize: 48,
     button: true,
     plainAsFile: false,
+    phoneSize: true,
     suggestions: true,
 }
 

@@ -21,6 +21,8 @@ const HIDDEN = '\u{1D159}'
 const link = (url: string) => `[${HIDDEN}](${url})`
 const esc = (s: string) => s.replace(/[-\\/^$*+?.()|[\]{}]/g, '\\$&')
 const MAX_FILES = 10
+/** 폰에서 작게 보이게 하는 판의 가로세로 비율 */
+const WIDE = 8
 
 export function hasNitro() {
     try {
@@ -305,7 +307,7 @@ export async function rewrite(args: any[], p: Plan | undefined): Promise<Rewritt
             try {
                 const bytes = await download(job.source)
                 if (bytes) {
-                    const out = render(bytes, job.mods, settings().emoteSize)
+                    const out = render(bytes, job.mods, settings().emoteSize, settings().phoneSize ? WIDE : 0)
                     made = await makeUpload(channelId, out.b64, out.ext, job.name)
                 }
             } catch (e: any) {

@@ -824,10 +824,26 @@ export function applyModifier(img: Img, name: string, arg: string): Img {
     return img
 }
 
-/** 그림 + 효과 → 보낼 파일 (base64, 확장자) */
-export function render(bytes: Uint8Array, mods: Array<[string, string]>, size: number): { b64: string; ext: 'png' | 'gif' } {
+/**
+ * 가로로 긴 투명한 판의 왼쪽에 놓는다.
+ * 폰 디스코드는 그림 파일을 화면 너비에 맞춰 키우는데, 판이 가로로 길면 이모트는 한 줄 높이 정도로만 커진다.
+ */
+export function padWide(img: Img, ratio: number): Img {
+    const W = Math.max(img.w, Math.round(img.h * ratio))
+    if (W === img.w) return img
+    const frames = img.frames.map(f => {
+        const rgba = new Uint8ClampedArray(W * img.h * 4)
+        for (let y = 0; y < img.h; y++) rgba.set(f.rgba.subarray(y * img.w * 4, (y + 1) * img.w * 4), y * W * 4)
+        return { rgba, delay: f.delay }
+    })
+    return { w: W, h: img.h, frames }
+}
+
+/** 그림 + 효과 → 보낼 파일 (base64, 확장자). wide 를 주면 그 비율의 판에 놓는다 */
+export function render(bytes: Uint8Array, mods: Array<[string, string]>, size: number, wide = 0): { b64: string; ext: 'png' | 'gif' } {
     let img = fit(decode(bytes), sizeFrom(mods, size))
     for (const [n, a] of mods) if (n !== 'resize') img = applyModifier(img, n, a)
+    if (wide > 1) img = padWide(img, wide)
     if (img.frames.length > 1) return { b64: toBase64(encodeGif(img)), ext: 'gif' }
     return { b64: toBase64(encodePng(img)), ext: 'png' }
 }
