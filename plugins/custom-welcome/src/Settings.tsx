@@ -96,6 +96,13 @@ export default function SettingsPage({ api }: { api?: any }) {
                         value={s.ping}
                         onValueChange={(ping: boolean) => update({ ping })}
                     />
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="LinkIcon" />}
+                        label="Send locked stickers as links"
+                        subLabel="When a sticker can't be sent here (no Nitro), send its image as a hidden link instead"
+                        value={s.stickerLinks}
+                        onValueChange={(stickerLinks: boolean) => update({ stickerLinks })}
+                    />
                 </TableRowGroup>
 
                 <TableRadioGroup title="Message and sticker" defaultValue={s.mode} onChange={(mode: 'together' | 'separate') => update({ mode })}>

@@ -1,5 +1,5 @@
 import { Stores } from '@valenced/discord/flux'
-import { getModules } from '@valenced/modules/finders'
+import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { bindSticker } from './grid'
@@ -67,6 +67,37 @@ function isWave(ids: any, options: any) {
     return String(ids[0]) === WAVE_STICKER || /wave/i.test(String(options?.location ?? ''))
 }
 
+let sendability: any
+/** 이 채널에서 이 스티커를 보낼 수 있는지. 모르면 보낼 수 있다고 본다 */
+function canSend(id: string, channelId: string): boolean {
+    const S: any = Stores
+    try {
+        sendability ??= (lookupModule(withProps('isSendableSticker') as any) as any)?.[0]
+        const sticker = S.StickersStore?.getStickerById?.(id)
+        const channel = S.ChannelStore?.getChannel?.(channelId)
+        const user = S.UserStore?.getCurrentUser?.()
+        if (!sticker || !channel || !user || typeof sendability?.isSendableSticker !== 'function') return true
+        return !!sendability.isSendableSticker(sticker, user, channel)
+    } catch {
+        return true
+    }
+}
+/**
+ * 못 보내는 스티커를 이미지 링크로 (FakeNitro 처럼).
+ * [𝅙](주소) 로 쓰면 (𝅙 는 거의 안 보이는 글자) 주소도 이름도 안 보이고 이미지만 뜬다.
+ * 로티(움직이는 기본 스티커)는 이미지 주소가 없어서 못 바꾼다.
+ */
+function stickerLink(id: string): string | undefined {
+    try {
+        const st = (Stores as any).StickersStore?.getStickerById?.(id)
+        const format = st?.format_type ?? st?.formatType
+        if (format === 3) return
+        const ext = format === 4 ? 'gif' : 'png'
+        const name = String(st?.name ?? 'sticker').replace(/[\[\]()\\]/g, '') || 'sticker'
+        return `[\u{1D159}](https://media.discordapp.net/stickers/${id}.${ext}?size=160&name=${encodeURIComponent(name)})`
+    } catch {}
+}
+
 function send(channelId: string, ref: any): boolean {
     const s = settings()
     const content = s.messages.length ? fill(pick(s.messages), channelId, ref) : ''
@@ -86,8 +117,13 @@ function send(channelId: string, ref: any): boolean {
     try {
         // 하나만 (separate): 그때그때 글만, 또는 스티커만 무작위로
         const one = s.mode === 'separate' && content.trim() && sticker ? (Math.random() < 0.5 ? 'text' : 'sticker') : undefined
-        if (sticker && one !== 'text') options.stickerIds = [sticker]
-        actions.sendMessage(channelId, msg(one === 'sticker' ? '' : content), undefined, options)
+        let text = one === 'sticker' ? '' : content
+        if (sticker && one !== 'text') {
+            const link = s.stickerLinks && !canSend(sticker, channelId) ? stickerLink(sticker) : undefined
+            if (link) text = text.trim() ? `${text}\n${link}` : link
+            else options.stickerIds = [sticker]
+        }
+        actions.sendMessage(channelId, msg(text), undefined, options)
     } finally {
         sending = false
     }
