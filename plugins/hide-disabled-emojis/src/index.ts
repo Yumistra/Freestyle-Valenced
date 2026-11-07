@@ -1,3 +1,4 @@
+import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
@@ -12,28 +13,53 @@ import { instead } from '@valenced/patcher'
  * 다 빠진 묶음(니트로가 없어 통째로 잠긴 서버 등)은 이름표까지 없앤다.
  */
 
-const done = new WeakMap<object, any[]>()
+const done = new WeakMap<object, { key: string; out: any[] }>()
+
+/** 니트로가 없으면 움직이는 이모지와 다른 서버 이모지는 쓸 수 없다 */
+function hasNitro() {
+    try {
+        const u = (Stores as any).UserStore?.getCurrentUser?.()
+        return !!u && u.premiumType != null && u.premiumType !== 0
+    } catch {
+        return false
+    }
+}
+function currentGuild(): string | undefined {
+    try {
+        return (Stores as any).SelectedGuildStore?.getGuildId?.() ?? undefined
+    } catch {}
+}
+/** 이 이모지를 숨길지 (니트로가 없을 때 움직이는 것, 다른 서버 것) */
+function locked(e: any, nitro: boolean, guild: string | undefined) {
+    if (nitro || !e || e.id == null) return false
+    if (e.animated) return true
+    const g = e.guildId ?? e.guild_id
+    return g != null && g !== guild
+}
 
 function filterSections(sections: any[]): any[] {
     if (!Array.isArray(sections)) return sections
+    const nitro = hasNitro()
+    const guild = currentGuild()
+    const key = `${nitro}|${guild}`
     const hit = done.get(sections)
-    if (hit) return hit
+    if (hit?.key === key) return hit.out
     const out: any[] = []
     for (const s of sections) {
         // 니트로가 없어 통째로 잠긴 묶음은 통째로 뺀다
         if (s?.isSectionNitroLocked === true && Array.isArray(s?.emojis)) continue
         const disabled = s?.emojisDisabled
         const emojis = s?.emojis
-        if (!Array.isArray(emojis) || !(disabled instanceof Set || Array.isArray(disabled))) {
+        if (!Array.isArray(emojis)) {
             out.push(s)
             continue
         }
-        const has = (id: any) => (disabled instanceof Set ? disabled.has(id) : disabled.includes(id))
-        const kept = emojis.filter((e: any) => e?.id == null || !has(e.id))
+        const has = (id: any) => (disabled instanceof Set ? disabled.has(id) : Array.isArray(disabled) ? disabled.includes(id) : false)
+        const kept = emojis.filter((e: any) => e?.id == null || (!has(e.id) && !locked(e, nitro, guild)))
         if (!kept.length && emojis.length) continue
         out.push(kept.length === emojis.length ? s : { ...s, emojis: kept, emojisDisabled: new Set(), isSectionNitroLocked: false })
     }
-    done.set(sections, out)
+    done.set(sections, { key, out })
     return out
 }
 
