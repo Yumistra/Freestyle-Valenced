@@ -439,27 +439,12 @@ function SettingsPage({ api }: { api?: any }) {
     )
 }
 
-/** 시험용: 테마 바탕색 후보를 칸으로 보여 준다 (화면 배경과 같은 색을 찾으려고) */
-const SWATCHES = ['BACKGROUND_BASE_LOW', 'BACKGROUND_BASE_LOWER', 'BACKGROUND_BASE_LOWEST', 'BACKGROUND_SURFACE_HIGH', 'BACKGROUND_SURFACE_HIGHEST', 'BG_SURFACE_RAISED', 'BACKGROUND_SECONDARY_ALT', 'BACKGROUND_MOD_SUBTLE', 'BACKGROUND_PRIMARY', 'BACKGROUND_SECONDARY', 'BACKGROUND_TERTIARY', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_MOBILE_SECONDARY', 'BG_BASE_PRIMARY', 'BG_BASE_SECONDARY', 'BG_BASE_TERTIARY']
-function Swatch({ name, i }: { name: string; i: number }) {
-    const { Text } = Design as any
-    const c = useColor([name], 'transparent')
-    return (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-            <View style={{ width: 120, height: 28, backgroundColor: c }} />
-            <Text variant="text-xs/medium" color="text-muted" style={{ marginLeft: 8 }}>
-                {i + 1}. {name} {T()?.colors?.[name] ? '' : '(none)'}
-            </Text>
-        </View>
-    )
-}
-
 function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems: (f: (x: Activity[]) => Activity[]) => void; on: boolean; setOnState: (v: boolean) => void }) {
     const { Stack, Button, TableRowGroup, TableSwitchRow } = Design as any
     const hide = useTooltipHide()
     const whys = reasons(items)
-    // 설정 화면 바탕색 (떠 있는 Add activity 뒤에 깐다)
-    const pageBg = useColor(['BACKGROUND_BASE_LOW', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
+    // 설정 화면 바탕색 (떠 있는 Add activity 뒤에 깐다). 색 칸을 띄워 재 보니 화면 배경은 BACKGROUND_SURFACE_HIGH
+    const pageBg = useColor(['BACKGROUND_SURFACE_HIGH', 'BACKGROUND_BASE_LOW'], '#000000')
     return (
         <ScrollView
             style={{ flex: 1 }}
@@ -471,11 +456,6 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
             stickyHeaderIndices={[1]}
         >
             <View style={{ marginBottom: 8 }}>
-                <View style={{ marginBottom: 12 }}>
-                    {SWATCHES.map((n, i) => (
-                        <Swatch key={n} name={n} i={i} />
-                    ))}
-                </View>
                 <TableRowGroup>
                     <TableSwitchRow
                         label="Multi RPC"
