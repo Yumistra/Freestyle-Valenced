@@ -162,22 +162,46 @@ function send(socketId: string, pid: number, activity: any) {
     ;(Dispatcher as any).dispatch({ type: 'LOCAL_ACTIVITY_UPDATE', activity, pid, socketId })
 }
 
+const isUrl = (v: string) => /^https?:\/\//i.test(v)
+/** 디스코드에 올라간 이미지는 미디어 프록시 경로(mp:)로 바로 쓴다 */
+function discordMedia(v: string): string | undefined {
+    const m = v.match(/^https?:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/(.+)$/i)
+    return m ? `mp:${m[1]}` : undefined
+}
+
+/**
+ * 이미지 칸 값을 디스코드가 보여 줄 수 있는 값으로.
+ *  - 에셋 이름: 그 활동의 Application ID 로 찾는다
+ *  - 바깥 주소(imgur 등): 디스코드 미디어 프록시(mp:external/...)로 바꿔야 보인다.
+ *    바꾸는 요청은 실제로 있는 앱이어야 해서, 활동마다 쓰는 무작위 ID 대신 기본 앱 ID 로 한다
+ *    (나온 mp: 경로는 앱과 상관없이 보인다)
+ */
 async function resolveAssets(appId: string, keys: Array<{ field: string; value: string }>) {
     const out: Record<string, string> = {}
     const present = keys.filter(k => k.value)
+    if (!present.length) return out
     const assets = find('getAssetIds')
-    if (!present.length || !assets) {
-        for (const k of present) out[k.field] = k.value
-        return out
+    const run = async (id: string, list: Array<{ field: string; value: string }>) => {
+        if (!list.length) return
+        const raw = list.map(k => k.value)
+        try {
+            let ids = assets?.getAssetIds?.(id, raw)
+            if (!ids?.length || ids.some((x: any) => !x)) ids = await assets?.fetchAssetIds?.(id, raw)
+            list.forEach((k, i) => (out[k.field] = ids?.[i] || k.value))
+        } catch {
+            for (const k of list) out[k.field] = k.value
+        }
     }
-    const raw = present.map(k => k.value)
-    try {
-        let ids = assets.getAssetIds(appId, raw)
-        if (!ids?.length) ids = await assets.fetchAssetIds(appId, raw)
-        present.forEach((k, i) => (out[k.field] = ids?.[i] || k.value))
-    } catch {
-        for (const k of present) out[k.field] = k.value
+    const urls: Array<{ field: string; value: string }> = []
+    const named: Array<{ field: string; value: string }> = []
+    for (const k of present) {
+        const media = isUrl(k.value) ? discordMedia(k.value) : undefined
+        if (media) out[k.field] = media
+        else if (k.value.startsWith('mp:')) out[k.field] = k.value
+        else (isUrl(k.value) ? urls : named).push(k)
     }
+    await run(DEFAULT_APP_ID, urls)
+    await run(appId, named)
     return out
 }
 
