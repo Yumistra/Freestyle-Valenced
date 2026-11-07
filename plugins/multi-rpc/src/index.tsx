@@ -33,7 +33,7 @@ interface Activity {
     length_min: number
     /** + 로 추가한 칸 (보이는 순서) */
     fields?: string[]
-    /** 활동 아래 버튼 (최대 2개, 다른 사람에게 보인다) */
+    /** 활동 아래 버튼 (다른 사람에게 보인다). 개수, 길이 제한은 두지 않는다 */
     buttons?: Array<{ label: string; url: string }>
 }
 
@@ -187,9 +187,8 @@ async function build(a: Activity) {
     if (Object.keys(assets).length) act.assets = assets
     // 버튼: 글자는 buttons, 주소는 metadata.button_urls (디스코드 RPC 와 같은 모양)
     const buttons = (a.buttons ?? [])
-        .map(b => ({ label: (b.label || '').trim().slice(0, 32), url: (b.url || '').trim() }))
-        .filter(b => b.label && /^https?:\/\//i.test(b.url))
-        .slice(0, 2)
+        .map(b => ({ label: (b.label || '').trim(), url: (b.url || '').trim() }))
+        .filter(b => b.label && b.url)
     if (buttons.length) {
         act.buttons = buttons.map(b => b.label)
         act.metadata = { button_urls: buttons.map(b => b.url) }
@@ -442,7 +441,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                                             <View style={{ flex: 1 }}>
                                                                 <Stack spacing={8}>
-                                                                    <TextInput value={b.label} placeholder="Button text" maxLength={32} onChange={(v: string) => setBtn(i, { label: v })} />
+                                                                    <TextInput value={b.label} placeholder="Button text" onChange={(v: string) => setBtn(i, { label: v })} />
                                                                     <TextInput value={b.url} placeholder="https://" autoCapitalize="none" keyboardType="url" onChange={(v: string) => setBtn(i, { url: v })} />
                                                                 </Stack>
                                                             </View>
@@ -452,7 +451,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                                         </View>
                                                     </View>
                                                 ))}
-                                                {list.length < 2 ? <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} /> : null}
+                                                <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} />
                                             </Stack>
                                         )
                                     }
