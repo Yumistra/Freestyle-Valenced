@@ -13,6 +13,7 @@ Plugins for Valenced.
 | Silent Leave | `yumistra.silent-leave` |
 | Sticker With Text | `yumistra.sticker-with-text` |
 | Custom Welcome | `yumistra.custom-welcome` |
+| Multi RPC | `yumistra.multi-rpc` |
 
 ## Install
 
