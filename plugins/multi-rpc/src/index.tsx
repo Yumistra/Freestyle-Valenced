@@ -129,7 +129,7 @@ function conflict(a: Activity, shown: Activity[]): Why {
     if (shown.some(b => appIdOf(b) === appIdOf(a))) return { text: 'Another activity uses the same Application ID', id: true }
     // 이름이 같은 활동은 프로필에서 하나로 합쳐진다 (코드, 직접 해 본 결과 둘 다 확인)
     if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) return { text: 'Another activity has the same name' }
-    // Streaming 은 몇 개까지 보이는지 아직 몰라서 막지 않는다 (시험 중)
+    // Listening, Streaming 은 여러 개 보인다 (직접 해 본 결과, 전체 5개 안에서)
     if (a.type !== LISTENING && a.type !== STREAMING && shown.some(b => b.type === a.type)) return { text: `Only one ${typeLabel(a.type)} activity can show` }
     if (shown.length >= MAX_SHOWN) return { text: `Only ${MAX_SHOWN} activities can show at once` }
 }
