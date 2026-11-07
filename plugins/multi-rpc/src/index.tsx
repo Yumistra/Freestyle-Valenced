@@ -305,6 +305,16 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
         </Pressable>
     )
 }
+function alpha(color: string, a: number) {
+    const h = /^#([0-9a-f]{6})/i.exec(color)
+    const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(color)
+    if (h) {
+        const n = parseInt(h[1], 16)
+        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+    }
+    if (m) return `rgba(${m[1]},${m[2]},${m[3]},${a})`
+    return color
+}
 const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
 function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void }) {
@@ -354,9 +364,12 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     }
     const typeName = TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'
     const showing = !!a.enabled && !why
+    // 켜진 활동은 테마의 강조색을 아주 옅게 덮어 구분한다
+    const radius = num(T()?.radii?.lg, 16)
+    const tint = alpha(tokenColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND', 'TEXT_BRAND'], '#5865f2'), 0.1)
     return (
         <View>
-            <View>
+            <View style={{ borderRadius: radius, overflow: 'hidden' }}>
                 <TableRowGroup>
                     <TableRow
                         label={a.name || 'Activity'}
@@ -417,6 +430,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                         </View>
                     ) : null}
                 </TableRowGroup>
+                {showing ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: tint }} /> : null}
             </View>
         </View>
     )
@@ -451,8 +465,16 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
     const hide = useTooltipHide()
     const whys = reasons(items)
     return (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled onScrollBeginDrag={hide}>
-            <Stack spacing={16}>
+        <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: 160 }}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            onScrollBeginDrag={hide}
+            // Add activity 는 위로 밀려 가려지면 맨 위에 붙어 떠 있는다
+            stickyHeaderIndices={[1]}
+        >
+            <View style={{ marginBottom: 8 }}>
                 <TableRowGroup>
                     <TableSwitchRow
                         label="Multi RPC"
@@ -466,7 +488,11 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                         }}
                     />
                 </TableRowGroup>
+            </View>
+            <View style={{ paddingVertical: 8 }}>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
+            </View>
+            <Stack spacing={16} style={{ marginTop: 8 }}>
                 {items.map((a, i) => (
                     <Card
                         key={a.id}
