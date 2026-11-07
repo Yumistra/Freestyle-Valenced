@@ -3,7 +3,11 @@ import { Design } from '@valenced/discord/design'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { Tokens } from '@valenced/discord/common/tokens'
+import { Stores } from '@valenced/discord/flux'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { Blocked, TooltipHost, useTooltipHide } from './tooltip'
 
 /**
@@ -27,6 +31,8 @@ interface Activity {
     use_timestamps: boolean
     start: number
     length_min: number
+    /** + 로 추가한 칸 (보이는 순서) */
+    fields?: string[]
 }
 
 const DEFAULT_APP_ID = '1054951789318909972'
@@ -36,9 +42,6 @@ const TYPES: Array<[number, string]> = [
     [3, 'Watching'],
     [5, 'Competing'],
 ]
-/** 활동 사이 간격 (ms). 설정에서 바꾼다 */
-const GAPS = [0, 300, 500, 800, 1000, 1500]
-const DEFAULT_GAP = 1500
 const REFRESH_MS = 120000
 const sessionStart = Date.now()
 
@@ -66,22 +69,12 @@ function newActivity(o: Partial<Activity> = {}): Activity {
 const DEFAULTS = {
     /** Multi RPC 전체 켜기. 꺼져 있으면 아무것도 보내지 않는다 */
     on: false,
-    gap: DEFAULT_GAP,
     activities: [newActivity({ name: 'A game', type: 0 }), newActivity({ name: 'A song', type: 2, use_timestamps: true, length_min: 3 }), newActivity({ name: 'A show', type: 3, use_timestamps: true })],
 }
 
 // ── 저장 ────────────────────────────────────────────────────────
 let storage: any
 const list = (): Activity[] => (Array.isArray(storage?.cache?.activities) ? storage.cache.activities : DEFAULTS.activities)
-const gap = (): number => {
-    const g = Number(storage?.cache?.gap)
-    return Number.isFinite(g) && g >= 0 ? g : DEFAULT_GAP
-}
-function setGap(g: number) {
-    if (!storage) return
-    if (storage.cache) storage.cache.gap = g
-    storage.set({ ...(storage.cache ?? {}), gap: g }, true)
-}
 const isOn = () => storage?.cache?.on === true
 function setOn(on: boolean) {
     if (!storage) return
@@ -215,15 +208,11 @@ async function apply() {
             live.delete(sid)
         }
     rememberSent([...keep])
+    // 모두 한꺼번에 보낸다
     for (let i = 0; i < built.length; i++) {
         const b = built[i]
         send(b.socketId, b.pid, b.activity)
         live.set(b.socketId, b.pid)
-        if (i < built.length - 1) {
-            const ms = gap()
-            if (ms > 0) await new Promise(r => setTimeout(r, ms))
-            if (my !== runId) return
-        }
     }
 }
 
@@ -235,15 +224,97 @@ function clearAll() {
 }
 
 // ── 설정 화면 ───────────────────────────────────────────────────
-/** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다. 겹치면 다른 숫자로 바꿀 수 있게 */
+
+/** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다 */
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
 
+/** + 로 추가하는 칸 */
+type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_text' | 'small_image' | 'small_text' | 'time'
+const FIELDS: Array<[FieldKey, string, string]> = [
+    ['details', 'Details', 'Top line'],
+    ['state', 'State', 'Bottom line'],
+    ['large_image', 'Large image', 'Asset key or URL'],
+    ['large_text', 'Large image text', 'Hover text'],
+    ['small_image', 'Small image', 'Asset key or URL'],
+    ['small_text', 'Small image text', 'Hover text'],
+    ['time', 'Time', ''],
+    ['application_id', 'Application ID', DEFAULT_APP_ID],
+]
+/** 지금 보이는 칸: 추가한 것 + (예전 버전에서) 값이 들어 있는 것 */
+function fieldsOf(a: Activity): FieldKey[] {
+    const out = (a.fields ?? []).filter(k => FIELDS.some(([f]) => f === k)) as FieldKey[]
+    for (const [k] of FIELDS) {
+        if (out.includes(k) || k === 'application_id') continue
+        if (k === 'time' ? a.use_timestamps : String((a as any)[k] ?? '').trim()) out.push(k)
+    }
+    return out
+}
+
+const animate = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+const T = (): any => (Tokens as any)?.default ?? {}
+function tokenColor(names: string[], fallback: string) {
+    try {
+        const t = T()
+        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
+        for (const n of names) {
+            const key = t?.colors?.[n]
+            if (!key) continue
+            const c = t.internal.resolveSemanticColor(theme, key)
+            if (typeof c === 'string' && c) return c
+        }
+    } catch {}
+    return fallback
+}
+function Icon({ name, color, size = 20, alt = [] }: { name: string; color: string; size?: number; alt?: string[] }) {
+    let C: any
+    for (const n of [name, ...alt])
+        try {
+            C ??= lookupGeneratedIconComponent(n as any)
+        } catch {}
+    if (C) return <C size="sm" color={color} style={{ width: size, height: size }} />
+    const { Text } = Design as any
+    return <Text variant="text-md/bold" style={{ color }}>{name.startsWith('X') ? '×' : '🗑'}</Text>
+}
+
+/** 드롭다운 앞 지우기 버튼: 두 번 눌러야 지운다 */
+function DeleteButton({ onDelete }: { onDelete: () => void }) {
+    const [armed, setArmed] = useState(false)
+    const timer = useRef<any>()
+    useEffect(() => () => clearTimeout(timer.current), [])
+    const red = tokenColor(['CONTROL_CRITICAL_PRIMARY_BACKGROUND_DEFAULT', 'STATUS_DANGER', 'TEXT_DANGER'], '#da373c')
+    const surface = tokenColor(['CARD_BACKGROUND_DEFAULT', 'BACKGROUND_MOD_SUBTLE', 'BACKGROUND_SECONDARY'], '#2b2d31')
+    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    return (
+        <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={armed ? 'Tap again to delete' : 'Delete'}
+            onPress={() => {
+                if (!armed) {
+                    setArmed(true)
+                    clearTimeout(timer.current)
+                    timer.current = setTimeout(() => setArmed(false), 3000)
+                    return
+                }
+                clearTimeout(timer.current)
+                animate()
+                onDelete()
+            }}
+            style={{ width: 48, height: 56, borderRadius: num(T()?.radii?.lg, 12), backgroundColor: armed ? red : surface, alignItems: 'center', justifyContent: 'center' }}
+        >
+            <Icon name="TrashIcon" alt={['TrashFilledIcon']} color={armed ? '#ffffff' : muted} />
+        </Pressable>
+    )
+}
+const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
+
 function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void }) {
-    const { Stack, TableRowGroup, TableSwitchRow, TextInput, Button } = Design as any
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TextInput, Button, Text } = Design as any
+    const [open, setOpen] = useState(false)
+    const [adding, setAdding] = useState(false)
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
     const digits = (v: string) => v.replace(/[^0-9]/g, '')
-    const field = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false) => (
+    const input = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false) => (
         <TextInput
             label={label}
             value={a[key] ? String(a[key]) : ''}
@@ -252,62 +323,104 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
             onChange={(v: string) => set({ [key]: numeric === 'number' ? Number(digits(v)) || 0 : numeric === 'id' ? digits(v) : v } as any)}
         />
     )
+    const shown = fieldsOf(a)
+    const left = FIELDS.filter(([k]) => !shown.includes(k))
+    const add = (k: FieldKey) => {
+        animate()
+        setAdding(false)
+        set({ fields: [...shown, k], ...(k === 'time' ? { use_timestamps: true } : {}) })
+    }
+    const remove = (k: FieldKey) => {
+        animate()
+        const patch: any = { fields: shown.filter(f => f !== k) }
+        if (k === 'time') patch.use_timestamps = false
+        else if (k !== 'application_id') patch[k] = ''
+        set(patch)
+    }
+    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    const removeBtn = (k: FieldKey) => (
+        <Pressable accessibilityRole="button" accessibilityLabel="Remove" hitSlop={10} onPress={() => remove(k)} style={{ padding: 6, marginLeft: 6 }}>
+            <Icon name="XSmallIcon" alt={['XLargeIcon', 'CloseSmallIcon', 'CircleXIcon']} color={muted} />
+        </Pressable>
+    )
+    const row = (k: FieldKey, child: any) => (
+        <View key={k} style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+            <View style={{ flex: 1 }}>{child}</View>
+            {removeBtn(k)}
+        </View>
+    )
     const typeName = TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'
+    const showing = !!a.enabled && !why
     return (
-        <TableRowGroup title={`${a.name || 'Activity'}, ${typeName}`}>
-            {/* 켜도 안 보일 활동은 켤 수 없게 (누르면 이유) */}
-            {/* 스위치(줄 오른쪽 끝)를 가리킨다 */}
-            <Blocked
-                text={(a.enabled ? why : blockOn)?.text}
-                anchor={r => ({ x: r.x + r.width - 68, y: r.y, width: 52, height: r.height })}
-                onBlocked={() => a.enabled && set({ enabled: false })}
-            >
-                <TableSwitchRow label="Show this" value={!!a.enabled && !why} onValueChange={(enabled: boolean) => set({ enabled })} />
-            </Blocked>
-            <View style={{ padding: 12 }}>
-                <Stack spacing={10}>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                        {TYPES.map(([v, label]) => (
-                            <Blocked key={v} text={a.type === v ? undefined : blockType(v)?.text}>
-                                <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
-                            </Blocked>
-                        ))}
-                    </View>
-                    {field('Name', 'name', 'Spotify')}
-                    {field('Details', 'details', 'Top line')}
-                    {field('State', 'state', 'Bottom line')}
-                    {field('Application ID', 'application_id', DEFAULT_APP_ID, 'id')}
-                    {field('Large image', 'large_image', 'Asset key or URL')}
-                    {field('Large image text', 'large_text', 'Hover text')}
-                    {field('Small image', 'small_image', 'Asset key or URL')}
-                    {field('Small image text', 'small_text', 'Hover text')}
-                </Stack>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+            <DeleteButton onDelete={onRemove} />
+            <View style={{ flex: 1 }}>
+                <TableRowGroup>
+                    <TableRow
+                        label={a.name || 'Activity'}
+                        subLabel={showing ? typeName : `${typeName}, off`}
+                        trailing={<TableRowAssetIcon name={open ? 'ChevronSmallUpIcon' : 'ChevronSmallDownIcon'} />}
+                        onPress={() => (animate(), setOpen(o => !o))}
+                    />
+                    {open ? (
+                        <Blocked
+                            text={(a.enabled ? why : blockOn)?.text}
+                            anchor={r => ({ x: r.x + r.width - 68, y: r.y, width: 52, height: r.height })}
+                            onBlocked={() => a.enabled && set({ enabled: false })}
+                        >
+                            <TableSwitchRow label="Show this" value={showing} onValueChange={(enabled: boolean) => set({ enabled })} />
+                        </Blocked>
+                    ) : null}
+                    {open ? (
+                        <View style={{ padding: 12 }}>
+                            <Stack spacing={10}>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                    {TYPES.map(([v, label]) => (
+                                        <Blocked key={v} text={a.type === v ? undefined : blockType(v)?.text}>
+                                            <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
+                                        </Blocked>
+                                    ))}
+                                </View>
+                                {input('Name', 'name', 'Spotify')}
+                                {shown.map(k => {
+                                    if (k === 'time')
+                                        return row(
+                                            k,
+                                            <Stack spacing={10}>
+                                                {input('Start (ms, 0 = when Discord opened)', 'start', '0', 'number')}
+                                                {input('Length in minutes (0 = elapsed time)', 'length_min', '0', 'number')}
+                                                <Button size="sm" variant="secondary" text="Start the time from now" onPress={() => set({ start: Date.now() })} />
+                                            </Stack>,
+                                        )
+                                    const f = FIELDS.find(([x]) => x === k)!
+                                    return row(k, input(f[1], k as keyof Activity, f[2], k === 'application_id' ? 'id' : false))
+                                })}
+                                {left.length ? (
+                                    adding ? (
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                            {left.map(([k, label]) => (
+                                                <Button key={k} size="sm" variant="secondary" text={label} onPress={() => add(k)} />
+                                            ))}
+                                            <Button size="sm" variant="tertiary" text="Cancel" onPress={() => (animate(), setAdding(false))} />
+                                        </View>
+                                    ) : (
+                                        <Button size="sm" variant="secondary" text="+ Add" onPress={() => (animate(), setAdding(true))} />
+                                    )
+                                ) : null}
+                            </Stack>
+                        </View>
+                    ) : null}
+                </TableRowGroup>
             </View>
-            <TableSwitchRow label="Show time" value={!!a.use_timestamps} onValueChange={(use_timestamps: boolean) => set({ use_timestamps })} />
-            {a.use_timestamps ? (
-                <View style={{ padding: 12 }}>
-                    <Stack spacing={10}>
-                        {field('Start (ms, 0 = when Discord opened)', 'start', '0', 'number')}
-                        {field('Length in minutes (0 = elapsed time)', 'length_min', '0', 'number')}
-                        <Button size="md" variant="secondary" text="Start the time from now" onPress={() => set({ start: Date.now() })} />
-                    </Stack>
-                </View>
-            ) : null}
-            <View style={{ padding: 12 }}>
-                <Button size="md" variant="destructive" text="Remove" onPress={onRemove} />
-            </View>
-        </TableRowGroup>
+        </View>
     )
 }
 
 function SettingsPage({ api }: { api?: any }) {
     if (!storage && api?.jsonStorage) storage = api.jsonStorage
     storage?.use?.()
-    const { Stack, Button, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
     const [items, setItems] = useState<Activity[]>(list)
-    const [g, setG] = useState(gap)
     const [on, setOnState] = useState(isOn)
-    const whys = reasons(items)
     const first = useRef(true)
     useEffect(() => {
         if (first.current) {
@@ -318,14 +431,15 @@ function SettingsPage({ api }: { api?: any }) {
     }, [items])
     return (
         <TooltipHost>
-            <Page items={items} setItems={setItems} on={on} setOnState={setOnState} g={g} setG={setG} whys={whys} />
+            <Page items={items} setItems={setItems} on={on} setOnState={setOnState} />
         </TooltipHost>
     )
 }
 
-function Page({ items, setItems, on, setOnState, g, setG, whys }: any) {
-    const { Stack, Button, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
+function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems: (f: (x: Activity[]) => Activity[]) => void; on: boolean; setOnState: (v: boolean) => void }) {
+    const { Stack, Button, TableRowGroup, TableSwitchRow } = Design as any
     const hide = useTooltipHide()
+    const whys = reasons(items)
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled onScrollBeginDrag={hide}>
             <Stack spacing={16}>
@@ -345,12 +459,7 @@ function Page({ items, setItems, on, setOnState, g, setG, whys }: any) {
                 <Blocked text={on ? undefined : 'Turn on Multi RPC first'}>
                     <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
                 </Blocked>
-                <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity({ application_id: randomAppId() })])} />
-                <TableRadioGroup title="Time between activities" defaultValue={String(g)} onChange={(v: string) => (setG(Number(v)), setGap(Number(v)))}>
-                    {GAPS.map(ms => (
-                        <TableRadioRow key={ms} value={String(ms)} label={ms === 0 ? 'All at once' : `${ms / 1000}s`} />
-                    ))}
-                </TableRadioGroup>
+                <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
                 {items.map((a, i) => (
                     <Card
                         key={a.id}
@@ -358,7 +467,9 @@ function Page({ items, setItems, on, setOnState, g, setG, whys }: any) {
                         why={whys[i]}
                         blockOn={blockedBy(items, whys, i, {})}
                         blockType={(t: number) => (a.enabled && !whys[i] ? blockedBy(items, whys, i, { type: t }) : undefined)}
-                        onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
+                        onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))}
+                        onRemove={() => setItems(x => x.filter(y => y.id !== a.id))}
+                    />
                 ))}
             </Stack>
         </ScrollView>
