@@ -35,11 +35,24 @@ interface Activity {
     fields?: string[]
     /** 활동 아래 버튼 (다른 사람에게 보인다). 디스코드는 2개까지만 보여 준다 */
     buttons?: Array<{ label: string; url: string }>
+    /** Streaming 방송 주소 (트위치, 유튜브) */
+    url?: string
+    /** 파티 인원 (지금, 최대) */
+    party_size?: number
+    party_max?: number
+    /** 멤버 목록에 이름 아래로 보일 것: 0 이름, 1 State, 2 Details */
+    status_display?: number
+    /** 글자, 이미지를 누르면 열리는 주소 */
+    details_url?: string
+    state_url?: string
+    large_url?: string
+    small_url?: string
 }
 
 const DEFAULT_APP_ID = '1054951789318909972'
 const TYPES: Array<[number, string]> = [
     [0, 'Playing'],
+    [1, 'Streaming'],
     [2, 'Listening'],
     [3, 'Watching'],
     [5, 'Competing'],
@@ -107,6 +120,7 @@ function setList(next: Activity[], now = false) {
 // 프로필은 Application ID 나 이름이 같은 활동을 하나로 합친다 (디스코드 코드에서 확인)
 const MAX_SHOWN = 5
 const LISTENING = 2
+const STREAMING = 1
 type Why = { text: string; id?: boolean } | undefined
 const appIdOf = (a: Activity) => String(a.application_id || DEFAULT_APP_ID)
 const typeLabel = (t: number) => TYPES.find(([v]) => v === t)?.[1] ?? 'Playing'
@@ -115,7 +129,8 @@ function conflict(a: Activity, shown: Activity[]): Why {
     if (shown.some(b => appIdOf(b) === appIdOf(a))) return { text: 'Another activity uses the same Application ID', id: true }
     // 이름이 같은 활동은 프로필에서 하나로 합쳐진다 (코드, 직접 해 본 결과 둘 다 확인)
     if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) return { text: 'Another activity has the same name' }
-    if (a.type !== LISTENING && shown.some(b => b.type === a.type)) return { text: `Only one ${typeLabel(a.type)} activity can show` }
+    // Listening, Streaming 은 여러 개 보인다 (직접 해 본 결과, 전체 5개 안에서)
+    if (a.type !== LISTENING && a.type !== STREAMING && shown.some(b => b.type === a.type)) return { text: `Only one ${typeLabel(a.type)} activity can show` }
     if (shown.length >= MAX_SHOWN) return { text: `Only ${MAX_SHOWN} activities can show at once` }
 }
 /** 켜 둔 활동마다 안 보이는 이유 (위에서부터 차례로) */
@@ -171,6 +186,11 @@ async function build(a: Activity) {
     const act: any = { name: (a.name || '').trim() || 'Discord', type: Number(a.type) || 0, application_id: appId, flags: 0 }
     if (a.details?.trim()) act.details = a.details.trim()
     if (a.state?.trim()) act.state = a.state.trim()
+    if (act.type === STREAMING && a.url?.trim()) act.url = a.url.trim()
+    if (act.details && a.details_url?.trim()) act.details_url = a.details_url.trim()
+    if (act.state && a.state_url?.trim()) act.state_url = a.state_url.trim()
+    if (Number(a.party_size) > 0 && Number(a.party_max) > 0) act.party = { id: `multirpc-${a.id}`, size: [Number(a.party_size), Number(a.party_max)] }
+    if (a.status_display != null && fieldsOf(a).includes('status')) act.status_display_type = Number(a.status_display) || 0
     if (a.use_timestamps) {
         const start = Number(a.start) > 0 ? Number(a.start) : sessionStart
         act.timestamps = { start }
@@ -184,6 +204,8 @@ async function build(a: Activity) {
     const assets: any = { ...resolved }
     if (resolved.large_image && a.large_text?.trim()) assets.large_text = a.large_text.trim()
     if (resolved.small_image && a.small_text?.trim()) assets.small_text = a.small_text.trim()
+    if (resolved.large_image && a.large_url?.trim()) assets.large_url = a.large_url.trim()
+    if (resolved.small_image && a.small_url?.trim()) assets.small_url = a.small_url.trim()
     if (Object.keys(assets).length) act.assets = assets
     // 버튼: 글자는 buttons, 주소는 metadata.button_urls (디스코드 RPC 와 같은 모양)
     const buttons = (a.buttons ?? [])
@@ -204,7 +226,7 @@ function signature(items: Activity[]) {
     return JSON.stringify(
         items
             .filter((a, i) => a.enabled && !why[i])
-            .map(a => [a.id, a.type, a.name, a.application_id, a.details, a.state, a.large_image, a.large_text, a.small_image, a.small_text, a.use_timestamps, a.start, a.length_min, (a.buttons ?? []).filter(b => b.label?.trim() && b.url?.trim()).slice(0, 2)]),
+            .map(a => [a.id, a.type, a.name, a.application_id, a.details, a.state, a.large_image, a.large_text, a.small_image, a.small_text, a.use_timestamps, a.start, a.length_min, a.url, a.party_size, a.party_max, fieldsOf(a).includes('status') ? a.status_display : null, a.details_url, a.state_url, a.large_url, a.small_url, (a.buttons ?? []).filter(b => b.label?.trim() && b.url?.trim()).slice(0, 2)]),
     )
 }
 let appliedSig: string | undefined
@@ -253,7 +275,7 @@ function clearAll() {
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
 
 /** + 로 추가하는 칸 */
-type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_text' | 'small_image' | 'small_text' | 'time' | 'buttons'
+type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_text' | 'small_image' | 'small_text' | 'time' | 'buttons' | 'party' | 'status' | 'details_url' | 'state_url' | 'large_url' | 'small_url'
 const FIELDS: Array<[FieldKey, string, string]> = [
     ['details', 'Details', 'Top line'],
     ['state', 'State', 'Bottom line'],
@@ -262,7 +284,13 @@ const FIELDS: Array<[FieldKey, string, string]> = [
     ['small_image', 'Small image', 'Asset key or URL'],
     ['small_text', 'Small image text', 'Hover text'],
     ['time', 'Time', ''],
+    ['party', 'Party', ''],
     ['buttons', 'Button', ''],
+    ['status', 'Status display', ''],
+    ['details_url', 'Details link', 'https://'],
+    ['state_url', 'State link', 'https://'],
+    ['large_url', 'Large image link', 'https://'],
+    ['small_url', 'Small image link', 'https://'],
     ['application_id', 'Application ID', DEFAULT_APP_ID],
 ]
 /** 지금 보이는 칸: 추가한 것 + (예전 버전에서) 값이 들어 있는 것 */
@@ -270,7 +298,9 @@ function fieldsOf(a: Activity): FieldKey[] {
     const out = (a.fields ?? []).filter(k => FIELDS.some(([f]) => f === k)) as FieldKey[]
     for (const [k] of FIELDS) {
         if (out.includes(k) || k === 'application_id') continue
-        if (k === 'time' ? a.use_timestamps : k === 'buttons' ? (a.buttons ?? []).length > 0 : String((a as any)[k] ?? '').trim()) out.push(k)
+        if (k === 'status') continue
+        const has = k === 'time' ? a.use_timestamps : k === 'buttons' ? (a.buttons ?? []).length > 0 : k === 'party' ? Number(a.party_size) > 0 || Number(a.party_max) > 0 : String((a as any)[k] ?? '').trim()
+        if (has) out.push(k)
     }
     return out
 }
@@ -375,6 +405,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
         set({
             fields: shown.includes(k) ? shown : [...shown, k],
             ...(k === 'time' ? { use_timestamps: true } : {}),
+            ...(k === 'status' ? { status_display: a.status_display ?? 0 } : {}),
             ...(k === 'buttons' ? { buttons: [...(a.buttons ?? []), { label: '', url: '' }] } : {}),
         })
     }
@@ -383,6 +414,8 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
         const patch: any = { fields: shown.filter(f => f !== k) }
         if (k === 'time') patch.use_timestamps = false
         else if (k === 'buttons') patch.buttons = []
+        else if (k === 'party') Object.assign(patch, { party_size: 0, party_max: 0 })
+        else if (k === 'status') patch.status_display = undefined
         else if (k !== 'application_id') patch[k] = ''
         set(patch)
     }
@@ -432,6 +465,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                     ))}
                                 </View>
                                 {input('Name', 'name', 'Spotify')}
+                                {a.type === STREAMING ? input('Stream link', 'url', 'https://twitch.tv/…') : null}
                                 {shown.map(k => {
                                     if (k === 'time')
                                         return (
@@ -473,6 +507,37 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                             </Stack>
                                         )
                                     }
+                                    if (k === 'party')
+                                        return (
+                                            <Stack key={k} spacing={10}>
+                                                {input('Party, people now', 'party_size', '1', 'number', () => remove(k))}
+                                                {input('Party, max people', 'party_max', '4', 'number')}
+                                            </Stack>
+                                        )
+                                    if (k === 'status')
+                                        return (
+                                            <View key={k}>
+                                                <Text variant="text-sm/semibold" color="text-muted" style={{ marginBottom: 8 }}>
+                                                    Status display
+                                                </Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                                        {(
+                                                            [
+                                                                [0, 'Name'],
+                                                                [1, 'State'],
+                                                                [2, 'Details'],
+                                                            ] as Array<[number, string]>
+                                                        ).map(([v, label]) => (
+                                                            <Button key={v} size="sm" text={label} variant={(a.status_display ?? 0) === v ? 'primary' : 'secondary'} onPress={() => (animate(), set({ status_display: v }))} />
+                                                        ))}
+                                                    </View>
+                                                    <Pressable accessibilityRole="button" accessibilityLabel="Remove" hitSlop={10} onPress={() => remove(k)} style={{ padding: 6, marginLeft: 6 }}>
+                                                        <Icon name="XSmallIcon" alt={['XLargeIcon', 'CloseSmallIcon', 'CircleXIcon']} color={muted} />
+                                                    </Pressable>
+                                                </View>
+                                            </View>
+                                        )
                                     const f = FIELDS.find(([x]) => x === k)!
                                     return <View key={k}>{input(f[1], k as keyof Activity, f[2], k === 'application_id' ? 'id' : false, () => remove(k))}</View>
                                 })}
