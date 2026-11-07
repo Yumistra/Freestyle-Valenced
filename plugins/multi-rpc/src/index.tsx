@@ -89,6 +89,27 @@ function setList(next: Activity[], now = false) {
     else saveTimer = setTimeout(write, 400)
 }
 
+// ── 디스코드가 보여 주는 규칙 (직접 해 본 결과) ──
+// 최대 5개, Listening 은 여러 개 되지만 Playing, Watching, Competing 은 하나씩만.
+// 프로필은 Application ID 나 이름이 같은 활동을 하나로 합친다 (디스코드 코드에서 확인)
+const MAX_SHOWN = 5
+const LISTENING = 2
+type Why = { text: string; id?: boolean } | undefined
+function reasons(items: Activity[]): Why[] {
+    const shown: Activity[] = []
+    const appId = (a: Activity) => String(a.application_id || DEFAULT_APP_ID)
+    return items.map(a => {
+        if (!a.enabled) return undefined
+        let why: Why
+        if (shown.some(b => appId(b) === appId(a))) why = { text: "Same Application ID as another activity, this one won't show", id: true }
+        else if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) why = { text: "Same name as another activity, this one won't show" }
+        else if (a.type !== LISTENING && shown.some(b => b.type === a.type)) why = { text: `Only one ${TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'} shows, this one won't` }
+        else if (shown.length >= MAX_SHOWN) why = { text: `Only ${MAX_SHOWN} activities show, this one won't` }
+        if (!why) shown.push(a)
+        return why
+    })
+}
+
 // ── 보내기 ──────────────────────────────────────────────────────
 const find = (...props: string[]): any => {
     try {
@@ -145,7 +166,10 @@ async function build(a: Activity) {
 
 async function apply() {
     const my = ++runId
-    const on = list().filter(a => a?.enabled)
+    // 안 보일 활동은 보내지 않는다 (보내면 다른 활동이 대신 빠지기도 한다)
+    const all = list()
+    const skip = reasons(all)
+    const on = all.filter((a, i) => a?.enabled && !skip[i])
     const built: Array<{ socketId: string; pid: number; activity: any }> = []
     for (let i = 0; i < on.length; i++) {
         try {
@@ -181,7 +205,7 @@ function clearAll() {
 /** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다. 겹치면 다른 숫자로 바꿀 수 있게 */
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
 
-function Card({ a, dup, onChange, onRemove }: { a: Activity; dup: boolean; onChange: (a: Activity) => void; onRemove: () => void }) {
+function Card({ a, why, onChange, onRemove }: { a: Activity; why: Why; onChange: (a: Activity) => void; onRemove: () => void }) {
     const { Stack, TableRowGroup, TableSwitchRow, TableRow, TextInput, Button } = Design as any
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
@@ -199,10 +223,10 @@ function Card({ a, dup, onChange, onRemove }: { a: Activity; dup: boolean; onCha
     return (
         <TableRowGroup title={`${a.name || 'Activity'}, ${typeName}`}>
             <TableSwitchRow label="Show this" value={!!a.enabled} onValueChange={(enabled: boolean) => set({ enabled })} />
-            {dup ? (
+            {why ? (
                 <TableRow
-                    label="Same Application ID as another activity, only one shows"
-                    trailing={<Button size="sm" variant="secondary" text="Change" onPress={() => set({ application_id: randomAppId() })} />}
+                    label={why.text}
+                    trailing={why.id ? <Button size="sm" variant="secondary" text="Change" onPress={() => set({ application_id: randomAppId() })} /> : undefined}
                 />
             ) : null}
             <View style={{ padding: 12 }}>
@@ -245,6 +269,7 @@ function SettingsPage({ api }: { api?: any }) {
     const { Stack, Button, TableRowGroup, TableRadioGroup, TableRadioRow } = Design as any
     const [items, setItems] = useState<Activity[]>(list)
     const [g, setG] = useState(gap)
+    const whys = reasons(items)
     const first = useRef(true)
     useEffect(() => {
         if (first.current) {
@@ -268,7 +293,7 @@ function SettingsPage({ api }: { api?: any }) {
                     <Card
                         key={a.id}
                         a={a}
-                        dup={a.enabled && items.some((b, j) => j < i && b.enabled && String(b.application_id || DEFAULT_APP_ID) === String(a.application_id || DEFAULT_APP_ID))} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
+                        why={whys[i]} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
                 ))}
             </Stack>
         </ScrollView>
