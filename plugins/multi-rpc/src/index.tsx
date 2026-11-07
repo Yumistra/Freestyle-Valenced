@@ -33,7 +33,7 @@ interface Activity {
     length_min: number
     /** + 로 추가한 칸 (보이는 순서) */
     fields?: string[]
-    /** 활동 아래 버튼 (다른 사람에게 보인다). 개수, 길이 제한은 두지 않는다 */
+    /** 활동 아래 버튼 (다른 사람에게 보인다). 디스코드는 2개까지만 보여 준다 */
     buttons?: Array<{ label: string; url: string }>
 }
 
@@ -189,6 +189,8 @@ async function build(a: Activity) {
     const buttons = (a.buttons ?? [])
         .map(b => ({ label: (b.label || '').trim(), url: (b.url || '').trim() }))
         .filter(b => b.label && b.url)
+        // 디스코드는 2개까지만 보여 준다 (직접 해 본 결과)
+        .slice(0, 2)
     if (buttons.length) {
         act.buttons = buttons.map(b => b.label)
         act.metadata = { button_urls: buttons.map(b => b.url) }
@@ -451,7 +453,9 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                                         </View>
                                                     </View>
                                                 ))}
-                                                <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} />
+                                                <Blocked text={list.length >= 2 ? 'Only 2 buttons can show' : undefined}>
+                                                    <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} />
+                                                </Blocked>
                                             </Stack>
                                         )
                                     }
