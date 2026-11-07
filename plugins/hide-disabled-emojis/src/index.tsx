@@ -8,7 +8,8 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 
 /**
- * Hide Disabled Emojis: 이모지 고르기에서 쓸 수 없는(흐리게, 자물쇠로 보이는) 이모지를 숨긴다.
+ * Hide Disabled Emojis: 이모지, 스티커 고르기에서 쓸 수 없는(흐리게, 자물쇠로 보이는) 것을 숨긴다.
+ * 스티커: useStickerCategories 결과와 검색(searchAllStickers)에서 니트로 없이 못 보내는 다른 서버 스티커를 뺀다.
  * BetterDiscord 의 HideDisabledEmojis 를 옮긴 것.
  *
  * 디스코드 모바일 이모지 고르기는 useEmojiCategories(intention, channel, { guildId }) 로 묶음 목록을 받는다.
@@ -65,6 +66,9 @@ const status = {
     lastEmojis: 0,
     lastNitro: false as boolean,
     lastGuild: undefined as string | undefined,
+    stickerCalls: 0,
+    lastPacks: 0,
+    lastStickers: 0,
 }
 const err = (where: string, e: any) => {
     const m = `${where}: ${e?.message ?? e}`
@@ -149,6 +153,58 @@ function filterSearch(res: any, guild: string | undefined): any {
     return out
 }
 
+/** 니트로가 없으면 다른 서버 스티커는 못 보낸다. 디스코드 기본 스티커(guild_id 없음)는 괜찮다 */
+function stickerLocked(st: any, nitro: boolean, guild: string | undefined) {
+    if (!st) return false
+    if (st.available === false) return true
+    if (nitro) return false
+    const g = st.guild_id ?? st.guildId
+    return g != null && String(g) !== guild
+}
+
+function filterStickerCategories(cats: any[], guild: string | undefined): any[] {
+    if (!Array.isArray(cats)) return cats
+    const nitro = hasNitro()
+    const key = `${nitro}|${guild}`
+    status.stickerCalls++
+    const hit = cache.get(cats)
+    if (hit?.key === key) return hit.out
+    let changed = false
+    let packs = 0
+    let hidden = 0
+    const out: any[] = []
+    for (const c of cats) {
+        const list = c?.stickers
+        if (!c || !Array.isArray(list)) {
+            out.push(c)
+            continue
+        }
+        if (c.isNitroLocked === true) {
+            changed = true
+            packs++
+            hidden += list.length
+            continue
+        }
+        const kept = list.filter((st: any) => !stickerLocked(st, nitro, guild))
+        if (kept.length === list.length) {
+            out.push(c)
+            continue
+        }
+        changed = true
+        hidden += list.length - kept.length
+        if (!kept.length) {
+            packs++
+            continue
+        }
+        out.push({ ...c, stickers: kept })
+    }
+    status.lastPacks = packs
+    status.lastStickers = hidden
+    const res = changed ? out : cats
+    cache.set(cats, { key, out: res })
+    return res
+}
+
 function patchModule(mod: any, cleanup: (...f: any[]) => void, patched: WeakSet<object>) {
     if (!mod || typeof mod !== 'object' || patched.has(mod)) return
     patched.add(mod)
@@ -174,6 +230,13 @@ function patchModule(mod: any, cleanup: (...f: any[]) => void, patched: WeakSet<
     }
     hook('useEmojiCategories', (res, args) => filterCategories(res, guildOf(args[1], args[2])))
     hook('useEmojiSearchResults', (res, args) => filterSearch(res, guildOf(args[1], undefined)))
+    hook('useStickerCategories', (res, args) => filterStickerCategories(res, guildOf(args[0], undefined)))
+    hook('searchAllStickers', res => {
+        if (!Array.isArray(res)) return res
+        const nitro = hasNitro()
+        const guild = selectedGuild()
+        return res.filter((st: any) => !stickerLocked(st, nitro, guild))
+    })
 }
 
 function SettingsPage() {
@@ -190,7 +253,7 @@ function SettingsPage() {
                 <TableRowGroup title="Status">
                     <TableRow
                         icon={<TableRowAssetIcon name="InfoIcon" />}
-                        label="Emoji list"
+                        label="Hooks"
                         subLabel={status.patched.length ? `Hooked, ${status.patched.join(', ')}` : status.found ? 'Found, but not hooked' : 'Not found yet'}
                     />
                     <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Nitro" subLabel={nitro ? 'Yes, nothing is hidden' : 'No'} />
@@ -200,6 +263,15 @@ function SettingsPage() {
                         subLabel={
                             status.calls
                                 ? `Opened, last time hid ${status.lastSections} servers and ${status.lastEmojis} emojis${status.lastGuild ? '' : ', outside a server'}`
+                                : 'Not opened since Discord started'
+                        }
+                    />
+                    <TableRow
+                        icon={<TableRowAssetIcon name="StickerIcon" />}
+                        label="Sticker picker"
+                        subLabel={
+                            status.stickerCalls
+                                ? `Opened, last time hid ${status.lastPacks} packs and ${status.lastStickers} stickers`
                                 : 'Not opened since Discord started'
                         }
                     />
@@ -213,15 +285,17 @@ function SettingsPage() {
 export default plugin({
     start({ cleanup }: any) {
         const patched = new WeakSet<object>()
-        try {
-            patchModule((lookupModule(withProps('useEmojiCategories') as any) as any)?.[0], cleanup, patched)
-        } catch (e) {
-            err('lookup', e)
-        }
-        try {
-            cleanup(getModules(withProps('useEmojiCategories') as any, (mod: any) => patchModule(mod, cleanup, patched)) as any)
-        } catch (e) {
-            err('getModules', e)
+        for (const prop of ['useEmojiCategories', 'useStickerCategories', 'searchAllStickers']) {
+            try {
+                patchModule((lookupModule(withProps(prop) as any) as any)?.[0], cleanup, patched)
+            } catch (e) {
+                err(`lookup ${prop}`, e)
+            }
+            try {
+                cleanup(getModules(withProps(prop) as any, (mod: any) => patchModule(mod, cleanup, patched)) as any)
+            } catch (e) {
+                err(`getModules ${prop}`, e)
+            }
         }
     },
     SettingsComponent: SettingsPage,

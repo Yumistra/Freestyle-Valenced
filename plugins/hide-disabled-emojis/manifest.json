@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.hide-disabled-emojis",
 	"name": "Hide Disabled Emojis",
-	"description": "Hides emojis you can't use from the emoji picker.",
+	"description": "Hides emojis and stickers you can't use from the pickers.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
