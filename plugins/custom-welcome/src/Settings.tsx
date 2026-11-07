@@ -1,9 +1,6 @@
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
-import { AlertActionCreators } from '@valenced/discord/actions'
-import { lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { palette } from './colors'
@@ -18,41 +15,6 @@ function stickerName(id: string) {
 
 /** 붙여 넣은 글에서 스티커 ID 를 꺼낸다 (ID 그대로, 또는 스티커 링크) */
 const stickerIdOf = (text: string) => /(\d{17,20})/.exec(text)?.[1]
-
-/**
- * DM 첫 화면 "손 흔들기" 버튼과 똑같이 웨이브 스티커를 sendStickers 로 보낸다 (마지막으로 연 채널에).
- * Custom Welcome 이 잘 가로채면 설정한 글이나 스티커가 가고, 아니면 디스코드 기본 웨이브가 간다.
- */
-function tryWave() {
-    const { AlertModal, AlertActionButton } = Design as any
-    const S: any = Stores
-    let channelId: string | undefined
-    let where = ''
-    try {
-        channelId = S.SelectedChannelStore?.getChannelId?.() ?? S.SelectedChannelStore?.getMostRecentSelectedTextChannelId?.()
-        const ch = channelId ? S.ChannelStore?.getChannel?.(channelId) : undefined
-        const dm = ch?.recipients?.length ? S.UserStore?.getUser?.(ch.recipients[0]) : undefined
-        where = ch?.name ? `#${ch.name}` : dm ? `your DM with ${dm.globalName ?? dm.username}` : ch ? 'that chat' : ''
-    } catch {}
-    const show = (content: string, actions: any) => AlertActionCreators.openAlert('custom-welcome-try', <AlertModal title="Try the wave button" content={content} actions={actions} />)
-    if (!channelId || !where) return show('Open a chat first, then come back here.', <AlertActionButton text="OK" variant="primary" />)
-    show(
-        `This sends a real message in ${where}, the same way the DM "Wave" button does.`,
-        <>
-            <AlertActionButton
-                text="Send"
-                variant="primary"
-                onPress={() => {
-                    try {
-                        const mod: any = (lookupModule(withProps('sendStickers', 'sendMessage') as any) as any)?.[0]
-                        mod?.sendStickers?.(channelId, ['749054660769218631'], '', { location: 'SEND_WAVE' })
-                    } catch {}
-                }}
-            />
-            <AlertActionButton text="Cancel" variant="secondary" />
-        </>,
-    )
-}
 
 const anim = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
 
@@ -140,14 +102,6 @@ export default function SettingsPage({ api }: { api?: any }) {
                     <TableRadioRow label="Together" value="together" />
                     <TableRadioRow label="One at random" value="separate" />
                 </TableRadioGroup>
-
-                <TableRowGroup>
-                    <TableRow
-                        icon={<TableRowAssetIcon name="HandRequestSpeakIcon" />}
-                        label="Try the wave button"
-                        trailing={<Button size="sm" variant="secondary" text="Try" onPress={tryWave} />}
-                    />
-                </TableRowGroup>
 
                 <Section
                     title="Messages"

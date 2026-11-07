@@ -2,7 +2,7 @@
 	"format": 1,
 	"id": "yumistra.silent-messages",
 	"name": "Silent Messages",
-	"description": "",
+	"description": "Send messages without notifying people.",
 	"author": "Yumistra",
 	"icon": "BellSlashIcon",
 	"version": "1.0.2",

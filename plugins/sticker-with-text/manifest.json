@@ -2,7 +2,7 @@
     "format": 1,
     "id": "yumistra.sticker-with-text",
     "name": "Sticker With Text",
-    "description": "",
+    "description": "Send stickers together with text and files.",
     "author": "Yumistra",
     "icon": "StickerIcon",
     "version": "1.0.25",

@@ -2,7 +2,7 @@
 	"format": 1,
 	"id": "yumistra.intelligent-compression",
 	"name": "Intelligent Compression",
-	"description": "",
+	"description": "Original quality uploads, compressed only when needed.",
 	"author": "Yumistra",
 	"icon": "ImageIcon",
 	"version": "1.2.10",

@@ -2,7 +2,7 @@
 	"format": 1,
 	"id": "yumistra.message-logger",
 	"name": "Message Logger",
-	"description": "",
+	"description": "Keeps deleted and edited messages.",
 	"author": "Yumistra",
 	"icon": "ChatXIcon",
 	"version": "1.0.12",
