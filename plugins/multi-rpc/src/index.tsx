@@ -3,7 +3,8 @@ import { Design } from '@valenced/discord/design'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
-import { Animated, Pressable, ScrollView, Text, View } from 'react-native'
+import { ScrollView, View } from 'react-native'
+import { Blocked, TooltipHost, useTooltipHide } from './tooltip'
 
 /**
  * Multi RPC: 내 활동(게임 중, 듣는 중 …)을 여러 개 한꺼번에 보여 준다.
@@ -232,52 +233,6 @@ function clearAll() {
     live.clear()
 }
 
-// ── 막힌 버튼: 누르면 이유를 말풍선으로 ─────────────────────────────
-function Tip({ text, side = 'above', onBlocked, children }: { text?: string; side?: 'above' | 'left'; onBlocked?: () => void; children: any }) {
-    const [shown, setShown] = useState(false)
-    const fade = useRef(new Animated.Value(0)).current
-    const timer = useRef<any>()
-    useEffect(() => () => clearTimeout(timer.current), [])
-    if (!text) return children
-    const show = () => {
-        onBlocked?.()
-        setShown(true)
-        fade.setValue(0)
-        Animated.timing(fade, { toValue: 1, duration: 120, useNativeDriver: true }).start()
-        clearTimeout(timer.current)
-        timer.current = setTimeout(() => Animated.timing(fade, { toValue: 0, duration: 160, useNativeDriver: true }).start(() => setShown(false)), 2200)
-    }
-    const BLURPLE = '#5865F2'
-    const bubble = (
-        <Animated.View
-            pointerEvents="none"
-            style={[
-                { position: 'absolute', zIndex: 20, elevation: 20, opacity: fade, flexDirection: side === 'left' ? 'row' : 'column', alignItems: 'center' },
-                side === 'above' ? { bottom: '100%', left: 0, marginBottom: 4 } : { right: 64, top: 0, bottom: 0, justifyContent: 'center' },
-            ]}
-        >
-            <View style={{ backgroundColor: BLURPLE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 240 }}>
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>{text}</Text>
-            </View>
-            <View
-                style={[
-                    { width: 8, height: 8, backgroundColor: BLURPLE, transform: [{ rotate: '45deg' }] },
-                    side === 'above' ? { marginTop: -4, alignSelf: 'flex-start', marginLeft: 14 } : { marginLeft: -4 },
-                ]}
-            />
-        </Animated.View>
-    )
-    return (
-        <View>
-            <View style={{ opacity: 0.4 }} pointerEvents="none">
-                {children}
-            </View>
-            <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={show} />
-            {shown ? bubble : null}
-        </View>
-    )
-}
-
 // ── 설정 화면 ───────────────────────────────────────────────────
 /** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다. 겹치면 다른 숫자로 바꿀 수 있게 */
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
@@ -300,16 +255,21 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     return (
         <TableRowGroup title={`${a.name || 'Activity'}, ${typeName}`}>
             {/* 켜도 안 보일 활동은 켤 수 없게 (누르면 이유) */}
-            <Tip text={(a.enabled ? why : blockOn)?.text} side="left" onBlocked={() => a.enabled && set({ enabled: false })}>
+            {/* 스위치(줄 오른쪽 끝)를 가리킨다 */}
+            <Blocked
+                text={(a.enabled ? why : blockOn)?.text}
+                anchor={r => ({ x: r.x + r.width - 68, y: r.y, width: 52, height: r.height })}
+                onBlocked={() => a.enabled && set({ enabled: false })}
+            >
                 <TableSwitchRow label="Show this" value={!!a.enabled && !why} onValueChange={(enabled: boolean) => set({ enabled })} />
-            </Tip>
+            </Blocked>
             <View style={{ padding: 12 }}>
                 <Stack spacing={10}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {TYPES.map(([v, label]) => (
-                            <Tip key={v} text={a.type === v ? undefined : blockType(v)?.text}>
+                            <Blocked key={v} text={a.type === v ? undefined : blockType(v)?.text}>
                                 <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
-                            </Tip>
+                            </Blocked>
                         ))}
                     </View>
                     {field('Name', 'name', 'Spotify')}
@@ -356,7 +316,17 @@ function SettingsPage({ api }: { api?: any }) {
         setList(items)
     }, [items])
     return (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+        <TooltipHost>
+            <Page items={items} setItems={setItems} on={on} setOnState={setOnState} g={g} setG={setG} whys={whys} />
+        </TooltipHost>
+    )
+}
+
+function Page({ items, setItems, on, setOnState, g, setG, whys }: any) {
+    const { Stack, Button, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow } = Design as any
+    const hide = useTooltipHide()
+    return (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled onScrollBeginDrag={hide}>
             <Stack spacing={16}>
                 <TableRowGroup>
                     <TableSwitchRow
@@ -371,9 +341,9 @@ function SettingsPage({ api }: { api?: any }) {
                         }}
                     />
                 </TableRowGroup>
-                <Tip text={on ? undefined : 'Turn on Multi RPC first'}>
+                <Blocked text={on ? undefined : 'Turn on Multi RPC first'}>
                     <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
-                </Tip>
+                </Blocked>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity({ application_id: randomAppId() })])} />
                 <TableRadioGroup title="Time between activities" defaultValue={String(g)} onChange={(v: string) => (setG(Number(v)), setGap(Number(v)))}>
                     {GAPS.map(ms => (
