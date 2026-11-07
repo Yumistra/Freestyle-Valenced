@@ -45,6 +45,12 @@ function fill(text: string, channelId: string, ref: any) {
         const ch = S.ChannelStore?.getChannel?.(channelId)
         channel = ch?.name ? `#${ch.name}` : ''
         server = (ch?.guild_id && S.GuildStore?.getGuild?.(ch.guild_id)?.name) || ''
+        // DM 의 손 흔들기처럼 답장할 메시지가 없으면 DM 상대를 부른다
+        if (!user && ch && !ch.guild_id) {
+            const me = S.UserStore?.getCurrentUser?.()?.id
+            const id = ch.getRecipientId?.() ?? (ch.recipients ?? ch.recipient_ids ?? []).map((r: any) => (typeof r === 'string' ? r : r?.id)).find((r: string) => r && r !== me)
+            if (id) user = S.UserStore?.getUser?.(id) ?? { id }
+        }
     } catch {}
     const name = user?.globalName ?? user?.global_name ?? user?.username ?? 'there'
     return text
@@ -52,6 +58,13 @@ function fill(text: string, channelId: string, ref: any) {
         .replace(/\{name\}/gi, name)
         .replace(/\{server\}/gi, server)
         .replace(/\{channel\}/gi, channel)
+}
+
+/** 디스코드의 "손 흔들기" 웨이브 스티커 (DM 첫 화면 버튼이 보내는 것) */
+export const WAVE_STICKER = '749054660769218631'
+function isWave(ids: any, options: any) {
+    if (!Array.isArray(ids) || ids.length !== 1) return false
+    return String(ids[0]) === WAVE_STICKER || /wave/i.test(String(options?.location ?? ''))
 }
 
 function send(channelId: string, ref: any): boolean {
@@ -71,15 +84,10 @@ function send(channelId: string, ref: any): boolean {
     const msg = (text: string) => ({ content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] })
     sending = true
     try {
-        if (s.mode === 'separate' && content.trim() && sticker) {
-            // 메시지 먼저, 그다음 스티커 (두 번째는 다시 알림 가지 않게)
-            Promise.resolve(actions.sendMessage(channelId, msg(content), undefined, options))
-                .catch(() => {})
-                .then(() => actions.sendMessage(channelId, msg(''), undefined, { ...options, stickerIds: [sticker], allowedMentions: { parse: [], replied_user: false } }))
-        } else {
-            if (sticker) options.stickerIds = [sticker]
-            actions.sendMessage(channelId, msg(content), undefined, options)
-        }
+        // 하나만 (separate): 그때그때 글만, 또는 스티커만 무작위로
+        const one = s.mode === 'separate' && content.trim() && sticker ? (Math.random() < 0.5 ? 'text' : 'sticker') : undefined
+        if (sticker && one !== 'text') options.stickerIds = [sticker]
+        actions.sendMessage(channelId, msg(one === 'sticker' ? '' : content), undefined, options)
     } finally {
         sending = false
     }
@@ -102,11 +110,27 @@ export default plugin({
             return orig.apply(this, args)
         }
         const done = new WeakSet<object>()
+        const waved = new WeakSet<object>()
         cleanup(
             getModules(withProps('sendGreetMessage') as any, (mod: any) => {
                 if (typeof mod?.sendGreetMessage !== 'function' || done.has(mod)) return
                 done.add(mod)
                 cleanup(instead(mod, 'sendGreetMessage', greet))
+            }) as any,
+            // DM 첫 화면의 "손 흔들기" 버튼은 sendGreetMessage 가 아니라 웨이브 스티커를 sendStickers 로 보낸다
+            getModules(withProps('sendStickers', 'sendMessage') as any, (mod: any) => {
+                if (typeof mod?.sendStickers !== 'function' || waved.has(mod)) return
+                waved.add(mod)
+                if (typeof mod.sendMessage === 'function' && !actions) actions = mod
+                cleanup(
+                    instead(mod, 'sendStickers', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        try {
+                            const [channelId, ids, , options] = args
+                            if (settings().enabled && typeof channelId === 'string' && isWave(ids, options) && send(channelId, undefined)) return Promise.resolve()
+                        } catch {}
+                        return orig.apply(this, args)
+                    }),
+                )
             }) as any,
             // 보내는 함수는 찾아 두기만 한다 (보낼 때마다 끼어들지 않는다)
             getModules(withProps('sendMessage', 'deleteMessage') as any, (mod: any) => {

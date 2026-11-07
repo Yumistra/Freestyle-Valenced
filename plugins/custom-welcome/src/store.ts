@@ -7,7 +7,7 @@ export interface Settings {
     stickers: string[]
     /** 답장할 때 그 사람에게 알림 (멘션) */
     ping: boolean
-    /** 메시지와 스티커를 한 메시지로(together), 따로 두 메시지로(separate) */
+    /** 메시지와 스티커를 한 메시지로(together), 둘 중 하나만 무작위로(separate) */
     mode: 'together' | 'separate'
     /** 예전 버전에서 쓰던 값 */
     lastSticker?: string

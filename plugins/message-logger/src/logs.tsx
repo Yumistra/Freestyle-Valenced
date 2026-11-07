@@ -597,7 +597,7 @@ export function LogsView() {
                     </View>
                 ) : null}
                 <Text variant="text-xs/medium" style={{ color: P.muted, marginTop: 10 }}>
-                    {all.length ? `${entries.length} of ${all.length} log(s), tap a message to go to it` : 'No logs yet.'}
+                    {all.length ? `${entries.length} of ${all.length} log(s)` : 'No logs yet.'}
                     {all.length && !entries.length && (q.trim() || active) ? ', nothing matches' : ''}
                 </Text>
             </View>

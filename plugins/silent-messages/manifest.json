@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.silent-messages",
 	"name": "Silent Messages",
-	"description": "Send messages without notifying people, toggled from a button in the chat bar. Ported from siguma's Silent Messages.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "BellSlashIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

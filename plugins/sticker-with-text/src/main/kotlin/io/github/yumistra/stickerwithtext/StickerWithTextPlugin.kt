@@ -3,6 +3,9 @@
 package io.github.yumistra.stickerwithtext
 
 import android.graphics.Bitmap
+import android.view.inputmethod.InputMethodManager
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import android.util.Base64
 import app.valenced.plugins.PluginBuilder
 import app.valenced.plugins.PluginScope
@@ -18,6 +21,37 @@ import java.io.ByteArrayOutputStream
  */
 private object State {
     var loader: ClassLoader? = null
+    @Volatile var suppressUntil = 0L
+    var unhooks: Set<XC_MethodHook.Unhook> = emptySet()
+}
+
+/** 스티커를 고른 직후 잠깐은 폰 글자 키보드(IME)가 아예 뜨지 않게 showSoftInput 을 막는다 */
+private object BlockShow : XC_MethodHook() {
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        if (System.currentTimeMillis() < State.suppressUntil) param.result = false
+    }
+}
+
+/** 안드로이드 11 부터는 RN 입력창이 WindowInsetsController.show(ime) 로 키보드를 띄운다. 그것도 막는다 */
+private object BlockInsetsShow : XC_MethodHook() {
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        if (System.currentTimeMillis() >= State.suppressUntil) return
+        val types = param.args.getOrNull(0) as? Int ?: return
+        val ime = try {
+            android.view.WindowInsets.Type.ime()
+        } catch (_: Throwable) {
+            8
+        }
+        if (types and ime != 0) param.result = null
+    }
+}
+
+private object SuppressIme : Function1<List<Any?>, Any?> {
+    override fun invoke(args: List<Any?>): Any? {
+        val ms = (args.getOrNull(0) as? Number)?.toLong()?.coerceIn(0L, 3000L) ?: 1000L
+        State.suppressUntil = System.currentTimeMillis() + ms
+        return State.unhooks.isNotEmpty()
+    }
 }
 
 private fun method(cls: Class<*>, name: String, argc: Int): java.lang.reflect.Method? {
@@ -67,6 +101,17 @@ private object RLottie {
             inst = f?.get(null)
         } catch (_: Throwable) {
         }
+        // 이 Companion 에는 생성자가 없다 (R8 이 지웠다). 네이티브 함수는 this 를 쓰지 않으니 빈 객체를 만든다
+        if (inst == null) {
+            try {
+                val unsafeCls = Class.forName("sun.misc.Unsafe")
+                val f = unsafeCls.getDeclaredField("theUnsafe")
+                f.isAccessible = true
+                val unsafe = f.get(null)
+                inst = unsafeCls.getMethod("allocateInstance", Class::class.java).invoke(unsafe, comp)
+            } catch (_: Throwable) {
+            }
+        }
         if (inst == null) {
             val cs = comp.declaredConstructors
             var i = 0
@@ -82,7 +127,7 @@ private object RLottie {
         create = method(comp, "createWithJson", 4)
         frame = method(comp, "getFrame", 7)
         destroy = method(comp, "destroy", 1)
-        if (inst == null || create == null || frame == null) throw IllegalStateException("rlottie not found")
+        if (inst == null || create == null || frame == null) throw IllegalStateException("rlottie not found (" + (if (inst == null) "no instance" else "no methods") + ")")
         companion = inst
     }
 }
@@ -143,12 +188,31 @@ private object OnStart : Function1<PluginScope, Unit> {
     override fun invoke(scope: PluginScope) {
         State.loader = scope.classLoader
         scope.registerNativeMethod("yumistra.sticker-with-text.renderLottie", RenderLottie)
+        scope.registerNativeMethod("yumistra.sticker-with-text.suppressIme", SuppressIme)
+        val hooks = HashSet<XC_MethodHook.Unhook>()
+        try {
+            hooks.addAll(XposedBridge.hookAllMethods(InputMethodManager::class.java, "showSoftInput", BlockShow))
+        } catch (_: Throwable) {
+        }
+        for (name in arrayOf("android.view.InsetsController", "android.view.PendingInsetsController")) {
+            try {
+                hooks.addAll(XposedBridge.hookAllMethods(Class.forName(name), "show", BlockInsetsShow))
+            } catch (_: Throwable) {
+            }
+        }
+        State.unhooks = hooks
     }
 }
 
 private object OnStop : Function1<PluginScope, Unit> {
     override fun invoke(scope: PluginScope) {
         State.loader = null
+        State.suppressUntil = 0L
+        for (u in State.unhooks) try {
+            u.unhook()
+        } catch (_: Throwable) {
+        }
+        State.unhooks = emptySet()
     }
 }
 

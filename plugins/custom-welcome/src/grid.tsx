@@ -4,6 +4,8 @@ import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/fi
 import { getModules, lookupModule, lookupModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
+import { renderLottie } from './lottie'
+import { encodePng } from './png'
 import { Animated, Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
 import { palette } from './colors'
 
@@ -70,7 +72,11 @@ export function bindSticker(cleanup: (...f: Array<() => void>) => void) {
 function stickerComponent() {
     if (StickerC) return StickerC
     try {
-        const m: any = (lookupModuleWithImportedPath('modules/stickers/native/Sticker.tsx') as any)?.[0]
+        const found: any = lookupModuleWithImportedPath('modules/stickers/native/Sticker.tsx')
+        let m: any = found?.[0]
+        // 디스코드가 아직 스티커 부품을 안 불렀으면 (스티커 고르기를 한 번도 안 연 경우) 직접 부른다.
+        // 이게 없으면 움직이는 스티커가 이름 글자로만 보인다
+        if (!m && found?.[1] != null && typeof (globalThis as any).__r === 'function') m = (globalThis as any).__r(found[1])
         if (isStickerModule(m)) StickerC = m.default
     } catch {}
     try {
@@ -89,10 +95,100 @@ export function StickerView({ sticker, size }: { sticker: any; size: number }) {
     // 디스코드 부품은 온전한 스티커 정보(형식 포함)가 있을 때만 쓴다
     const C = sticker?.format_type != null && sticker?.name ? stickerComponent() : undefined
     if (C) return <C sticker={sticker} size={size} animated={false} />
-    if (sticker?.format_type === 3) {
-        // 움직이는 Lottie 스티커는 그림 주소가 없다. 디스코드 부품을 못 찾으면 이름 칸으로
+    if (sticker?.format_type === 3) return <LottieStill sticker={sticker} size={size} />
+    return <Image source={{ uri: stickerImage(sticker) }} style={{ width: size, height: size }} resizeMode="contain" />
+}
+
+// ── 움직이는(Lottie) 스티커: 디스코드 부품이 아직 없으면 플러그인이 한 장면을 직접 그린다 ──
+const stills = new Map<string, string | null>()
+const waitingFor = new Map<string, Set<() => void>>()
+/** 받기는 여러 개 같이, 그리기는 화면이 안 멈추게 하나씩 */
+const jsons = new Map<string, Promise<any>>()
+const drawQueue: string[] = []
+let drawing = false
+function fetchJson(id: string): Promise<any> {
+    let p = jsons.get(id)
+    if (!p) {
+        p = (async () => {
+            for (const u of [`https://discord.com/stickers/${id}.json`, `https://media.discordapp.net/stickers/${id}.json`, `https://cdn.discordapp.com/stickers/${id}.json`]) {
+                try {
+                    const res = await fetch(u)
+                    if (!res.ok) continue
+                    const j = await res.json()
+                    if (j && Array.isArray(j.layers)) return j
+                } catch {}
+            }
+        })()
+        jsons.set(id, p)
+    }
+    return p
+}
+function finish(id: string, uri: string | null) {
+    stills.set(id, uri)
+    const fs = waitingFor.get(id)
+    waitingFor.delete(id)
+    for (const f of fs ?? [])
+        try {
+            f()
+        } catch {}
+}
+function pump() {
+    if (drawing) return
+    const id = drawQueue.shift()
+    if (!id) return
+    drawing = true
+    fetchJson(id)
+        .then(json => {
+            let uri: string | null = null
+            if (json)
+                for (const at of [0.4, 0.6, 0.25, 0.8, 0])
+                    try {
+                        const rgba = renderLottie(json, 96, at)
+                        if (rgba) {
+                            uri = `data:image/png;base64,${encodePng(rgba, 96)}`
+                            break
+                        }
+                    } catch {}
+            finish(id, uri)
+        })
+        .finally(() => {
+            drawing = false
+            setTimeout(pump, 0)
+        })
+}
+function drawStill(id: string, done: () => void) {
+    if (stills.has(id)) return done()
+    let fs = waitingFor.get(id)
+    if (!fs) {
+        waitingFor.set(id, (fs = new Set()))
+        fetchJson(id)
+        drawQueue.push(id)
+    }
+    fs.add(done)
+    pump()
+}
+function LottieStill({ sticker, size }: { sticker: any; size: number }) {
+    const id = String(sticker.id)
+    const [, tick] = useState(0)
+    const fade = useRef(new Animated.Value(stills.get(id) ? 1 : 0)).current
+    useEffect(() => {
+        let alive = true
+        if (!stills.has(id))
+            drawStill(id, () => {
+                if (!alive) return
+                tick(n => n + 1)
+                Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start()
+            })
+        return () => {
+            alive = false
+        }
+    }, [id])
+    const uri = stills.get(id)
+    if (uri) return <Animated.Image source={{ uri }} style={{ width: size, height: size, opacity: fade }} resizeMode="contain" />
+    const P = palette()
+    if (uri === null) {
+        // 못 그린 스티커만 이름으로
         const { Text } = Design as any
-        const P = palette()
         return (
             <View style={{ width: size, height: size, borderRadius: 12, backgroundColor: P.chip, alignItems: 'center', justifyContent: 'center', padding: 2 }}>
                 <Text variant="text-xs/semibold" numberOfLines={2} adjustsFontSizeToFit style={{ color: P.text, textAlign: 'center' }}>
@@ -101,15 +197,19 @@ export function StickerView({ sticker, size }: { sticker: any; size: number }) {
             </View>
         )
     }
-    return <Image source={{ uri: stickerImage(sticker) }} style={{ width: size, height: size }} resizeMode="contain" />
+    // 그리는 중: 글자 없이 옅은 자리만
+    return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: P.chip, opacity: 0.5, transform: [{ scale: 0.6 }] }} />
 }
 
 // ── 디스코드 기본 스티커 묶음 (Wumpus 같은 것) ──────────────────────────────
 let apiPacks: any[] | undefined
 let loading = false
 /** 디스코드 기본 스티커 묶음 목록 (로그인 없이 받는 공개 주소, 토큰은 쓰지 않는다) */
+const waiting = new Set<() => void>()
 function loadPacks(done: () => void) {
-    if (apiPacks || loading) return
+    if (apiPacks) return
+    waiting.add(done)
+    if (loading) return
     loading = true
     fetch('https://discord.com/api/v9/sticker-packs')
         .then(r => r.json())
@@ -121,8 +221,25 @@ function loadPacks(done: () => void) {
         })
         .finally(() => {
             loading = false
-            done()
+            const all = [...waiting]
+            waiting.clear()
+            for (const f of all)
+                try {
+                    f()
+                } catch {}
         })
+}
+
+/** 고른 스티커 목록이 디스코드 기본 묶음을 받은 뒤 다시 그려지게 한다 (안 그러면 "Sticker 123..." 으로 남는다) */
+export function usePacks() {
+    const [, tick] = useState(0)
+    useEffect(() => {
+        let alive = true
+        loadPacks(() => alive && tick(n => n + 1))
+        return () => {
+            alive = false
+        }
+    }, [])
 }
 
 function storePacks(): any[] {
@@ -260,7 +377,7 @@ export function ExpressionGrid({ kind, onPick, chosen }: { kind: 'sticker' | 'em
     if (!groups.length)
         return (
             <Text variant="text-sm/medium" style={{ color: P.muted }}>
-                {kind === 'sticker' ? 'No stickers found.' : 'No emojis found. Keyboard emojis work too.'}
+                {kind === 'sticker' ? 'No stickers found.' : 'No emojis found.'}
             </Text>
         )
 

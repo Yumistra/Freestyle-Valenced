@@ -27,15 +27,14 @@ export default function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="BellSlashIcon" />}
                         label="Always send silently"
-                        subLabel="All of your messages are sent without notifications."
                         value={s.alwaysSilent}
                         onValueChange={(alwaysSilent: boolean) => update({ alwaysSilent })}
                     />
                 </TableRowGroup>
                 <TableRadioGroup title="Chat bar button" defaultValue={s.button} onChange={(button: Settings['button']) => update({ button })}>
                     <TableRadioRow label="Hidden" value="none" />
-                    <TableRadioRow label="Left" subLabel="Next to the attachments button." value="left" />
-                    <TableRadioRow label="Right" subLabel="Next to the emoji button." value="right" />
+                    <TableRadioRow label="Left" value="left" />
+                    <TableRadioRow label="Right" value="right" />
                 </TableRadioGroup>
                 <TableRowGroup title={`Silenced (${s.silentList.length})`}>
                     {s.silentList.length ? (
@@ -48,7 +47,7 @@ export default function SettingsPage({ api }: { api?: any }) {
                             />
                         ))
                     ) : (
-                        <TableRow label="Nothing yet" subLabel="Tap the bell in the chat bar to silence a chat." />
+                        <TableRow label="Nothing yet" />
                     )}
                 </TableRowGroup>
                 <Stack spacing={8}>

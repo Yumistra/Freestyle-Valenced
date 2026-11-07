@@ -409,8 +409,8 @@ function Choice<T extends string>({ title, value, options, onChange }: { title: 
     const { TableRadioGroup, TableRadioRow } = D()
     return (
         <TableRadioGroup title={title} value={value} onChange={onChange}>
-            {options.map(([v, label, sub]) => (
-                <TableRadioRow key={v} value={v} label={label} subLabel={sub} />
+            {options.map(([v, label]) => (
+                <TableRadioRow key={v} value={v} label={label} />
             ))}
         </TableRadioGroup>
     )

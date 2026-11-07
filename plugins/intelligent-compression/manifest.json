@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.intelligent-compression",
 	"name": "Intelligent Compression",
-	"description": "Uploads images and videos in original quality when they fit your upload limit, and compresses them just enough to fit when they don't.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "ImageIcon",
-	"version": "1.2.8",
+	"version": "1.2.9",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

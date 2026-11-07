@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.silent-leave",
 	"name": "Silent Leave",
-	"description": "Leave group DMs silently.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "DoorExitIcon",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

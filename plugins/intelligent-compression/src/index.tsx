@@ -156,31 +156,25 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="ImageIcon" />}
                         label="Images"
-                        subLabel="Original quality if it fits. Otherwise the best quality that still fits."
                         value={s.images}
                         onValueChange={(images: boolean) => set({ images })}
                     />
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="VideoIcon" />}
                         label="Videos"
-                        subLabel="Original if it fits. Otherwise re-encoded to just under your limit."
                         value={s.videos}
                         onValueChange={(videos: boolean) => set({ videos })}
                     />
                 </TableRowGroup>
                 <TableRadioGroup title="Video encoder (when compressing)" defaultValue={s.codec} onChange={(codec: Codec) => set({ codec })}>
-                    {CODECS.map(([value, label, sub]) => (
-                        <TableRadioRow key={value} label={label} subLabel={sub} value={value} />
+                    {CODECS.map(([value, label]) => (
+                        <TableRadioRow key={value} label={label} value={value} />
                     ))}
                 </TableRadioGroup>
                 <TableRowGroup title="Upload limit">
                     <TableRow
                         label={`${fmt(limit)} here`}
-                        subLabel={
-                            ready
-                                ? "Your account or this server's boost level, whichever is higher. Files that can't fit even at the lowest quality are refused."
-                                : 'Not active yet — fully close and reopen Discord.'
-                        }
+                        subLabel={ready ? undefined : 'Not active yet, fully close and reopen Discord.'}
                     />
                 </TableRowGroup>
                 <TableRowGroup title="Diagnostics">

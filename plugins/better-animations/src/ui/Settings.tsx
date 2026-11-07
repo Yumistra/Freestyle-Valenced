@@ -600,14 +600,12 @@ export default function SettingsPage({ api }: { api?: any }) {
                     <TableRowGroup>
                         <TableSwitchRow
                             label="iOS bounce"
-                            subLabel="Lists stretch and spring back at their ends"
                             value={s.modules.messages.bounce !== false}
                             onValueChange={(bounce: boolean) => commit({ ...s, modules: { ...s.modules, messages: { ...s.modules.messages, bounce } } })}
                         />
                         {s.modules.messages.bounce !== false && (
                             <TableSwitchRow
                                 label="Everywhere"
-                                subLabel="Every scrolling list, not just the chat"
                                 value={s.modules.messages.bounceAll !== false}
                                 onValueChange={(bounceAll: boolean) => commit({ ...s, modules: { ...s.modules, messages: { ...s.modules.messages, bounceAll } } })}
                             />

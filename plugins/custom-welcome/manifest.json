@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.custom-welcome",
 	"name": "Custom Welcome",
-	"description": "Choose what the \"Wave to say hi!\" button sends: your own message, a GIF link, your own sticker, or a mix, picked at random.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "HandRequestSpeakIcon",
-	"version": "1.0.6",
+	"version": "1.0.13",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

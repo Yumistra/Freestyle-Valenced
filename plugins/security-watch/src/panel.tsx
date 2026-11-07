@@ -96,11 +96,6 @@ export function RulesPanel({ id }: { id: string }) {
             </Pressable>
             {open ? (
                 <View style={{ paddingHorizontal: 14, paddingBottom: 12 }}>
-                    {trusted ? (
-                        <Text variant="text-xs/medium" style={{ color: P.muted, marginBottom: 6 }}>
-                            This plugin is trusted, so everything is allowed. Remove it from Trusted plugins in Security Watch to use these.
-                        </Text>
-                    ) : null}
                     {KINDS.map(k => (
                         <View key={k} style={{ marginTop: 8 }}>
                             <Text variant="text-xs/bold" style={{ color: P.muted, marginBottom: 6 }}>
@@ -125,9 +120,6 @@ export function RulesPanel({ id }: { id: string }) {
                             </View>
                         </View>
                     ))}
-                    <Text variant="text-xs/medium" style={{ color: P.muted, marginTop: 10 }}>
-                        Default follows the Security Watch settings.
-                    </Text>
                 </View>
             ) : null}
         </View>
