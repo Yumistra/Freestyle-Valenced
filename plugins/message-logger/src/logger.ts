@@ -11,6 +11,28 @@ const S = () => Stores as any
 const changed = new Set<string>()
 /** 우리가 진짜로 지우거나 되돌리려고 보내는 액션 (다시 잡지 않는다) */
 const bypassed = new Set<string>()
+/** 조용한 삭제(SilentDelete)가 원래 메시지 자리에 넣은 대체 메시지들. 이것들이 지워질 땐 로그로 남기지 않는다 */
+const placeholders = new Set<string>()
+
+/**
+ * 조용한 삭제, 조용한 수정 막기.
+ * SilentDelete, SilentEdit 류는 새 메시지를 보내면서 nonce 를 원래 메시지 ID 로 넣는다.
+ * 디스코드는 nonce 가 같은 메시지를 "내가 보내던 메시지가 도착했다"로 보고 그 자리를 새 메시지로 바꿔 버려서,
+ * 원래 메시지가 지워졌다는 알림 없이 화면과 저장소에서 사라진다.
+ * 내가 보내는 중인 메시지는 상태가 SENDING 이다. 이미 보내진(SENT) 진짜 메시지와 nonce 가 같으면 이 수법이니,
+ * nonce 를 떼서 새 메시지로 따로 들어오게 하고 원래 메시지는 남긴다.
+ */
+function unsilence(p: any) {
+    const m = p?.message
+    const nonce = m?.nonce
+    if (!m || !nonce || String(nonce) === String(m.id) || p.optimistic) return p
+    const old = getMessage(m.channel_id, String(nonce))
+    if (!old || (old.state && old.state !== 'SENT')) return p
+    placeholders.add(String(m.id))
+    if (placeholders.size > 500) placeholders.delete(placeholders.values().next().value as string)
+    const { nonce: _, ...rest } = m
+    return { ...p, message: rest }
+}
 
 /** 알림으로만 받은 메시지: 알림 글이 그대로 비교 가능할 때만 (멘션·이모지 표기가 없을 때) */
 function pushedComparable(u: any) {
@@ -106,6 +128,10 @@ function entryOf(record: any, guildId?: string): Entry {
  */
 function keepDeleted(channelId: string, id: string, guildId?: string): 'store' | 'seen' | false {
     if (bypassed.has(id)) return false
+    if (placeholders.has(id)) {
+        placeholders.delete(id)
+        return false
+    }
     const record = getMessage(channelId, id)
     const sx = record ? undefined : seen()[id]
     // 알림으로만 알던 메시지는 "알림 기억하기"를 켰을 때만
@@ -253,6 +279,9 @@ export function intercept() {
             return p
         }),
         onFluxEventDispatched('MESSAGE_CREATE', (p: any) => {
+            try {
+                if (settings().logDeletes || settings().logEdits) p = unsilence(p)
+            } catch {}
             try {
                 if (!p?.optimistic && p?.message && !p.isPushNotification) remember([{ ...p.message, guild_id: p.message.guild_id ?? p.guildId }], myId())
             } catch {}
