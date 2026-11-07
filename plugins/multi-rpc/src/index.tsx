@@ -358,6 +358,36 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
         </Pressable>
     )
 }
+/** 새로고침: 보낸 활동을 모두 내렸다가 지금 목록대로 다시 보낸다 (디스코드에 안 바뀌어 보일 때) */
+function RefreshButton({ onRefresh }: { onRefresh: () => Promise<void> }) {
+    const bg = useColor(['CONTROL_SECONDARY_BACKGROUND_DEFAULT', 'BUTTON_SECONDARY_BACKGROUND', 'BACKGROUND_MOD_NORMAL'], '#4e5058')
+    const bgPressed = useColor(['CONTROL_SECONDARY_BACKGROUND_ACTIVE', 'CONTROL_SECONDARY_BACKGROUND_DEFAULT'], '#6d6f78')
+    const fg = useColor(['CONTROL_SECONDARY_TEXT_DEFAULT', 'INTERACTIVE_TEXT_ACTIVE', 'WHITE'], '#ffffff')
+    const spin = useRef(new Animated.Value(0)).current
+    const [busy, setBusy] = useState(false)
+    const turn = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
+    return (
+        <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh activities"
+            disabled={busy}
+            onPress={() => {
+                setBusy(true)
+                spin.setValue(0)
+                Animated.timing(spin, { toValue: 1, duration: 700, useNativeDriver: true }).start()
+                onRefresh()
+                    .catch(() => {})
+                    .finally(() => setBusy(false))
+            }}
+            style={({ pressed }: any) => ({ height: 40, width: 40, borderRadius: 999, backgroundColor: pressed ? bgPressed : bg, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.6 : 1 })}
+        >
+            <Animated.View style={{ transform: [{ rotate: turn }] }}>
+                <Icon name="RefreshIcon" alt={['RetryIcon']} size={20} color={fg} />
+            </Animated.View>
+        </Pressable>
+    )
+}
+
 const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
 function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void }) {
@@ -646,6 +676,18 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                     <View style={{ flex: 1 }}>
                         <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
                     </View>
+                    {on ? (
+                        <RefreshButton
+                            onRefresh={async () => {
+                                setList(items, true)
+                                clearAll()
+                                // 디스코드가 내린 것을 받아들일 틈을 준 뒤 다시 보낸다
+                                await new Promise(r => setTimeout(r, 600))
+                                await apply()
+                                tick(n => n + 1)
+                            }}
+                        />
+                    ) : null}
                 </View>
             </View>
             <Stack spacing={16} style={{ marginTop: 8 }}>
