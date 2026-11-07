@@ -36,7 +36,9 @@ const TYPES: Array<[number, string]> = [
     [3, 'Watching'],
     [5, 'Competing'],
 ]
-const SEND_GAP_MS = 1500
+/** 활동 사이 간격 (ms). 설정에서 바꾼다 */
+const GAPS = [0, 300, 500, 800, 1000, 1500]
+const DEFAULT_GAP = 1500
 const REFRESH_MS = 120000
 const sessionStart = Date.now()
 
@@ -62,12 +64,22 @@ function newActivity(o: Partial<Activity> = {}): Activity {
 }
 
 const DEFAULTS = {
+    gap: DEFAULT_GAP,
     activities: [newActivity({ name: 'A game', type: 0 }), newActivity({ name: 'A song', type: 2, use_timestamps: true, length_min: 3 }), newActivity({ name: 'A show', type: 3, use_timestamps: true })],
 }
 
 // ── 저장 ────────────────────────────────────────────────────────
 let storage: any
 const list = (): Activity[] => (Array.isArray(storage?.cache?.activities) ? storage.cache.activities : DEFAULTS.activities)
+const gap = (): number => {
+    const g = Number(storage?.cache?.gap)
+    return Number.isFinite(g) && g >= 0 ? g : DEFAULT_GAP
+}
+function setGap(g: number) {
+    if (!storage) return
+    if (storage.cache) storage.cache.gap = g
+    storage.set({ ...(storage.cache ?? {}), gap: g }, true)
+}
 let saveTimer: any
 function setList(next: Activity[], now = false) {
     if (!storage) return
@@ -153,7 +165,8 @@ async function apply() {
         send(b.socketId, b.pid, b.activity)
         live.set(b.socketId, b.pid)
         if (i < built.length - 1) {
-            await new Promise(r => setTimeout(r, SEND_GAP_MS))
+            const ms = gap()
+            if (ms > 0) await new Promise(r => setTimeout(r, ms))
             if (my !== runId) return
         }
     }
@@ -219,8 +232,9 @@ function Card({ a, onChange, onRemove }: { a: Activity; onChange: (a: Activity) 
 function SettingsPage({ api }: { api?: any }) {
     if (!storage && api?.jsonStorage) storage = api.jsonStorage
     storage?.use?.()
-    const { Stack, Button } = Design as any
+    const { Stack, Button, TableRowGroup, TableRadioGroup, TableRadioRow } = Design as any
     const [items, setItems] = useState<Activity[]>(list)
+    const [g, setG] = useState(gap)
     const first = useRef(true)
     useEffect(() => {
         if (first.current) {
@@ -235,6 +249,11 @@ function SettingsPage({ api }: { api?: any }) {
                 <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
                 <Button size="md" variant="secondary" text="Clear all" onPress={clearAll} />
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity()])} />
+                <TableRadioGroup title="Time between activities" defaultValue={String(g)} onChange={(v: string) => (setG(Number(v)), setGap(Number(v)))}>
+                    {GAPS.map(ms => (
+                        <TableRadioRow key={ms} value={String(ms)} label={ms === 0 ? 'All at once' : `${ms / 1000}s`} />
+                    ))}
+                </TableRadioGroup>
                 {items.map(a => (
                     <Card key={a.id} a={a} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
                 ))}
