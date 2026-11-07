@@ -33,6 +33,8 @@ export interface ModuleSettings {
 
 export interface Settings {
     enabled: boolean
+    /** 디스코드 전체 애니메이션 끄기 (폰의 "애니메이션 제거"처럼 모든 게 바로 나타난다) */
+    noAnimations?: boolean
     modules: Record<ModuleKey, ModuleSettings>
 }
 
@@ -123,7 +125,7 @@ export function settings(): Settings {
     if (cached && cachedFrom === saved && cachedVersion === version) return cached
     const modules = { ...DEFAULTS.modules }
     for (const key of MODULE_KEYS) modules[key] = { ...DEFAULTS.modules[key], ...(saved.modules?.[key] ?? {}) }
-    cached = { enabled: saved.enabled ?? DEFAULTS.enabled, modules }
+    cached = { enabled: saved.enabled ?? DEFAULTS.enabled, noAnimations: !!saved.noAnimations, modules }
     cachedFrom = saved
     cachedVersion = version
     return cached
@@ -132,7 +134,7 @@ export function settings(): Settings {
 /** 이 부분을 바꿔야 하는지. 꺼져 있거나 "기본"이면 디스코드 그대로 둔다 */
 export function active(key: ModuleKey): ModuleSettings | undefined {
     const s = settings()
-    if (!s.enabled) return
+    if (!s.enabled || s.noAnimations) return
     const m = s.modules[key]
     return m.effect === DEFAULT_ID ? undefined : m
 }
@@ -163,6 +165,7 @@ export async function save(next: Settings) {
     // 같이 두는 값(native 등)은 지우지 않는다
     const extra = { ...(await current()) }
     delete extra.enabled
+    delete extra.noAnimations
     delete extra.modules
     await storage?.set({ ...extra, ...next }, true)
     notify()

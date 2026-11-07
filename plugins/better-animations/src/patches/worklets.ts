@@ -344,7 +344,7 @@ function mediaConfig(m: ModuleSettings) {
 
 const mediaSettings = () => {
     const s = settings()
-    return s.enabled ? s.modules.media : undefined
+    return s.enabled && !s.noAnimations ? s.modules.media : undefined
 }
 
 const PRESENTER_PATH = 'modules/media_viewer/native/components/MediaViewerItemPresenter.tsx'
