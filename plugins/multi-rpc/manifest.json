@@ -5,7 +5,7 @@
 	"description": "Show several custom activities at once.",
 	"author": "Yumistra",
 	"icon": "GameControllerIcon",
-	"version": "1.0.20",
+	"version": "1.0.21",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

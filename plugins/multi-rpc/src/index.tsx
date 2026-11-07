@@ -33,6 +33,8 @@ interface Activity {
     length_min: number
     /** + 로 추가한 칸 (보이는 순서) */
     fields?: string[]
+    /** 활동 아래 버튼 (최대 2개, 다른 사람에게 보인다) */
+    buttons?: Array<{ label: string; url: string }>
 }
 
 const DEFAULT_APP_ID = '1054951789318909972'
@@ -183,6 +185,15 @@ async function build(a: Activity) {
     if (resolved.large_image && a.large_text?.trim()) assets.large_text = a.large_text.trim()
     if (resolved.small_image && a.small_text?.trim()) assets.small_text = a.small_text.trim()
     if (Object.keys(assets).length) act.assets = assets
+    // 버튼: 글자는 buttons, 주소는 metadata.button_urls (디스코드 RPC 와 같은 모양)
+    const buttons = (a.buttons ?? [])
+        .map(b => ({ label: (b.label || '').trim().slice(0, 32), url: (b.url || '').trim() }))
+        .filter(b => b.label && /^https?:\/\//i.test(b.url))
+        .slice(0, 2)
+    if (buttons.length) {
+        act.buttons = buttons.map(b => b.label)
+        act.metadata = { button_urls: buttons.map(b => b.url) }
+    }
     return act
 }
 
@@ -229,7 +240,7 @@ function clearAll() {
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
 
 /** + 로 추가하는 칸 */
-type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_text' | 'small_image' | 'small_text' | 'time'
+type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_text' | 'small_image' | 'small_text' | 'time' | 'buttons'
 const FIELDS: Array<[FieldKey, string, string]> = [
     ['details', 'Details', 'Top line'],
     ['state', 'State', 'Bottom line'],
@@ -238,6 +249,7 @@ const FIELDS: Array<[FieldKey, string, string]> = [
     ['small_image', 'Small image', 'Asset key or URL'],
     ['small_text', 'Small image text', 'Hover text'],
     ['time', 'Time', ''],
+    ['buttons', 'Buttons', ''],
     ['application_id', 'Application ID', DEFAULT_APP_ID],
 ]
 /** 지금 보이는 칸: 추가한 것 + (예전 버전에서) 값이 들어 있는 것 */
@@ -245,7 +257,7 @@ function fieldsOf(a: Activity): FieldKey[] {
     const out = (a.fields ?? []).filter(k => FIELDS.some(([f]) => f === k)) as FieldKey[]
     for (const [k] of FIELDS) {
         if (out.includes(k) || k === 'application_id') continue
-        if (k === 'time' ? a.use_timestamps : String((a as any)[k] ?? '').trim()) out.push(k)
+        if (k === 'time' ? a.use_timestamps : k === 'buttons' ? (a.buttons ?? []).length > 0 : String((a as any)[k] ?? '').trim()) out.push(k)
     }
     return out
 }
@@ -346,12 +358,13 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const add = (k: FieldKey) => {
         animate()
         setAdding(false)
-        set({ fields: [...shown, k], ...(k === 'time' ? { use_timestamps: true } : {}) })
+        set({ fields: [...shown, k], ...(k === 'time' ? { use_timestamps: true } : {}), ...(k === 'buttons' && !(a.buttons ?? []).length ? { buttons: [{ label: '', url: '' }] } : {}) })
     }
     const remove = (k: FieldKey) => {
         animate()
         const patch: any = { fields: shown.filter(f => f !== k) }
         if (k === 'time') patch.use_timestamps = false
+        else if (k === 'buttons') patch.buttons = []
         else if (k !== 'application_id') patch[k] = ''
         set(patch)
     }
@@ -410,6 +423,39 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                                 <Button size="sm" variant="secondary" text="Start the time from now" onPress={() => set({ start: Date.now() })} />
                                             </Stack>
                                         )
+                                    if (k === 'buttons') {
+                                        const list = a.buttons?.length ? a.buttons : [{ label: '', url: '' }]
+                                        const setBtn = (i: number, patch: Partial<{ label: string; url: string }>) => set({ buttons: list.map((b, j) => (j === i ? { ...b, ...patch } : b)) })
+                                        const dropBtn = (i: number) => {
+                                            animate()
+                                            const next = list.filter((_, j) => j !== i)
+                                            if (next.length) set({ buttons: next })
+                                            else remove('buttons')
+                                        }
+                                        return (
+                                            <Stack key={k} spacing={10}>
+                                                {list.map((b, i) => (
+                                                    <View key={i}>
+                                                        <Text variant="text-sm/semibold" color="text-muted" style={{ marginBottom: 8 }}>
+                                                            {`Button ${i + 1}`}
+                                                        </Text>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                            <View style={{ flex: 1 }}>
+                                                                <Stack spacing={8}>
+                                                                    <TextInput value={b.label} placeholder="Button text" maxLength={32} onChange={(v: string) => setBtn(i, { label: v })} />
+                                                                    <TextInput value={b.url} placeholder="https://" autoCapitalize="none" keyboardType="url" onChange={(v: string) => setBtn(i, { url: v })} />
+                                                                </Stack>
+                                                            </View>
+                                                            <Pressable accessibilityRole="button" accessibilityLabel="Remove" hitSlop={10} onPress={() => dropBtn(i)} style={{ padding: 6, marginLeft: 6 }}>
+                                                                <Icon name="XSmallIcon" alt={['XLargeIcon', 'CloseSmallIcon', 'CircleXIcon']} color={muted} />
+                                                            </Pressable>
+                                                        </View>
+                                                    </View>
+                                                ))}
+                                                {list.length < 2 ? <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} /> : null}
+                                            </Stack>
+                                        )
+                                    }
                                     const f = FIELDS.find(([x]) => x === k)!
                                     return <View key={k}>{input(f[1], k as keyof Activity, f[2], k === 'application_id' ? 'id' : false, () => remove(k))}</View>
                                 })}
