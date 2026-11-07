@@ -118,7 +118,8 @@ const typeLabel = (t: number) => TYPES.find(([v]) => v === t)?.[1] ?? 'Playing'
 /** a 를 shown 옆에 더 보여 줄 수 없는 이유 */
 function conflict(a: Activity, shown: Activity[]): Why {
     if (shown.some(b => appIdOf(b) === appIdOf(a))) return { text: 'Another activity uses the same Application ID', id: true }
-    if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) return { text: 'Another activity has the same name' }
+    // 이름이 같은 활동: 디스코드 코드상 프로필에서 합쳐지지만 직접 확인하려고 잠시 막지 않는다
+    // if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) return { text: 'Another activity has the same name' }
     if (a.type !== LISTENING && shown.some(b => b.type === a.type)) return { text: `Only one ${typeLabel(a.type)} activity can show` }
     if (shown.length >= MAX_SHOWN) return { text: `Only ${MAX_SHOWN} activities can show at once` }
 }
