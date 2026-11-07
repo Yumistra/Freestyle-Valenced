@@ -29,8 +29,11 @@ jobs:
         with:
           name: native-jars
           path: plugins/*/build/plugin.jar
-      - name: Print jar (base64)
+      - name: Print jars (base64)
         if: always()
         run: |
-          f=plugins/sticker-with-text/build/plugin.jar
-          [ -f "$f" ] && { echo "JARSIZE $(wc -c < $f)"; base64 -w 0 "$f" | fold -w 3000 | sed 's/^/JARB64 /'; echo; }
+          for f in plugins/*/build/plugin.jar; do
+            n=$(basename $(dirname $(dirname $f)))
+            echo "JARSIZE $n $(wc -c < $f)"
+            base64 -w 0 "$f" | fold -w 3000 | sed "s/^/JARB64 $n /"; echo
+          done

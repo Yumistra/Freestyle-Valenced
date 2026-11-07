@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.message-logger",
 	"name": "Message Logger",
-	"description": "Keeps deleted (red) and edited (gray) messages with the same highlight as pings, even after restarting Discord. Remembers notifications so changes made while you're away are found too.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "ChatXIcon",
-	"version": "1.0.8",
+	"version": "1.0.11",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

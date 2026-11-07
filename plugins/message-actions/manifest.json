@@ -2,7 +2,7 @@
 	"format": 1,
 	"id": "yumistra.message-actions",
 	"name": "Message Actions",
-	"description": "Quick actions for your own messages.",
+	"description": "",
 	"author": "Yumistra",
 	"icon": "PencilIcon",
 	"version": "1.0.4",
