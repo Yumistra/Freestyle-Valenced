@@ -18,6 +18,8 @@ export interface Entry {
     h?: 1
     /** 알림으로만 알던 메시지 (ID 를 시각으로 만들었다) */
     n?: 1
+    /** 기기에 저장한 첨부파일 경로들 (지울 때 같이 지운다) */
+    f?: string[]
 }
 
 /** 본 메시지 (자리를 비운 사이 지워졌는지·고쳐졌는지 비교하려고) */
@@ -41,9 +43,20 @@ export interface Settings {
     ignoreBots: boolean
     /** 보관 시간 (시간) */
     keepHours: number
+    /** 지운 메시지의 첨부파일을 기기에 저장 */
+    saveAttachments: boolean
+    /** 화이트리스트: 사용자, 채널, 서버 ID. 블랙리스트보다 우선 */
+    allow: string[]
+    /** 블랙리스트: 사용자, 채널, 서버 ID */
+    block: string[]
+    /** 화이트리스트에 있는 것만 기록 */
+    allowOnly: boolean
 }
 
-export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72 }
+export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false }
+
+/** 첨부파일 하나 저장 크기 상한 */
+export const MAX_FILE_BYTES = 25 * 1024 * 1024
 
 export const KEEP_OPTIONS: Array<[number, string]> = [
     [12, '12 hours'],

@@ -2,6 +2,8 @@ import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { compare, forget, importPushes, remember, updateSeen } from './away'
 import { compareNotes } from './tray'
+import { removeFiles, saveAll } from './attachments'
+import { allowed } from './filters'
 import { keepMs, logs, save, seen, settings, type Entry } from './store'
 
 const EPHEMERAL = 1 << 6
@@ -59,7 +61,32 @@ function shouldLog(record: any) {
     const s = settings()
     if (s.ignoreBots && record?.author?.bot) return false
     if (s.ignoreSelf && record?.author?.id && record.author.id === myId()) return false
-    return true
+    return allowed(record)
+}
+
+/** 지운 메시지의 첨부파일을 기기에 받아 두고, 채팅에 보이는 것도 기기 파일로 바꾼다 */
+function keepFiles(id: string) {
+    const e = logs()[id]
+    if (!settings().saveAttachments || !e?.m?.attachments?.length) return
+    saveAll(id, e.m.attachments)
+        .then(r => {
+            const now = logs()[id]
+            if (!r || !now?.m) return removeFiles(r?.paths)
+            now.m = { ...now.m, attachments: r.list }
+            now.f = [...new Set([...(now.f ?? []), ...r.paths])]
+            save()
+            // 채팅에 떠 있으면 첨부파일만 바꿔서 다시 그린다 (우리가 보낸 수정은 기록하지 않는다)
+            if (!getMessage(now.c, id)) return
+            bypassed.add(id)
+            changed.add(id)
+            try {
+                Dispatcher.dispatch({ type: 'MESSAGE_UPDATE', guildId: now.g, message: { id, channel_id: now.c, attachments: r.list } } as any)
+            } catch {
+            } finally {
+                bypassed.delete(id)
+            }
+        })
+        .catch(() => {})
 }
 
 const getMessage = (channelId: string, id: string) => {
@@ -150,6 +177,8 @@ function keepDeleted(channelId: string, id: string, guildId?: string): 'store' |
     changed.add(id)
     forget(id)
     save()
+    // 디스패치가 끝난 뒤에 (받는 건 시간이 걸린다)
+    Promise.resolve().then(() => keepFiles(id))
     return record ? 'store' : 'seen'
 }
 
@@ -201,6 +230,7 @@ export function expire() {
         if (now - (e.at ?? 0) <= limit) continue
         delete all[id]
         any = true
+        removeFiles(e.f)
         reallyRemove(id, e)
     }
     if (any) save()
@@ -235,6 +265,7 @@ export function removeOne(id: string) {
     const e = all[id]
     if (!e) return
     delete all[id]
+    removeFiles(e.f)
     reallyRemove(id, e)
     save(true)
 }
@@ -243,6 +274,7 @@ export function clearAll() {
     const all = logs()
     for (const [id, e] of Object.entries(all)) {
         delete all[id]
+        removeFiles(e.f)
         reallyRemove(id, e)
     }
     save(true)
