@@ -297,10 +297,11 @@ export async function rewrite(args: any[], p: Plan | undefined): Promise<Rewritt
     if (typeof channelId !== 'string' || !message) return { args }
     let text = p?.text ?? message.content
     const uploads: Array<{ upload: any; draftType: number }> = []
-    const asFiles = settings().sendAsFile
     for (const job of p?.jobs ?? []) {
         let made: { upload: any; draftType: number } | undefined
-        if (asFiles && uploads.length < MAX_FILES) {
+        // 효과가 없으면 링크로 (폰 디스코드는 작은 그림 파일을 화면 가득 키워서 보여 준다)
+        const asFile = job.mods.length > 0 || settings().plainAsFile
+        if (asFile && uploads.length < MAX_FILES) {
             try {
                 const bytes = await download(job.source)
                 if (bytes) {

@@ -15,8 +15,8 @@ export interface Settings {
     emoteSize: number
     /** 채팅 입력창의 이모트 버튼 */
     button: boolean
-    /** 그림을 파일로 붙여 보내기 (끄면 링크, 효과 없음) */
-    sendAsFile: boolean
+    /** 효과 없는 이모트도 파일로 보내기 (폰에서는 크게 보인다). 효과가 있으면 늘 파일 */
+    plainAsFile: boolean
     /** 입력할 때 위에 이모트 미리보기 */
     suggestions: boolean
 }
@@ -30,7 +30,7 @@ export const DEFAULTS: Settings = {
     lockedStickers: true,
     emoteSize: 48,
     button: true,
-    sendAsFile: true,
+    plainAsFile: false,
     suggestions: true,
 }
 
