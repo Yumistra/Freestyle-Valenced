@@ -5,7 +5,7 @@
 	"description": "Hides emojis you can't use from the emoji picker.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
