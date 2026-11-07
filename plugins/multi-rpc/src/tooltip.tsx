@@ -2,7 +2,7 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Animated, Dimensions, Pressable, View } from 'react-native'
-import { T, useColor } from './colors'
+import { readableOn, T, useColor } from './colors'
 
 /**
  * 디스코드 툴팁(design Tooltip.native.tsx)을 그대로 따라 만든 것.
@@ -133,6 +133,10 @@ function Bubble({ req, host, onGone }: { req: Req; host: any; onGone: () => void
 
     const bg = useColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND'], '#5865f2')
     const bgPressed = useColor(['CONTROL_PRIMARY_BACKGROUND_ACTIVE', 'CONTROL_PRIMARY_BACKGROUND_DEFAULT'], '#4752c4')
+    // 글자: 디스코드는 text-overlay-light(흰색)지만, 테마가 바탕을 밝게 바꾸면 안 보인다.
+    // 바탕과 짝인 CONTROL_PRIMARY_TEXT_DEFAULT 를 쓰고, 그래도 대비가 낮으면 검정이나 흰색으로
+    const textTheme = useColor(['CONTROL_PRIMARY_TEXT_DEFAULT', 'WHITE'], '#ffffff')
+    const textColor = readableOn(bg, textTheme)
     const fill = pressed.interpolate({ inputRange: [0, 1], outputRange: [bg, bgPressed] })
     const t = T()
     const box = {
@@ -180,7 +184,7 @@ function Bubble({ req, host, onGone }: { req: Req; host: any; onGone: () => void
             >
                 {req.position === 'bottom' ? tri('up') : req.position === 'right' ? tri('left') : null}
                 <Animated.View style={[box, { backgroundColor: fill }]}>
-                    <Text variant="text-xs/bold" color="text-overlay-light" style={{ textAlign: 'center' }}>
+                    <Text variant="text-xs/bold" style={{ textAlign: 'center', color: textColor }}>
                         {req.text}
                     </Text>
                 </Animated.View>
