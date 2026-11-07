@@ -198,8 +198,20 @@ async function build(a: Activity) {
     return act
 }
 
+/** 실제로 보낼 내용만 모은 값 (보이는 칸 정리 같은 화면 변화는 빼고). 마지막으로 적용한 것과 다르면 Apply 를 보여 준다 */
+function signature(items: Activity[]) {
+    const why = reasons(items)
+    return JSON.stringify(
+        items
+            .filter((a, i) => a.enabled && !why[i])
+            .map(a => [a.id, a.type, a.name, a.application_id, a.details, a.state, a.large_image, a.large_text, a.small_image, a.small_text, a.use_timestamps, a.start, a.length_min, (a.buttons ?? []).filter(b => b.label?.trim() && b.url?.trim()).slice(0, 2)]),
+    )
+}
+let appliedSig: string | undefined
+
 async function apply() {
     if (!isOn()) return clearAll()
+    appliedSig = signature(list())
     const my = ++runId
     // 안 보일 활동은 보내지 않는다 (보내면 다른 활동이 대신 빠지기도 한다)
     const all = list()
@@ -498,10 +510,6 @@ function SettingsPage({ api }: { api?: any }) {
             return
         }
         setList(items)
-        // 바꾸면 바로 적용 (글자를 치는 동안은 잠깐 기다렸다가)
-        if (!isOn()) return
-        const t = setTimeout(() => apply().catch(() => {}), 700)
-        return () => clearTimeout(t)
     }, [items])
     return (
         <TooltipHost>
@@ -516,6 +524,14 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
     const whys = reasons(items)
     // 설정 화면 바탕색 (떠 있는 Add activity 뒤에 깐다). 색 칸을 띄워 재 보니 화면 배경은 BACKGROUND_SURFACE_HIGH
     const pageBg = useColor(['BACKGROUND_SURFACE_HIGH', 'BACKGROUND_BASE_LOW'], '#000000')
+    // 켜져 있고 마지막으로 적용한 뒤 바뀐 게 있을 때만 Apply 를 보여 준다
+    const [, tick] = useState(0)
+    const dirty = on && appliedSig !== undefined && signature(items) !== appliedSig
+    const wasDirty = useRef(dirty)
+    if (wasDirty.current !== dirty) {
+        wasDirty.current = dirty
+        animate()
+    }
     return (
         <ScrollView
             style={{ flex: 1 }}
@@ -544,7 +560,26 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
             </View>
             {/* 떠 있을 때 뒤가 비치지 않게 화면 바탕색을 깐다 */}
             <View style={{ paddingVertical: 8, marginHorizontal: -16, paddingHorizontal: 16, backgroundColor: pageBg }}>
-                <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {dirty ? (
+                        <View style={{ flex: 1 }}>
+                            <Button
+                                size="md"
+                                variant="primary"
+                                text="Apply"
+                                onPress={() => {
+                                    setList(items, true)
+                                    apply()
+                                        .catch(() => {})
+                                        .finally(() => tick(n => n + 1))
+                                }}
+                            />
+                        </View>
+                    ) : null}
+                    <View style={{ flex: 1 }}>
+                        <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
+                    </View>
+                </View>
             </View>
             <Stack spacing={16} style={{ marginTop: 8 }}>
                 {items.map((a, i) => (
