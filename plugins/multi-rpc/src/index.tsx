@@ -1,10 +1,9 @@
-import Page from '@valenced/components/Page'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { Design } from '@valenced/discord/design'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
-import { View } from 'react-native'
+import { ScrollView, View } from 'react-native'
 
 /**
  * Multi RPC: 내 활동(게임 중, 듣는 중 …)을 여러 개 한꺼번에 보여 준다.
@@ -244,7 +243,7 @@ function SettingsPage({ api }: { api?: any }) {
         setList(items)
     }, [items])
     return (
-        <Page>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             <Stack spacing={16}>
                 <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
                 <Button size="md" variant="secondary" text="Clear all" onPress={clearAll} />
@@ -258,7 +257,7 @@ function SettingsPage({ api }: { api?: any }) {
                     <Card key={a.id} a={a} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
                 ))}
             </Stack>
-        </Page>
+        </ScrollView>
     )
 }
 
