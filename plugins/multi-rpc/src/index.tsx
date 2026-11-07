@@ -282,7 +282,6 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     const timer = useRef<any>()
     useEffect(() => () => clearTimeout(timer.current), [])
     const red = tokenColor(['CONTROL_CRITICAL_PRIMARY_BACKGROUND_DEFAULT', 'STATUS_DANGER', 'TEXT_DANGER'], '#da373c')
-    const surface = tokenColor(['CARD_BACKGROUND_DEFAULT', 'BACKGROUND_MOD_SUBTLE', 'BACKGROUND_SECONDARY'], '#2b2d31')
     const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
     return (
         <Pressable
@@ -299,9 +298,10 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
                 animate()
                 onDelete()
             }}
-            style={{ width: 48, height: 56, borderRadius: num(T()?.radii?.lg, 12), backgroundColor: armed ? red : surface, alignItems: 'center', justifyContent: 'center' }}
+            hitSlop={8}
+            style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: armed ? red : 'transparent', alignItems: 'center', justifyContent: 'center' }}
         >
-            <Icon name="TrashIcon" alt={['TrashFilledIcon']} color={armed ? '#ffffff' : muted} />
+            <Icon name="TrashIcon" alt={['TrashFilledIcon']} size={18} color={armed ? '#ffffff' : muted} />
         </Pressable>
     )
 }
@@ -314,14 +314,29 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
     const digits = (v: string) => v.replace(/[^0-9]/g, '')
-    const input = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false) => (
-        <TextInput
-            label={label}
-            value={a[key] ? String(a[key]) : ''}
-            placeholder={placeholder}
-            keyboardType={numeric ? 'numeric' : undefined}
-            onChange={(v: string) => set({ [key]: numeric === 'number' ? Number(digits(v)) || 0 : numeric === 'id' ? digits(v) : v } as any)}
-        />
+    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    // 이름표는 칸 위에 따로 두고, 칸 오른쪽에 × 를 칸 높이 가운데에 맞춘다
+    const input = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false, onRemoveField?: () => void) => (
+        <View>
+            <Text variant="text-sm/semibold" color="text-muted" style={{ marginBottom: 8 }}>
+                {label}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                    <TextInput
+                        value={a[key] ? String(a[key]) : ''}
+                        placeholder={placeholder}
+                        keyboardType={numeric ? 'numeric' : undefined}
+                        onChange={(v: string) => set({ [key]: numeric === 'number' ? Number(digits(v)) || 0 : numeric === 'id' ? digits(v) : v } as any)}
+                    />
+                </View>
+                {onRemoveField ? (
+                    <Pressable accessibilityRole="button" accessibilityLabel="Remove" hitSlop={10} onPress={onRemoveField} style={{ padding: 6, marginLeft: 6 }}>
+                        <Icon name="XSmallIcon" alt={['XLargeIcon', 'CloseSmallIcon', 'CircleXIcon']} color={muted} />
+                    </Pressable>
+                ) : null}
+            </View>
+        </View>
     )
     const shown = fieldsOf(a)
     const left = FIELDS.filter(([k]) => !shown.includes(k))
@@ -337,29 +352,21 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
         else if (k !== 'application_id') patch[k] = ''
         set(patch)
     }
-    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
-    const removeBtn = (k: FieldKey) => (
-        <Pressable accessibilityRole="button" accessibilityLabel="Remove" hitSlop={10} onPress={() => remove(k)} style={{ padding: 6, marginLeft: 6 }}>
-            <Icon name="XSmallIcon" alt={['XLargeIcon', 'CloseSmallIcon', 'CircleXIcon']} color={muted} />
-        </Pressable>
-    )
-    const row = (k: FieldKey, child: any) => (
-        <View key={k} style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-            <View style={{ flex: 1 }}>{child}</View>
-            {removeBtn(k)}
-        </View>
-    )
     const typeName = TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'
     const showing = !!a.enabled && !why
     return (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-            <DeleteButton onDelete={onRemove} />
-            <View style={{ flex: 1 }}>
+        <View>
+            <View>
                 <TableRowGroup>
                     <TableRow
                         label={a.name || 'Activity'}
                         subLabel={showing ? typeName : `${typeName}, off`}
-                        trailing={<TableRowAssetIcon name={open ? 'ChevronSmallUpIcon' : 'ChevronSmallDownIcon'} />}
+                        trailing={
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <DeleteButton onDelete={onRemove} />
+                                <TableRowAssetIcon name={open ? 'ChevronSmallUpIcon' : 'ChevronSmallDownIcon'} />
+                            </View>
+                        }
                         onPress={() => (animate(), setOpen(o => !o))}
                     />
                     {open ? (
@@ -384,16 +391,15 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                 {input('Name', 'name', 'Spotify')}
                                 {shown.map(k => {
                                     if (k === 'time')
-                                        return row(
-                                            k,
-                                            <Stack spacing={10}>
-                                                {input('Start (ms, 0 = when Discord opened)', 'start', '0', 'number')}
+                                        return (
+                                            <Stack key={k} spacing={10}>
+                                                {input('Start (ms, 0 = when Discord opened)', 'start', '0', 'number', () => remove(k))}
                                                 {input('Length in minutes (0 = elapsed time)', 'length_min', '0', 'number')}
                                                 <Button size="sm" variant="secondary" text="Start the time from now" onPress={() => set({ start: Date.now() })} />
-                                            </Stack>,
+                                            </Stack>
                                         )
                                     const f = FIELDS.find(([x]) => x === k)!
-                                    return row(k, input(f[1], k as keyof Activity, f[2], k === 'application_id' ? 'id' : false))
+                                    return <View key={k}>{input(f[1], k as keyof Activity, f[2], k === 'application_id' ? 'id' : false, () => remove(k))}</View>
                                 })}
                                 {left.length ? (
                                     adding ? (
@@ -428,6 +434,10 @@ function SettingsPage({ api }: { api?: any }) {
             return
         }
         setList(items)
+        // 바꾸면 바로 적용 (글자를 치는 동안은 잠깐 기다렸다가)
+        if (!isOn()) return
+        const t = setTimeout(() => apply().catch(() => {}), 700)
+        return () => clearTimeout(t)
     }, [items])
     return (
         <TooltipHost>
@@ -456,9 +466,6 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                         }}
                     />
                 </TableRowGroup>
-                <Blocked text={on ? undefined : 'Turn on Multi RPC first'}>
-                    <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
-                </Blocked>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
                 {items.map((a, i) => (
                     <Card
