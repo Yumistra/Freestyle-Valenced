@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.multi-rpc",
+	"name": "Multi RPC",
+	"description": "Show several custom activities at once.",
+	"author": "Yumistra",
+	"icon": "GameControllerIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

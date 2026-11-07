@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.ghost-ping",
+	"name": "Ghost Ping",
+	"description": "Send a message and delete it right after.",
+	"author": "Yumistra",
+	"icon": "AtIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
