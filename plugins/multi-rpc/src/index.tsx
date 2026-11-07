@@ -178,22 +178,33 @@ function clearAll() {
 }
 
 // ── 설정 화면 ───────────────────────────────────────────────────
-function Card({ a, onChange, onRemove }: { a: Activity; onChange: (a: Activity) => void; onRemove: () => void }) {
-    const { Stack, TableRowGroup, TableSwitchRow, TextInput, Button } = Design as any
+/** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다. 겹치면 다른 숫자로 바꿀 수 있게 */
+const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
+
+function Card({ a, dup, onChange, onRemove }: { a: Activity; dup: boolean; onChange: (a: Activity) => void; onRemove: () => void }) {
+    const { Stack, TableRowGroup, TableSwitchRow, TableRow, TextInput, Button } = Design as any
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
-    const field = (label: string, key: keyof Activity, placeholder: string, numeric = false) => (
+    // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
+    const digits = (v: string) => v.replace(/[^0-9]/g, '')
+    const field = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false) => (
         <TextInput
             label={label}
             value={a[key] ? String(a[key]) : ''}
             placeholder={placeholder}
             keyboardType={numeric ? 'numeric' : undefined}
-            onChange={(v: string) => set({ [key]: numeric ? Number(v) || 0 : v } as any)}
+            onChange={(v: string) => set({ [key]: numeric === 'number' ? Number(digits(v)) || 0 : numeric === 'id' ? digits(v) : v } as any)}
         />
     )
     const typeName = TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'
     return (
         <TableRowGroup title={`${a.name || 'Activity'}, ${typeName}`}>
             <TableSwitchRow label="Show this" value={!!a.enabled} onValueChange={(enabled: boolean) => set({ enabled })} />
+            {dup ? (
+                <TableRow
+                    label="Same Application ID as another activity, only one shows"
+                    trailing={<Button size="sm" variant="secondary" text="Change" onPress={() => set({ application_id: randomAppId() })} />}
+                />
+            ) : null}
             <View style={{ padding: 12 }}>
                 <Stack spacing={10}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -204,7 +215,7 @@ function Card({ a, onChange, onRemove }: { a: Activity; onChange: (a: Activity) 
                     {field('Name', 'name', 'Spotify')}
                     {field('Details', 'details', 'Top line')}
                     {field('State', 'state', 'Bottom line')}
-                    {field('Application ID', 'application_id', DEFAULT_APP_ID, true)}
+                    {field('Application ID', 'application_id', DEFAULT_APP_ID, 'id')}
                     {field('Large image', 'large_image', 'Asset key or URL')}
                     {field('Large image text', 'large_text', 'Hover text')}
                     {field('Small image', 'small_image', 'Asset key or URL')}
@@ -215,8 +226,8 @@ function Card({ a, onChange, onRemove }: { a: Activity; onChange: (a: Activity) 
             {a.use_timestamps ? (
                 <View style={{ padding: 12 }}>
                     <Stack spacing={10}>
-                        {field('Start (ms, 0 = when Discord opened)', 'start', '0', true)}
-                        {field('Length in minutes (0 = elapsed time)', 'length_min', '0', true)}
+                        {field('Start (ms, 0 = when Discord opened)', 'start', '0', 'number')}
+                        {field('Length in minutes (0 = elapsed time)', 'length_min', '0', 'number')}
                         <Button size="md" variant="secondary" text="Start the time from now" onPress={() => set({ start: Date.now() })} />
                     </Stack>
                 </View>
@@ -247,14 +258,17 @@ function SettingsPage({ api }: { api?: any }) {
             <Stack spacing={16}>
                 <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
                 <Button size="md" variant="secondary" text="Clear all" onPress={clearAll} />
-                <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity()])} />
+                <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity({ application_id: randomAppId() })])} />
                 <TableRadioGroup title="Time between activities" defaultValue={String(g)} onChange={(v: string) => (setG(Number(v)), setGap(Number(v)))}>
                     {GAPS.map(ms => (
                         <TableRadioRow key={ms} value={String(ms)} label={ms === 0 ? 'All at once' : `${ms / 1000}s`} />
                     ))}
                 </TableRadioGroup>
-                {items.map(a => (
-                    <Card key={a.id} a={a} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
+                {items.map((a, i) => (
+                    <Card
+                        key={a.id}
+                        a={a}
+                        dup={a.enabled && items.some((b, j) => j < i && b.enabled && String(b.application_id || DEFAULT_APP_ID) === String(a.application_id || DEFAULT_APP_ID))} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
                 ))}
             </Stack>
         </ScrollView>
