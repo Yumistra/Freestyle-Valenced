@@ -97,8 +97,10 @@ private fun loadConfig(dir: File): Config {
         if (!file.isFile) return d
         val root = JSONObject(file.readText())
         val m = root.optJSONObject("modules")?.optJSONObject("messages") ?: JSONObject()
+        // "No animations" 면 메시지 효과, 밀림, 튕기기도 모두 끈다
+        val off = root.optBoolean("noAnimations", false)
         return Config(
-            enabled = root.optBoolean("enabled", d.enabled),
+            enabled = root.optBoolean("enabled", d.enabled) && !off,
             effect = m.optString("effect", d.effect),
             exit = m.optString("exit", d.exit),
             direction = m.optString("direction", d.direction),
@@ -109,7 +111,7 @@ private fun loadConfig(dir: File): Config {
             onOpen = m.optBoolean("onOpen", d.onOpen),
             shift = m.optBoolean("shift", d.shift),
             shiftDuration = m.optLong("shiftDuration", d.shiftDuration).coerceIn(50L, 2000L),
-            bounce = m.optBoolean("bounce", d.bounce),
+            bounce = m.optBoolean("bounce", d.bounce) && !off,
             bounceAll = m.optBoolean("bounceAll", d.bounceAll),
         )
     } catch (e: Throwable) {
@@ -1056,6 +1058,10 @@ val betterAnimationsPlugin = plugin {
         unhooks = hooks.toList()
         chatReady = chatListView != null && hooks.size >= 2
 
+        // 디스코드 전체 애니메이션 끄기
+        unhooks = unhooks + NoAnim.hook()
+        NoAnim.set(NoAnim.read(storageDir))
+
         // 큰 화면 전환
         val stack = AtomicReference(loadStackConfig(storageDir))
         val transitions = ScreenTransitions { stack.get() }
@@ -1074,6 +1080,7 @@ val betterAnimationsPlugin = plugin {
             config.set(loadConfig(storageDir))
             stack.set(loadStackConfig(storageDir))
             listsConfig.set(loadListsConfig(storageDir))
+            NoAnim.set(NoAnim.read(storageDir))
             true
         }
         // 서버 바꾸기: 옛 목록을 찍어 덮고 나가는 효과로 치운다 (덮은 뒤에 돌아감)
@@ -1148,5 +1155,6 @@ val betterAnimationsPlugin = plugin {
         highlightsRef = null
         for (unhook in unhooks) unhook.unhook()
         unhooks = emptyList()
+        NoAnim.set(false)
     }
 }

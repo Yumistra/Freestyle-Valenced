@@ -67,7 +67,7 @@ internal fun loadStackConfig(dir: File): StackConfig? {
         val file = File(dir, "storage.json")
         if (!file.isFile) return null
         val root = JSONObject(file.readText())
-        if (!root.optBoolean("enabled", true)) return null
+        if (!root.optBoolean("enabled", true) || root.optBoolean("noAnimations", false)) return null
         val st = root.optJSONObject("native")?.optJSONObject("stack") ?: return null
         if (!st.optBoolean("enabled", false)) return null
         val hidden = Pose.of(st.optJSONObject("hidden")) ?: return null
