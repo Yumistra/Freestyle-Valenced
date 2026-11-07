@@ -444,7 +444,7 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
     const hide = useTooltipHide()
     const whys = reasons(items)
     // 설정 화면 바탕색 (떠 있는 Add activity 뒤에 깐다)
-    const pageBg = useColor(['BACKGROUND_BASE_LOWER', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
+    const pageBg = useColor(['BACKGROUND_BASE_LOW', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
     return (
         <ScrollView
             style={{ flex: 1 }}
