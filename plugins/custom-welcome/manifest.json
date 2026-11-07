@@ -5,7 +5,7 @@
 	"description": "Your own message or sticker for Wave buttons.",
 	"author": "Yumistra",
 	"icon": "HandRequestSpeakIcon",
-	"version": "1.0.13",
+	"version": "1.0.14",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

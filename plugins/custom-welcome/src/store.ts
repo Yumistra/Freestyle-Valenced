@@ -9,6 +9,8 @@ export interface Settings {
     ping: boolean
     /** 메시지와 스티커를 한 메시지로(together), 둘 중 하나만 무작위로(separate) */
     mode: 'together' | 'separate'
+    /** 니트로가 없어 못 보내는 스티커는 이미지 링크로 보낸다 (FakeNitro 처럼) */
+    stickerLinks: boolean
     /** 예전 버전에서 쓰던 값 */
     lastSticker?: string
 }
@@ -19,6 +21,7 @@ export const DEFAULTS: Settings = {
     stickers: [],
     ping: true,
     mode: 'together',
+    stickerLinks: true,
 }
 
 let storage: any
