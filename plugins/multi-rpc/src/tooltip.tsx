@@ -1,8 +1,8 @@
-import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Animated, Dimensions, Pressable, View } from 'react-native'
+import { T, useColor } from './colors'
 
 /**
  * 디스코드 툴팁(design Tooltip.native.tsx)을 그대로 따라 만든 것.
@@ -36,20 +36,6 @@ const EDGE = 12
 const ARROW = 6
 const SHOW_MS = 2500
 
-const T = (): any => (Tokens as any)?.default ?? {}
-function color(names: string[], fallback: string) {
-    try {
-        const t = T()
-        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
-        for (const n of names) {
-            const key = t?.colors?.[n]
-            if (!key) continue
-            const c = t.internal.resolveSemanticColor(theme, key)
-            if (typeof c === 'string' && c) return c
-        }
-    } catch {}
-    return fallback
-}
 const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 const reducedMotion = () => {
     try {
@@ -145,8 +131,8 @@ function Bubble({ req, host, onGone }: { req: Req; host: any; onGone: () => void
         }
     }
 
-    const bg = color(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND'], '#5865f2')
-    const bgPressed = color(['CONTROL_PRIMARY_BACKGROUND_ACTIVE', 'CONTROL_PRIMARY_BACKGROUND_DEFAULT'], '#4752c4')
+    const bg = useColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND'], '#5865f2')
+    const bgPressed = useColor(['CONTROL_PRIMARY_BACKGROUND_ACTIVE', 'CONTROL_PRIMARY_BACKGROUND_DEFAULT'], '#4752c4')
     const fill = pressed.interpolate({ inputRange: [0, 1], outputRange: [bg, bgPressed] })
     const t = T()
     const box = {

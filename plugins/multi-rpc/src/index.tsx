@@ -4,11 +4,11 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
-import { Tokens } from '@valenced/discord/common/tokens'
 import { Stores } from '@valenced/discord/flux'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { Blocked, TooltipHost, useTooltipHide } from './tooltip'
+import { alpha, T, useColor } from './colors'
 
 /**
  * Multi RPC: 내 활동(게임 중, 듣는 중 …)을 여러 개 한꺼번에 보여 준다.
@@ -251,20 +251,6 @@ function fieldsOf(a: Activity): FieldKey[] {
 }
 
 const animate = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-const T = (): any => (Tokens as any)?.default ?? {}
-function tokenColor(names: string[], fallback: string) {
-    try {
-        const t = T()
-        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
-        for (const n of names) {
-            const key = t?.colors?.[n]
-            if (!key) continue
-            const c = t.internal.resolveSemanticColor(theme, key)
-            if (typeof c === 'string' && c) return c
-        }
-    } catch {}
-    return fallback
-}
 function Icon({ name, color, size = 20, alt = [] }: { name: string; color: string; size?: number; alt?: string[] }) {
     let C: any
     for (const n of [name, ...alt])
@@ -281,8 +267,9 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     const [armed, setArmed] = useState(false)
     const timer = useRef<any>()
     useEffect(() => () => clearTimeout(timer.current), [])
-    const red = tokenColor(['CONTROL_CRITICAL_PRIMARY_BACKGROUND_DEFAULT', 'STATUS_DANGER', 'TEXT_DANGER'], '#da373c')
-    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    const red = useColor(['CONTROL_CRITICAL_PRIMARY_BACKGROUND_DEFAULT', 'STATUS_DANGER', 'TEXT_DANGER'], '#da373c')
+    const onRed = useColor(['CONTROL_CRITICAL_PRIMARY_TEXT_DEFAULT', 'WHITE'], '#ffffff')
+    const muted = useColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
     return (
         <Pressable
             accessibilityRole="button"
@@ -301,21 +288,9 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
             hitSlop={8}
             style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: armed ? red : 'transparent', alignItems: 'center', justifyContent: 'center' }}
         >
-            <Icon name="TrashIcon" alt={['TrashFilledIcon']} size={18} color={armed ? '#ffffff' : muted} />
+            <Icon name="TrashIcon" alt={['TrashFilledIcon']} size={18} color={armed ? onRed : muted} />
         </Pressable>
     )
-}
-/** 설정 화면 바탕색 (테마) */
-const pageBg = () => tokenColor(['BACKGROUND_BASE_LOWEST', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
-function alpha(color: string, a: number) {
-    const h = /^#([0-9a-f]{6})/i.exec(color)
-    const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(color)
-    if (h) {
-        const n = parseInt(h[1], 16)
-        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
-    }
-    if (m) return `rgba(${m[1]},${m[2]},${m[3]},${a})`
-    return color
 }
 const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
@@ -326,7 +301,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
     const digits = (v: string) => v.replace(/[^0-9]/g, '')
-    const muted = tokenColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    const muted = useColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
     // 이름표는 칸 위에 따로 두고, 칸 오른쪽에 × 를 칸 높이 가운데에 맞춘다
     const input = (label: string, key: keyof Activity, placeholder: string, numeric: false | 'number' | 'id' = false, onRemoveField?: () => void) => (
         <View>
@@ -368,7 +343,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const showing = !!a.enabled && !why
     // 켜진 활동은 테마의 강조색을 아주 옅게 덮어 구분한다
     const radius = num(T()?.radii?.lg, 16)
-    const tint = alpha(tokenColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND', 'TEXT_BRAND'], '#5865f2'), 0.1)
+    const tint = alpha(useColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND', 'TEXT_BRAND'], '#5865f2'), 0.1)
     return (
         <View>
             <View style={{ borderRadius: radius, overflow: 'hidden' }}>
@@ -468,6 +443,8 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
     const { Stack, Button, TableRowGroup, TableSwitchRow } = Design as any
     const hide = useTooltipHide()
     const whys = reasons(items)
+    // 설정 화면 바탕색 (떠 있는 Add activity 뒤에 깐다)
+    const pageBg = useColor(['BACKGROUND_BASE_LOWEST', 'BACKGROUND_MOBILE_PRIMARY', 'BACKGROUND_PRIMARY'], '#000000')
     return (
         <ScrollView
             style={{ flex: 1 }}
@@ -494,7 +471,7 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                 </TableRowGroup>
             </View>
             {/* 떠 있을 때 뒤가 비치지 않게 화면 바탕색을 깐다 */}
-            <View style={{ paddingVertical: 8, marginHorizontal: -16, paddingHorizontal: 16, backgroundColor: pageBg() }}>
+            <View style={{ paddingVertical: 8, marginHorizontal: -16, paddingHorizontal: 16, backgroundColor: pageBg }}>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => (animate(), setItems(x => [...x, newActivity({ application_id: randomAppId() })]))} />
             </View>
             <Stack spacing={16} style={{ marginTop: 8 }}>
