@@ -262,7 +262,7 @@ const FIELDS: Array<[FieldKey, string, string]> = [
     ['small_image', 'Small image', 'Asset key or URL'],
     ['small_text', 'Small image text', 'Hover text'],
     ['time', 'Time', ''],
-    ['buttons', 'Buttons', ''],
+    ['buttons', 'Button', ''],
     ['application_id', 'Application ID', DEFAULT_APP_ID],
 ]
 /** 지금 보이는 칸: 추가한 것 + (예전 버전에서) 값이 들어 있는 것 */
@@ -367,11 +367,16 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
         </View>
     )
     const shown = fieldsOf(a)
-    const left = FIELDS.filter(([k]) => !shown.includes(k))
+    // 버튼은 2개가 될 때까지 + Add 에 계속 남는다
+    const left = FIELDS.filter(([k]) => (k === 'buttons' ? (a.buttons ?? []).length < 2 : !shown.includes(k)))
     const add = (k: FieldKey) => {
         animate()
         setAdding(false)
-        set({ fields: [...shown, k], ...(k === 'time' ? { use_timestamps: true } : {}), ...(k === 'buttons' && !(a.buttons ?? []).length ? { buttons: [{ label: '', url: '' }] } : {}) })
+        set({
+            fields: shown.includes(k) ? shown : [...shown, k],
+            ...(k === 'time' ? { use_timestamps: true } : {}),
+            ...(k === 'buttons' ? { buttons: [...(a.buttons ?? []), { label: '', url: '' }] } : {}),
+        })
     }
     const remove = (k: FieldKey) => {
         animate()
@@ -465,9 +470,6 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                                         </View>
                                                     </View>
                                                 ))}
-                                                <Blocked text={list.length >= 2 ? 'Only 2 buttons can show' : undefined}>
-                                                    <Button size="sm" variant="secondary" text="+ Button" onPress={() => (animate(), set({ buttons: [...list, { label: '', url: '' }] }))} />
-                                                </Blocked>
                                             </Stack>
                                         )
                                     }
