@@ -209,9 +209,15 @@ export function Blocked({
 }) {
     const ctx = useContext(Ctx)
     const ref = useRef<any>(null)
+    const shake = useRef(new Animated.Value(0)).current
     if (!text) return children
     const press = () => {
         onBlocked?.()
+        // 못 누른다는 걸 살짝 흔들어 보여 준다
+        shake.setValue(0)
+        Animated.sequence(
+            [6, -5, 4, -2, 0].map(v => Animated.timing(shake, { toValue: v, duration: 45, useNativeDriver: true })),
+        ).start()
         ref.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
             const r = { x, y, width, height }
             ctx?.show({ text, target: anchor ? anchor(r) : r, position })
@@ -219,9 +225,9 @@ export function Blocked({
     }
     return (
         <View ref={ref} collapsable={false}>
-            <View style={{ opacity: 0.4 }} pointerEvents="none">
+            <Animated.View style={{ opacity: 0.4, transform: [{ translateX: shake }] }} pointerEvents="none">
                 {children}
-            </View>
+            </Animated.View>
             <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={press} />
         </View>
     )

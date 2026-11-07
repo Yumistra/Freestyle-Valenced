@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Stores } from '@valenced/discord/flux'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { Animated, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { Blocked, TooltipHost, useTooltipHide } from './tooltip'
 import { alpha, T, useColor } from './colors'
 
@@ -270,6 +270,14 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     const red = useColor(['CONTROL_CRITICAL_PRIMARY_BACKGROUND_DEFAULT', 'STATUS_DANGER', 'TEXT_DANGER'], '#da373c')
     const onRed = useColor(['CONTROL_CRITICAL_PRIMARY_TEXT_DEFAULT', 'WHITE'], '#ffffff')
     const muted = useColor(['INTERACTIVE_TEXT_DEFAULT', 'INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1')
+    // 빨갛게 될 때 부드럽게 칠하고 살짝 튀어나온다
+    const arm = useRef(new Animated.Value(0)).current
+    const pop = useRef(new Animated.Value(1)).current
+    useEffect(() => {
+        Animated.timing(arm, { toValue: armed ? 1 : 0, duration: 160, useNativeDriver: false }).start()
+        if (armed) Animated.sequence([Animated.spring(pop, { toValue: 1.18, stiffness: 600, damping: 14, mass: 0.5, useNativeDriver: true }), Animated.spring(pop, { toValue: 1, stiffness: 400, damping: 18, mass: 0.5, useNativeDriver: true })]).start()
+    }, [armed])
+    const fill = arm.interpolate({ inputRange: [0, 1], outputRange: [alpha(red, 0), red] })
     return (
         <Pressable
             accessibilityRole="button"
@@ -286,9 +294,12 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
                 onDelete()
             }}
             hitSlop={8}
-            style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: armed ? red : 'transparent', alignItems: 'center', justifyContent: 'center' }}
         >
-            <Icon name="TrashIcon" alt={['TrashFilledIcon']} size={18} color={armed ? onRed : muted} />
+            <Animated.View style={{ transform: [{ scale: pop }] }}>
+                <Animated.View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: fill, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="TrashIcon" alt={['TrashFilledIcon']} size={18} color={armed ? onRed : muted} />
+                </Animated.View>
+            </Animated.View>
         </Pressable>
     )
 }
@@ -298,6 +309,11 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const { Stack, TableRowGroup, TableRow, TableSwitchRow, TextInput, Button, Text } = Design as any
     const [open, setOpen] = useState(false)
     const [adding, setAdding] = useState(false)
+    // 펼침 화살표 돌리기
+    const turn = useRef(new Animated.Value(0)).current
+    useEffect(() => {
+        Animated.spring(turn, { toValue: open ? 1 : 0, stiffness: 300, damping: 26, mass: 1, useNativeDriver: true }).start()
+    }, [open])
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
     const digits = (v: string) => v.replace(/[^0-9]/g, '')
@@ -343,6 +359,11 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
     const showing = !!a.enabled && !why
     // 켜진 활동은 테마의 강조색을 아주 옅게 덮어 구분한다
     const radius = num(T()?.radii?.lg, 16)
+    // 켜짐 색은 서서히 들어오고 빠진다
+    const lit = useRef(new Animated.Value(showing ? 1 : 0)).current
+    useEffect(() => {
+        Animated.timing(lit, { toValue: showing ? 1 : 0, duration: 220, useNativeDriver: true }).start()
+    }, [showing])
     const tint = alpha(useColor(['CONTROL_PRIMARY_BACKGROUND_DEFAULT', 'BACKGROUND_BRAND', 'TEXT_BRAND'], '#5865f2'), 0.1)
     return (
         <View>
@@ -354,7 +375,9 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                         trailing={
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                 <DeleteButton onDelete={onRemove} />
-                                <TableRowAssetIcon name={open ? 'ChevronSmallUpIcon' : 'ChevronSmallDownIcon'} />
+                                <Animated.View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }) }] }}>
+                                    <TableRowAssetIcon name="ChevronSmallDownIcon" />
+                                </Animated.View>
                             </View>
                         }
                         onPress={() => (animate(), setOpen(o => !o))}
@@ -365,7 +388,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                             anchor={r => ({ x: r.x + r.width - 68, y: r.y, width: 52, height: r.height })}
                             onBlocked={() => a.enabled && set({ enabled: false })}
                         >
-                            <TableSwitchRow label="Show this" value={showing} onValueChange={(enabled: boolean) => set({ enabled })} />
+                            <TableSwitchRow label="Show this" value={showing} onValueChange={(enabled: boolean) => (animate(), set({ enabled }))} />
                         </Blocked>
                     ) : null}
                     {open ? (
@@ -374,7 +397,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                                     {TYPES.map(([v, label]) => (
                                         <Blocked key={v} text={a.type === v ? undefined : blockType(v)?.text}>
-                                            <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
+                                            <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => (animate(), set({ type: v }))} />
                                         </Blocked>
                                     ))}
                                 </View>
@@ -409,7 +432,7 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
                         </View>
                     ) : null}
                 </TableRowGroup>
-                {showing ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: tint }} /> : null}
+                <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: tint, opacity: lit }} />
             </View>
         </View>
     )
@@ -461,6 +484,7 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                         label="Multi RPC"
                         value={on}
                         onValueChange={(v: boolean) => {
+                            animate()
                             setOnState(v)
                             setList(items, true)
                             setOn(v)
