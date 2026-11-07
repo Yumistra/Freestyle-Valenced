@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.clean-emoji",
+	"name": "Clean Emoji",
+	"description": "Hides emojis and stickers you can't use from the pickers.",
+	"author": "Yumistra",
+	"icon": "ReactionIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

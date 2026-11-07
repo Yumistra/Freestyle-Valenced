@@ -4,6 +4,7 @@ import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { addTo, inList, nameOf, removeFrom } from './filters'
 import { hideInChat, removeOne } from './logger'
 import { logs } from './store'
 
@@ -32,10 +33,35 @@ function done() {
     } catch {}
 }
 
-function Actions({ id }: { id: string; key?: string }) {
-    const e = logs()[id]
-    if (!e || e.h || (!e.d && !e.e?.length)) return null
+/** 보낸 사람을 블랙리스트에 넣거나 빼기 */
+function FilterRow({ author }: { author?: any }) {
     const { ActionSheetRow } = Design as any
+    const uid = author?.id ? String(author.id) : undefined
+    if (!uid) return null
+    const blocked = inList('block', uid)
+    const name = author.globalName ?? author.global_name ?? author.username ?? nameOf(uid)
+    return (
+        <ActionSheetRow
+            icon={icon(blocked ? 'UserPlusIcon' : 'UserMinusIcon')}
+            label={blocked ? `Log ${name} again` : `Stop logging ${name}`}
+            onPress={() => {
+                done()
+                if (blocked) removeFrom('block', uid)
+                else addTo('block', uid)
+            }}
+        />
+    )
+}
+
+function Actions({ id, author }: { id: string; author?: any; key?: string }) {
+    const e = logs()[id]
+    const { ActionSheetRow } = Design as any
+    if (!e || e.h || (!e.d && !e.e?.length))
+        return (
+            <ActionSheetRow.Group>
+                <FilterRow author={author} />
+            </ActionSheetRow.Group>
+        )
     const what = e.d ? 'Remove from chat' : 'Clear edit history'
     return (
         <ActionSheetRow.Group>
@@ -56,6 +82,7 @@ function Actions({ id }: { id: string; key?: string }) {
                     removeOne(id)
                 }}
             />
+            <FilterRow author={author} />
         </ActionSheetRow.Group>
     )
 }
@@ -89,13 +116,13 @@ export function patchSheet(cleanup: (...f: Array<() => void>) => void) {
                     instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                         const tree = orig.apply(this, args)
                         try {
-                            const id = args[0]?.message?.id
-                            const e = id ? logs()[String(id)] : undefined
-                            if (e && !e.h && (e.d || e.e?.length)) {
+                            const msg = args[0]?.message
+                            const id = msg?.id
+                            if (id && msg?.author?.id) {
                                 const sheet = findSheet(tree)
                                 if (sheet?.props) {
                                     const children = [sheet.props.children].flat().filter(Boolean)
-                                    children.push(<Actions key="message-logger" id={String(id)} />)
+                                    children.push(<Actions key="message-logger" id={String(id)} author={msg.author} />)
                                     sheet.props.children = children
                                 }
                             }

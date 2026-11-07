@@ -162,6 +162,7 @@ function send(socketId: string, pid: number, activity: any) {
     ;(Dispatcher as any).dispatch({ type: 'LOCAL_ACTIVITY_UPDATE', activity, pid, socketId })
 }
 
+const isImageUrl = (v?: string) => !!v && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(v.trim())
 const isUrl = (v: string) => /^https?:\/\//i.test(v)
 /** 디스코드에 올라간 이미지는 미디어 프록시 경로(mp:)로 바로 쓴다 */
 function discordMedia(v: string): string | undefined {
@@ -221,9 +222,11 @@ async function build(a: Activity) {
         const len = Number(a.length_min)
         if (len > 0) act.timestamps.end = start + len * 60000
     }
+    // 이미지 칸이 비었는데 "이미지 링크"(누르면 열리는 주소) 칸에 이미지 주소를 넣었으면 그걸 이미지로 쓴다
+    const pic = (img?: string, link?: string) => (img || '').trim() || (isImageUrl(link) ? (link as string).trim() : '')
     const resolved = await resolveAssets(appId, [
-        { field: 'large_image', value: (a.large_image || '').trim() },
-        { field: 'small_image', value: (a.small_image || '').trim() },
+        { field: 'large_image', value: pic(a.large_image, a.large_url) },
+        { field: 'small_image', value: pic(a.small_image, a.small_url) },
     ])
     const assets: any = { ...resolved }
     if (resolved.large_image && a.large_text?.trim()) assets.large_text = a.large_text.trim()
@@ -303,18 +306,18 @@ type FieldKey = 'details' | 'state' | 'application_id' | 'large_image' | 'large_
 const FIELDS: Array<[FieldKey, string, string]> = [
     ['details', 'Details', 'Top line'],
     ['state', 'State', 'Bottom line'],
-    ['large_image', 'Large image', 'Asset key or URL'],
+    ['large_image', 'Large image', 'Image URL or asset key'],
     ['large_text', 'Large image text', 'Hover text'],
-    ['small_image', 'Small image', 'Asset key or URL'],
+    ['small_image', 'Small image', 'Image URL or asset key'],
     ['small_text', 'Small image text', 'Hover text'],
     ['time', 'Time', ''],
     ['party', 'Party', ''],
     ['buttons', 'Button', ''],
     ['status', 'Status display', ''],
-    ['details_url', 'Details link', 'https://'],
-    ['state_url', 'State link', 'https://'],
-    ['large_url', 'Large image link', 'https://'],
-    ['small_url', 'Small image link', 'https://'],
+    ['details_url', 'Details link', 'Opens when tapped'],
+    ['state_url', 'State link', 'Opens when tapped'],
+    ['large_url', 'Large image tap link', 'Opens when tapped'],
+    ['small_url', 'Small image tap link', 'Opens when tapped'],
     ['application_id', 'Application ID', DEFAULT_APP_ID],
 ]
 /** 지금 보이는 칸: 추가한 것 + (예전 버전에서) 값이 들어 있는 것 */

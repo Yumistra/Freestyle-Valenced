@@ -1,4 +1,5 @@
 import { callNativeMethod } from '@valenced/modules/native'
+import { allowed } from './filters'
 import { cmp, markChanged } from './logger'
 import { keepMs, logs, save, seen, SEEN_MAX, settings, type Entry } from './store'
 
@@ -59,7 +60,7 @@ function wanted(m: any, me?: string) {
     const s = settings()
     if (s.ignoreBots && m.author?.bot) return false
     if (s.ignoreSelf && me && m.author?.id === me) return false
-    return true
+    return allowed(m)
 }
 
 /** 본 메시지로 기억 (이미 지워진 걸로 기록된 건 빼고) */

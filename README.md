@@ -14,6 +14,7 @@ Plugins for Valenced.
 | Sticker With Text | `yumistra.sticker-with-text` |
 | Custom Welcome | `yumistra.custom-welcome` |
 | Multi RPC | `yumistra.multi-rpc` |
+| Clean Emoji | `yumistra.clean-emoji` |
 
 ## Install
 

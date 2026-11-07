@@ -12,6 +12,7 @@ import { trim } from './away'
 import { bindNotes, nativeStatus, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
 import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
+import { FilterSettings } from './filtersUI'
 import { patchSheet } from './sheet'
 import { setNative, styleRow } from './rows'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
@@ -61,6 +62,16 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow label="Ignore my messages" value={s.ignoreSelf} onValueChange={(ignoreSelf: boolean) => set({ ignoreSelf })} />
                     <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
                 </TableRowGroup>
+                <TableRowGroup title="Attachments">
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="ImageIcon" />}
+                        label="Save deleted attachments"
+                        subLabel="Keeps images, videos and files of deleted messages on this device, up to 25 MB each"
+                        value={s.saveAttachments}
+                        onValueChange={(saveAttachments: boolean) => set({ saveAttachments })}
+                    />
+                </TableRowGroup>
+                <FilterSettings set={set} />
                 <TableRowGroup title="While you're away">
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="BellIcon" />}
