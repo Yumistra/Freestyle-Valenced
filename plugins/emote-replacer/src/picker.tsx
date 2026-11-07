@@ -127,7 +127,7 @@ function Grid({ channelId }: { channelId: string }) {
                     ))
                 ) : (
                     <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
-                        {emoteStatus().failed ? "Couldn't load the emote list" : emoteStatus().count ? 'No emotes found' : 'Loading emotes'}
+                        No emotes found
                     </Text>
                 )}
             </ScrollView>

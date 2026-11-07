@@ -152,7 +152,7 @@ function plan(content: string, channelId: string, force = false): Plan {
         jobs.push({ mark: m, name, source: url, fallback: url, mods })
         return m
     }
-    // 순서: 내 이모트, 같은 이름의 디스코드 이모지, Yentis 이모트 (대소문자까지 같은 것 먼저)
+    // 순서: 내 이모트, 같은 이름의 디스코드 이모지 (대소문자까지 같은 것 먼저)
     const resolve = (name: string, mods: Array<[string, string]>): string | undefined => {
         if (s.customEmotes[name]) return urlJob(name, s.customEmotes[name], mods)
         const found = discordFind(name)

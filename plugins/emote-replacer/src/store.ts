@@ -5,8 +5,6 @@ export interface Settings {
     prefix: string
     /** 앞 글자 없이 이름만 써도 바꿀지 */
     requirePrefix: boolean
-    /** Yentis 이모트 목록 쓰기 */
-    showStandardEmotes: boolean
     /** 내가 추가한 이모트 (이름 → 이미지 주소) */
     customEmotes: Record<string, string>
     /** 니트로 없이 못 쓰는 디스코드 이모지를 이미지로 */
@@ -27,7 +25,6 @@ export const DEFAULTS: Settings = {
     typing: false,
     prefix: ';',
     requirePrefix: true,
-    showStandardEmotes: true,
     customEmotes: {},
     lockedEmojis: true,
     lockedStickers: true,

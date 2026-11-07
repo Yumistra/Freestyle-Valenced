@@ -3,7 +3,6 @@ import { Design } from '@valenced/discord/design'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
-import { emoteStatus, loadEmotes, onEmotesChange } from './emotes'
 import { toast } from './picker'
 import { update, useSettings } from './store'
 
@@ -51,8 +50,6 @@ export default function SettingsPage() {
     const [, tick] = useState(0)
     const [name, setName] = useState('')
     const [url, setUrl] = useState('')
-    useEffect(() => onEmotesChange(() => tick(n => n + 1)), [])
-    const st = emoteStatus()
     const customs = Object.entries(s.customEmotes)
     const addCustom = () => {
         const n = name.trim().replace(/^[^\w]+/, '')
@@ -93,18 +90,6 @@ export default function SettingsPage() {
                             ))}
                         </View>
                     </View>
-                </TableRowGroup>
-
-                <TableRowGroup title="Emote list">
-                    <TableSwitchRow label="Yentis emotes" subLabel={st.failed ? "Couldn't load the list" : `${st.count} emotes`} value={s.showStandardEmotes} onValueChange={(showStandardEmotes: boolean) => update({ showStandardEmotes })} />
-                    <TableRow
-                        icon={<TableRowAssetIcon name="RefreshIcon" />}
-                        label="Reload emote list"
-                        onPress={() => {
-                            toast('Reloading emotes')
-                            loadEmotes(true).then(() => toast(emoteStatus().failed ? "Couldn't load the emote list" : `Loaded ${emoteStatus().count} emotes`))
-                        }}
-                    />
                 </TableRowGroup>
 
                 <TableRowGroup title="Custom emotes">
