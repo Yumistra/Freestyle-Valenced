@@ -8,8 +8,10 @@ import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useMemo, useState } from 'react'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 import { emoteStatus, loadEmotes, onEmotesChange, search } from './emotes'
+import { MODIFIERS } from './img'
 import { discordEmojis } from './send'
 import { settings } from './store'
+import { tokenColor } from './suggest'
 
 /**
  * 채팅 입력창의 이모트 버튼. 누르면 이모트를 찾아 누를 수 있는 창이 뜨고,
@@ -64,6 +66,7 @@ function Grid({ channelId }: { channelId: string }) {
     const [query, setQuery] = useState('')
     const [, tick] = useState(0)
     const [added, setAdded] = useState<string | undefined>()
+    const [effects, setEffects] = useState<string[]>([])
     useEffect(() => onEmotesChange(() => tick(n => n + 1)), [])
     // 내가 들어가 있는 서버의 이모지도 같이 (니트로 없이 못 쓰는 것은 보낼 때 이미지로 바뀐다)
     const mine = useMemo(() => {
@@ -84,15 +87,35 @@ function Grid({ channelId }: { channelId: string }) {
     return (
         <View style={{ alignSelf: 'stretch', gap: 8 }}>
             <TextInput value={query} placeholder="Search emotes" onChange={setQuery} isClearable />
-            <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }} keyboardShouldPersistTaps="handled">
+            <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {MODIFIERS.map(m => {
+                    const on = effects.includes(m.name)
+                    const brand = tokenColor(['BACKGROUND_BRAND', 'BRAND_500'], '#5865f2')
+                    return (
+                        <Pressable
+                            key={m.name}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: on }}
+                            onPress={() => setEffects(x => (on ? x.filter(e => e !== m.name) : [...x, m.name]))}
+                            style={({ pressed }: any) => ({ paddingHorizontal: 10, height: 30, borderRadius: 15, justifyContent: 'center', borderWidth: 1, borderColor: on ? brand : 'rgba(128,128,128,0.35)', backgroundColor: on ? brand : 'transparent', opacity: pressed ? 0.6 : 1 })}
+                        >
+                            <Text variant="text-sm/medium" style={on ? { color: '#ffffff' } : undefined} color={on ? undefined : 'text-muted'}>
+                                {m.name}
+                            </Text>
+                        </Pressable>
+                    )
+                })}
+            </ScrollView>
+            <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }} keyboardShouldPersistTaps="handled">
                 {list.length ? (
                     list.map(([name, url]) => (
                         <Pressable
                             key={name}
                             accessibilityLabel={name}
                             onPress={() => {
-                                insert(channelId, prefix + name)
-                                setAdded(name)
+                                const word = prefix + name + effects.map(e => `.${e}`).join('')
+                                insert(channelId, word)
+                                setAdded(word)
                             }}
                             style={({ pressed }: any) => ({ width: 52, height: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}
                         >
@@ -106,7 +129,7 @@ function Grid({ channelId }: { channelId: string }) {
                 )}
             </ScrollView>
             <Text variant="text-xs/medium" color="text-muted" style={{ textAlign: 'center' }}>
-                {added ? `Added ${prefix}${added}` : 'Tap an emote to add it to your message'}
+                {added ? `Added ${added}` : effects.length ? `Effects, ${effects.join(', ')}` : 'Pick effects, then tap an emote'}
             </Text>
         </View>
     )

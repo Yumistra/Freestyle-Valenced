@@ -1,21 +1,26 @@
+import { Dispatcher } from '@valenced/discord/common/flux'
 import { Stores } from '@valenced/discord/flux'
+import { FileModule } from '@valenced/discord/native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { allEmotes } from './emotes'
+import { fromBase64, parseModifiers, render } from './img'
 import { settings } from './store'
 
 /**
- * 보낼 때 바꾸기.
- *  - ;이름 → 이모트 이미지
- *  - 니트로 없이 못 쓰는 디스코드 이모지 <:이름:ID> → 이모지 이미지
- *  - 니트로 없이 못 보내는 스티커 → 스티커 이미지
- * 이미지는 [𝅙](주소) 로 보낸다. 𝅙 는 거의 안 보이는 글자라 주소도 글자도 안 보이고 이미지만 뜬다.
+ * 보낼 때 바꾸기 (원래 플러그인과 같이).
+ *  - ;이름 (와 .flip 같은 효과) → 이모트 그림 파일
+ *  - 니트로 없이 못 쓰는 디스코드 이모지 → 이모지 그림 파일
+ *  - 니트로 없이 못 보내는 스티커 → 스티커 그림
+ * 그림은 크기를 맞추고 효과를 넣어 파일로 붙여 보낸다 (sendMessage 의 attachmentsToUpload).
+ * 파일로 못 붙이면 [𝅙](주소) 숨은 링크로 보낸다 (효과는 빠진다).
  */
 
 const S = () => Stores as any
 const HIDDEN = '\u{1D159}'
 const link = (url: string) => `[${HIDDEN}](${url})`
 const esc = (s: string) => s.replace(/[-\\/^$*+?.()|[\]{}]/g, '\\$&')
+const MAX_FILES = 10
 
 export function hasNitro() {
     try {
@@ -26,7 +31,7 @@ export function hasNitro() {
     }
 }
 
-function guildOf(channelId: string): string | undefined {
+export function guildOf(channelId: string): string | undefined {
     try {
         const g = S().ChannelStore?.getChannel?.(channelId)?.guild_id
         return g == null ? undefined : String(g)
@@ -77,17 +82,28 @@ function usable(e: any, here: string | undefined) {
     return !e?.animated && g != null && String(g) === here
 }
 
-const emojiUrl = (e: any) =>
-    `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? 'gif' : 'webp'}?size=${settings().emoteSize}&quality=lossless&name=${encodeURIComponent(e.name)}`
+/** 디스코드 이모지 원본 그림 주소 (파일로 만들 때는 png, gif 로 받는다) */
+export const emojiSource = (e: any, size = 128) => `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? 'gif' : 'png'}?size=${size}&quality=lossless`
+const emojiLink = (e: any) => `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? 'gif' : 'webp'}?size=${settings().emoteSize}&quality=lossless&name=${encodeURIComponent(e.name)}`
 
-/** 디스코드 이모지를 이 채널에 맞게: 쓸 수 있으면 진짜 이모지, 아니면 이미지 */
-function emojiOut(list: any[], here: string | undefined): string {
-    const ok = list.find(e => usable(e, here))
-    if (ok) return `<${ok.animated ? 'a' : ''}:${ok.name}:${ok.id}>`
-    return link(emojiUrl(list[0]))
+interface Job {
+    /** 본문에 넣은 자리 표시 */
+    mark: string
+    name: string
+    /** 그림을 받을 주소 */
+    source: string
+    /** 파일로 못 만들 때 보낼 링크 주소 */
+    fallback: string
+    mods: Array<[string, string]>
 }
 
-function replaceNamed(text: string, channelId: string): { text: string; count: number } {
+interface Plan {
+    text: string
+    jobs: Job[]
+}
+
+/** 글에서 바꿀 것들을 찾아 자리 표시로 바꾼다 */
+function plan(content: string, channelId: string): Plan {
     const s = settings()
     const emotes = allEmotes()
     const lower: Record<string, string> = {}
@@ -102,78 +118,149 @@ function replaceNamed(text: string, channelId: string): { text: string; count: n
         }
         return discord.get(name) ?? discord.get(discordLower.get(name.toLowerCase()) ?? '')
     }
-    // 순서: 내 이모트, 같은 이름의 디스코드 이모지, Yentis 이모트 (대소문자까지 같은 것 먼저)
-    const resolve = (name: string): string | undefined => {
-        if (s.customEmotes[name]) return link(s.customEmotes[name])
-        const exact = discordFind(name)
-        if (exact?.length && exact[0].name === name) return emojiOut(exact, here)
-        if (emotes[name]) return link(emotes[name])
-        if (exact?.length) return emojiOut(exact, here)
-        const k = lower[name.toLowerCase()]
-        return k ? link(emotes[k]) : undefined
+    const jobs: Job[] = []
+    const mark = () => `\u0000${jobs.length}\u0000`
+    const emojiJob = (list: any[], mods: Array<[string, string]>): string => {
+        // 효과가 없고 여기서 쓸 수 있으면 진짜 이모지로
+        const ok = !mods.length && list.find(e => usable(e, here))
+        if (ok) return `<${ok.animated ? 'a' : ''}:${ok.name}:${ok.id}>`
+        const e = list[0]
+        const m = mark()
+        jobs.push({ mark: m, name: e.name, source: emojiSource(e), fallback: emojiLink(e), mods })
+        return m
     }
-    let count = 0
+    const urlJob = (name: string, url: string, mods: Array<[string, string]>) => {
+        const m = mark()
+        jobs.push({ mark: m, name, source: url, fallback: url, mods })
+        return m
+    }
+    // 순서: 내 이모트, 같은 이름의 디스코드 이모지, Yentis 이모트 (대소문자까지 같은 것 먼저)
+    const resolve = (name: string, mods: Array<[string, string]>): string | undefined => {
+        if (s.customEmotes[name]) return urlJob(name, s.customEmotes[name], mods)
+        const found = discordFind(name)
+        if (found?.length && found[0].name === name) return emojiJob(found, mods)
+        if (emotes[name]) return urlJob(name, emotes[name], mods)
+        if (found?.length) return emojiJob(found, mods)
+        const k = lower[name.toLowerCase()]
+        return k ? urlJob(k, emotes[k], mods) : undefined
+    }
     const prefix = s.prefix || ''
-    const re = s.requirePrefix && prefix ? new RegExp(`(^|[^\\w/:])${esc(prefix)}([\\w~-]{2,})`, 'g') : /(^|[^\w/:<])([\w~-]{2,})(?![\w:>])/g
-    let out = outsideCode(text, part =>
-        part.replace(re, (all, before: string, name: string) => {
-            const r = resolve(name)
+    const re =
+        s.requirePrefix && prefix
+            ? new RegExp(`(^|[^\\w/:])${esc(prefix)}([\\w~]{2,})((?:\\.[\\w-]+)*)`, 'g')
+            : /(^|[^\w/:<])([\w~]{2,})((?:\.[\w-]+)*)(?![\w:>])/g
+    let text = outsideCode(content, part =>
+        part.replace(re, (all, before: string, name: string, modText: string) => {
+            const mods = parseModifiers(modText)
+            // 효과 자리에 효과가 아닌 것이 있으면 (예: 문장 끝 마침표) 이름만 바꾼다
+            const r = resolve(name, mods)
             if (!r) return all
-            count++
-            return before + r
+            const rest = mods.length ? '' : modText
+            return before + r + rest
         }),
     )
-    // :이름: 으로 쓴 것 중 디스코드가 못 바꾼 (니트로가 없어 잠긴) 이모지
-    if (s.lockedEmojis)
-        out = outsideCode(out, part =>
-            part.replace(/(^|[^\w<])(:([\w~-]{2,}):)(?!\d)/g, (all, before: string, _w: string, name: string) => {
-                const list = discordFind(name)
-                if (!list?.length) return all
-                count++
-                return before + emojiOut(list, here)
+    if (s.lockedEmojis && !hasNitro()) {
+        // <:이름:ID> 로 들어온 잠긴 이모지
+        text = outsideCode(text, part =>
+            part.replace(/<(a?):(\w+):(\d+)>/g, (all, animated: string, name: string, id: string) => {
+                const known = discordFind(name)?.find(e => String(e.id) === id)
+                // 내 서버 이모지는 쓸 수 있는지 보고, 모르는 이모지(다른 곳에서 붙여 넣은 것)는 잠긴 것으로 본다
+                if (known && usable(known, here)) return all
+                const e = known ?? { id, name, animated: !!animated }
+                return emojiJob([e], [])
             }),
         )
-    return { text: out, count }
+        // :이름: 으로 남은 것 (디스코드가 잠겨서 못 바꾼 것)
+        text = outsideCode(text, part =>
+            part.replace(/(^|[^\w<])(:([\w~]{2,}):)(?!\d)/g, (all, before: string, _w: string, name: string) => {
+                const list = discordFind(name)
+                if (!list?.length) return all
+                return before + emojiJob(list, [])
+            }),
+        )
+    }
+    return { text, jobs }
 }
 
-function emojiGuild(id: string): string | undefined {
+// ── 파일로 만들기 ─────────────────────────────────────────────────────────
+async function download(url: string): Promise<Uint8Array | undefined> {
     try {
-        const e = S().EmojiStore?.getCustomEmojiById?.(id)
-        const g = e?.guildId ?? e?.guild_id
-        return g == null ? undefined : String(g)
+        const res = await fetch(url)
+        if (!res.ok) return
+        const blob = await res.blob()
+        const data: string = await new Promise((ok, no) => {
+            const r = new FileReader()
+            r.onload = () => ok(String(r.result ?? ''))
+            r.onerror = () => no(r.error)
+            r.readAsDataURL(blob)
+        })
+        const at = data.indexOf(',')
+        return fromBase64(at >= 0 ? data.slice(at + 1) : data)
     } catch {}
 }
 
-function replaceLockedEmojis(text: string, channelId: string): { text: string; count: number } {
-    if (!settings().lockedEmojis || hasNitro()) return { text, count: 0 }
-    const here = guildOf(channelId)
-    const size = settings().emoteSize
-    let count = 0
-    const out = outsideCode(text, part =>
-        part.replace(/<(a?):(\w+):(\d+)>/g, (all, animated: string, name: string, id: string) => {
-            const g = emojiGuild(id)
-            const usable = !animated && g != null && g === here
-            if (usable) return all
-            count++
-            return link(`https://cdn.discordapp.com/emojis/${id}.${animated ? 'gif' : 'webp'}?size=${size}&quality=lossless&name=${encodeURIComponent(name)}`)
-        }),
-    )
-    return { text: out, count }
+const CHANNEL_MESSAGE = 0
+/** 우리 파일만 따로 두는 칸 (입력창의 파일 줄에 안 보이게) */
+const OUR_DRAFT = 77
+
+const find = (...props: string[]): any => {
+    try {
+        return (lookupModule(withProps(...props) as any) as any)?.[0]
+    } catch {}
 }
 
+function uploadsOf(channelId: string, draftType: number): any[] {
+    try {
+        const u = S().UploadAttachmentStore?.getUploads?.(channelId, draftType)
+        return Array.isArray(u) ? u : []
+    } catch {
+        return []
+    }
+}
+
+let seq = 0
+/** 그림 파일을 디스코드의 업로드(CloudUpload)로 만든다. 사진 고르기와 같은 방법 */
+async function makeUpload(channelId: string, b64: string, ext: string, name: string): Promise<{ upload: any; draftType: number } | undefined> {
+    const safe = name.replace(/[^\w-]/g, '').slice(0, 40) || 'emote'
+    const file = `${safe}.${ext}`
+    const path: string = await (FileModule as any).writeFile('cache', `emote-replacer/${Date.now()}_${seq++}/${file}`, b64, 'base64')
+    const uri = String(path).startsWith('file://') ? String(path) : `file://${path}`
+    const platform = find('UploadPlatform')?.UploadPlatform?.REACT_NATIVE ?? 0
+    const origin = find('UploadOrigin')?.UploadOrigin?.IMAGE_PICKER
+    const item: any = { id: uri, uri, originalUri: uri, mimeType: ext === 'gif' ? 'image/gif' : 'image/png', width: 128, height: 128, filename: file, platform }
+    if (origin != null) item.origin = origin
+    for (const draftType of [OUR_DRAFT, CHANNEL_MESSAGE]) {
+        const before = new Set(uploadsOf(channelId, draftType))
+        try {
+            Dispatcher.dispatch({ type: 'UPLOAD_ATTACHMENT_ADD_FILES', channelId, files: [item], draftType, allowOptimization: false } as any)
+        } catch {
+            continue
+        }
+        const added = uploadsOf(channelId, draftType).find(u => !before.has(u))
+        if (added) return { upload: added, draftType }
+    }
+}
+
+function removeUpload(channelId: string, u: { upload: any; draftType: number }) {
+    const id = u.upload?.id ?? u.upload?.item?.id
+    if (id == null) return
+    try {
+        Dispatcher.dispatch({ type: 'UPLOAD_ATTACHMENT_REMOVE_FILE', channelId, id, draftType: u.draftType } as any)
+    } catch {}
+}
+
+// ── 스티커 ────────────────────────────────────────────────────────────────
 let sendability: any
 function stickerStore(): any {
     if (S().StickersStore?.getStickerById) return S().StickersStore
-    try {
-        return (lookupModule(withProps('getStickerById', 'getStickerPack') as any) as any)?.[0]
-    } catch {}
+    return find('getStickerById', 'getStickerPack')
 }
 function stickerLocked(id: string, channelId: string): any {
     const sticker = stickerStore()?.getStickerById?.(id)
     const channel = S().ChannelStore?.getChannel?.(channelId)
     const user = S().UserStore?.getCurrentUser?.()
     try {
-        sendability ??= (lookupModule(withProps('isSendableSticker') as any) as any)?.[0]
+        sendability ??= find('isSendableSticker')
         if (sticker && channel && user && typeof sendability?.isSendableSticker === 'function' && !sendability.isSendableSticker(sticker, user, channel)) return sticker
     } catch {}
     if (hasNitro() || !sticker) return
@@ -182,24 +269,52 @@ function stickerLocked(id: string, channelId: string): any {
 }
 function stickerUrl(st: any): string | undefined {
     const format = st?.format_type ?? st?.formatType
-    // 로티(움직이는 기본 스티커)는 이미지 주소가 없다
+    // 로티(움직이는 기본 스티커)는 그림 주소가 없다
     if (format === 3) return
-    const size = Math.max(160, settings().emoteSize)
-    return `https://media.discordapp.net/stickers/${st.id}.${format === 4 ? 'gif' : 'png'}?size=${size}&name=${encodeURIComponent(String(st.name ?? 'sticker'))}`
+    return `https://media.discordapp.net/stickers/${st.id}.${format === 4 ? 'gif' : 'png'}?size=160&name=${encodeURIComponent(String(st.name ?? 'sticker'))}`
+}
+
+export let lastError = ''
+
+export interface Rewritten {
+    args: any[]
+    /** 보낸 뒤 할 일 (우리 업로드 정리) */
+    after?: () => void
+}
+
+/** 바꿀 것이 있는지 (없으면 그대로 보낸다) */
+export function quickPlan(args: any[]): Plan | undefined {
+    const [channelId, message] = args
+    if (typeof channelId !== 'string' || !message || typeof message.content !== 'string') return
+    const p = plan(message.content, channelId)
+    if (p.text === message.content && !p.jobs.length) return
+    return p
 }
 
 /** sendMessage(channelId, message, _, options) 의 인자를 바꿔서 돌려준다 */
-export function rewrite(args: any[]): any[] {
+export async function rewrite(args: any[], p: Plan | undefined): Promise<Rewritten> {
     const [channelId, message, third, options] = args
-    if (typeof channelId !== 'string' || !message || typeof message.content !== 'string') return args
-    let text = message.content
-    let changed = false
-
-    const named = replaceNamed(text, channelId)
-    const locked = replaceLockedEmojis(named.text, channelId)
-    if (named.count || locked.count) {
-        text = locked.text
-        changed = true
+    if (typeof channelId !== 'string' || !message) return { args }
+    let text = p?.text ?? message.content
+    const uploads: Array<{ upload: any; draftType: number }> = []
+    const asFiles = settings().sendAsFile
+    for (const job of p?.jobs ?? []) {
+        let made: { upload: any; draftType: number } | undefined
+        if (asFiles && uploads.length < MAX_FILES) {
+            try {
+                const bytes = await download(job.source)
+                if (bytes) {
+                    const out = render(bytes, job.mods, settings().emoteSize)
+                    made = await makeUpload(channelId, out.b64, out.ext, job.name)
+                }
+            } catch (e: any) {
+                lastError = String(e?.message ?? e)
+            }
+        }
+        if (made) {
+            uploads.push(made)
+            text = text.split(job.mark).join('')
+        } else text = text.split(job.mark).join(link(job.fallback))
     }
 
     let opts = options
@@ -215,12 +330,20 @@ export function rewrite(args: any[]): any[] {
         }
         if (links.length) {
             text = [text.trim(), ...links].filter(Boolean).join('\n')
-            opts = { ...options, stickerIds: keep.length ? keep : undefined }
-            changed = true
+            opts = { ...opts, stickerIds: keep.length ? keep : undefined }
         }
     }
+    if (uploads.length) opts = { ...opts, attachmentsToUpload: [...(opts?.attachmentsToUpload ?? []), ...uploads.map(u => u.upload)] }
+    const next = { ...message, content: text.replace(/[ \t]{2,}/g, ' ').trim(), invalidEmojis: [] }
+    return {
+        args: [channelId, next, third, opts, ...args.slice(4)],
+        after: uploads.some(u => u.draftType === CHANNEL_MESSAGE) ? () => uploads.filter(u => u.draftType === CHANNEL_MESSAGE).forEach(u => removeUpload(channelId, u)) : undefined,
+    }
+}
 
-    if (!changed) return args
-    const next = { ...message, content: text, invalidEmojis: [] }
-    return [channelId, next, third, opts, ...args.slice(4)]
+/** 스티커만 바꿀 것이 있는지 */
+export function stickerNeedsWork(args: any[]) {
+    const [channelId, , , options] = args
+    const ids: string[] = Array.isArray(options?.stickerIds) ? options.stickerIds : []
+    return typeof channelId === 'string' && settings().lockedStickers && ids.some(id => !!stickerLocked(String(id), channelId))
 }
