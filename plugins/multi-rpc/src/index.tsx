@@ -3,7 +3,7 @@ import { Design } from '@valenced/discord/design'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { Animated, Pressable, ScrollView, Text, View } from 'react-native'
 
 /**
  * Multi RPC: 내 활동(게임 중, 듣는 중 …)을 여러 개 한꺼번에 보여 준다.
@@ -63,6 +63,8 @@ function newActivity(o: Partial<Activity> = {}): Activity {
 }
 
 const DEFAULTS = {
+    /** Multi RPC 전체 켜기. 꺼져 있으면 아무것도 보내지 않는다 */
+    on: false,
     gap: DEFAULT_GAP,
     activities: [newActivity({ name: 'A game', type: 0 }), newActivity({ name: 'A song', type: 2, use_timestamps: true, length_min: 3 }), newActivity({ name: 'A show', type: 3, use_timestamps: true })],
 }
@@ -78,6 +80,21 @@ function setGap(g: number) {
     if (!storage) return
     if (storage.cache) storage.cache.gap = g
     storage.set({ ...(storage.cache ?? {}), gap: g }, true)
+}
+const isOn = () => storage?.cache?.on === true
+function setOn(on: boolean) {
+    if (!storage) return
+    if (storage.cache) storage.cache.on = on
+    storage.set({ ...(storage.cache ?? {}), on }, true)
+}
+/** 보낸 적 있는 활동 (디스코드를 다시 켜기 전까지 남아 있어서 끌 때 다 지운다) */
+const sentIds = (): string[] => (Array.isArray(storage?.cache?.sent) ? storage.cache.sent : [])
+function rememberSent(ids: string[]) {
+    if (!storage) return
+    const next = [...new Set([...sentIds(), ...ids])].slice(-50)
+    if (next.length === sentIds().length) return
+    if (storage.cache) storage.cache.sent = next
+    storage.set({ ...(storage.cache ?? {}), sent: next }, true)
 }
 let saveTimer: any
 function setList(next: Activity[], now = false) {
@@ -95,19 +112,29 @@ function setList(next: Activity[], now = false) {
 const MAX_SHOWN = 5
 const LISTENING = 2
 type Why = { text: string; id?: boolean } | undefined
+const appIdOf = (a: Activity) => String(a.application_id || DEFAULT_APP_ID)
+const typeLabel = (t: number) => TYPES.find(([v]) => v === t)?.[1] ?? 'Playing'
+/** a 를 shown 옆에 더 보여 줄 수 없는 이유 */
+function conflict(a: Activity, shown: Activity[]): Why {
+    if (shown.some(b => appIdOf(b) === appIdOf(a))) return { text: 'Another activity uses the same Application ID', id: true }
+    if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) return { text: 'Another activity has the same name' }
+    if (a.type !== LISTENING && shown.some(b => b.type === a.type)) return { text: `Only one ${typeLabel(a.type)} activity can show` }
+    if (shown.length >= MAX_SHOWN) return { text: `Only ${MAX_SHOWN} activities can show at once` }
+}
+/** 켜 둔 활동마다 안 보이는 이유 (위에서부터 차례로) */
 function reasons(items: Activity[]): Why[] {
     const shown: Activity[] = []
-    const appId = (a: Activity) => String(a.application_id || DEFAULT_APP_ID)
     return items.map(a => {
         if (!a.enabled) return undefined
-        let why: Why
-        if (shown.some(b => appId(b) === appId(a))) why = { text: "Same Application ID as another activity, this one won't show", id: true }
-        else if (shown.some(b => (b.name || '').trim() === (a.name || '').trim())) why = { text: "Same name as another activity, this one won't show" }
-        else if (a.type !== LISTENING && shown.some(b => b.type === a.type)) why = { text: `Only one ${TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'} shows, this one won't` }
-        else if (shown.length >= MAX_SHOWN) why = { text: `Only ${MAX_SHOWN} activities show, this one won't` }
+        const why = conflict(a, shown)
         if (!why) shown.push(a)
         return why
     })
+}
+/** i 번째를 patch 대로 바꿔 켜면 안 되는 이유 (다른 보이는 활동과 비교) */
+function blockedBy(items: Activity[], whys: Why[], i: number, patch: Partial<Activity>): Why {
+    const others = items.filter((b, j) => j !== i && b.enabled && !whys[j])
+    return conflict({ ...items[i], ...patch, enabled: true }, others)
 }
 
 // ── 보내기 ──────────────────────────────────────────────────────
@@ -165,6 +192,7 @@ async function build(a: Activity) {
 }
 
 async function apply() {
+    if (!isOn()) return clearAll()
     const my = ++runId
     // 안 보일 활동은 보내지 않는다 (보내면 다른 활동이 대신 빠지기도 한다)
     const all = list()
@@ -178,11 +206,13 @@ async function apply() {
     }
     if (my !== runId) return
     const keep = new Set(built.map(b => b.socketId))
-    for (const [sid, pid] of live)
+    // 꺼졌거나 지운 활동은 내린다 (디스코드를 다시 켜기 전 것까지)
+    for (const sid of new Set([...live.keys(), ...sentIds()]))
         if (!keep.has(sid)) {
-            send(sid, pid, null)
+            send(sid, live.get(sid) ?? 0, null)
             live.delete(sid)
         }
+    rememberSent([...keep])
     for (let i = 0; i < built.length; i++) {
         const b = built[i]
         send(b.socketId, b.pid, b.activity)
@@ -197,16 +227,63 @@ async function apply() {
 
 function clearAll() {
     runId++
-    for (const [sid, pid] of live) send(sid, pid, null)
+    const ids = new Set([...live.keys(), ...sentIds(), ...list().map(a => `MultiRPC-${a.id}@Valenced`)])
+    for (const sid of ids) send(sid, live.get(sid) ?? 0, null)
     live.clear()
+}
+
+// ── 막힌 버튼: 누르면 이유를 말풍선으로 ─────────────────────────────
+function Tip({ text, side = 'above', onBlocked, children }: { text?: string; side?: 'above' | 'left'; onBlocked?: () => void; children: any }) {
+    const [shown, setShown] = useState(false)
+    const fade = useRef(new Animated.Value(0)).current
+    const timer = useRef<any>()
+    useEffect(() => () => clearTimeout(timer.current), [])
+    if (!text) return children
+    const show = () => {
+        onBlocked?.()
+        setShown(true)
+        fade.setValue(0)
+        Animated.timing(fade, { toValue: 1, duration: 120, useNativeDriver: true }).start()
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => Animated.timing(fade, { toValue: 0, duration: 160, useNativeDriver: true }).start(() => setShown(false)), 2200)
+    }
+    const BLURPLE = '#5865F2'
+    const bubble = (
+        <Animated.View
+            pointerEvents="none"
+            style={[
+                { position: 'absolute', zIndex: 20, elevation: 20, opacity: fade, flexDirection: side === 'left' ? 'row' : 'column', alignItems: 'center' },
+                side === 'above' ? { bottom: '100%', left: 0, marginBottom: 4 } : { right: 64, top: 0, bottom: 0, justifyContent: 'center' },
+            ]}
+        >
+            <View style={{ backgroundColor: BLURPLE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 240 }}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>{text}</Text>
+            </View>
+            <View
+                style={[
+                    { width: 8, height: 8, backgroundColor: BLURPLE, transform: [{ rotate: '45deg' }] },
+                    side === 'above' ? { marginTop: -4, alignSelf: 'flex-start', marginLeft: 14 } : { marginLeft: -4 },
+                ]}
+            />
+        </Animated.View>
+    )
+    return (
+        <View>
+            <View style={{ opacity: 0.4 }} pointerEvents="none">
+                {children}
+            </View>
+            <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={show} />
+            {shown ? bubble : null}
+        </View>
+    )
 }
 
 // ── 설정 화면 ───────────────────────────────────────────────────
 /** 디스코드는 같은 Application ID 의 활동을 하나만 보여 준다. 겹치면 다른 숫자로 바꿀 수 있게 */
 const randomAppId = () => '1' + Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')
 
-function Card({ a, why, onChange, onRemove }: { a: Activity; why: Why; onChange: (a: Activity) => void; onRemove: () => void }) {
-    const { Stack, TableRowGroup, TableSwitchRow, TableRow, TextInput, Button } = Design as any
+function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void }) {
+    const { Stack, TableRowGroup, TableSwitchRow, TextInput, Button } = Design as any
     const set = (patch: Partial<Activity>) => onChange({ ...a, ...patch })
     // 숫자만 (ID 처럼 긴 숫자는 글자로 둔다. Number 로 바꾸면 끝자리가 뭉개진다)
     const digits = (v: string) => v.replace(/[^0-9]/g, '')
@@ -222,18 +299,17 @@ function Card({ a, why, onChange, onRemove }: { a: Activity; why: Why; onChange:
     const typeName = TYPES.find(([v]) => v === a.type)?.[1] ?? 'Playing'
     return (
         <TableRowGroup title={`${a.name || 'Activity'}, ${typeName}`}>
-            <TableSwitchRow label="Show this" value={!!a.enabled} onValueChange={(enabled: boolean) => set({ enabled })} />
-            {why ? (
-                <TableRow
-                    label={why.text}
-                    trailing={why.id ? <Button size="sm" variant="secondary" text="Change" onPress={() => set({ application_id: randomAppId() })} /> : undefined}
-                />
-            ) : null}
+            {/* 켜도 안 보일 활동은 켤 수 없게 (누르면 이유) */}
+            <Tip text={(a.enabled ? why : blockOn)?.text} side="left" onBlocked={() => a.enabled && set({ enabled: false })}>
+                <TableSwitchRow label="Show this" value={!!a.enabled && !why} onValueChange={(enabled: boolean) => set({ enabled })} />
+            </Tip>
             <View style={{ padding: 12 }}>
                 <Stack spacing={10}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {TYPES.map(([v, label]) => (
-                            <Button key={v} size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
+                            <Tip key={v} text={a.type === v ? undefined : blockType(v)?.text}>
+                                <Button size="sm" text={label} variant={a.type === v ? 'primary' : 'secondary'} onPress={() => set({ type: v })} />
+                            </Tip>
                         ))}
                     </View>
                     {field('Name', 'name', 'Spotify')}
@@ -269,6 +345,7 @@ function SettingsPage({ api }: { api?: any }) {
     const { Stack, Button, TableRowGroup, TableRadioGroup, TableRadioRow } = Design as any
     const [items, setItems] = useState<Activity[]>(list)
     const [g, setG] = useState(gap)
+    const [on, setOnState] = useState(isOn)
     const whys = reasons(items)
     const first = useRef(true)
     useEffect(() => {
@@ -281,8 +358,22 @@ function SettingsPage({ api }: { api?: any }) {
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             <Stack spacing={16}>
-                <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
-                <Button size="md" variant="secondary" text="Clear all" onPress={clearAll} />
+                <TableRowGroup>
+                    <TableSwitchRow
+                        label="Multi RPC"
+                        value={on}
+                        onValueChange={(v: boolean) => {
+                            setOnState(v)
+                            setList(items, true)
+                            setOn(v)
+                            if (v) apply().catch(() => {})
+                            else clearAll()
+                        }}
+                    />
+                </TableRowGroup>
+                <Tip text={on ? undefined : 'Turn on Multi RPC first'}>
+                    <Button size="md" variant="primary" text="Apply" onPress={() => (setList(items, true), apply().catch(() => {}))} />
+                </Tip>
                 <Button size="md" variant="secondary" text="Add activity" onPress={() => setItems(x => [...x, newActivity({ application_id: randomAppId() })])} />
                 <TableRadioGroup title="Time between activities" defaultValue={String(g)} onChange={(v: string) => (setG(Number(v)), setGap(Number(v)))}>
                     {GAPS.map(ms => (
@@ -293,7 +384,10 @@ function SettingsPage({ api }: { api?: any }) {
                     <Card
                         key={a.id}
                         a={a}
-                        why={whys[i]} onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
+                        why={whys[i]}
+                        blockOn={blockedBy(items, whys, i, {})}
+                        blockType={(t: number) => (a.enabled && !whys[i] ? blockedBy(items, whys, i, { type: t }) : undefined)}
+                        onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))} onRemove={() => setItems(x => x.filter(y => y.id !== a.id))} />
                 ))}
             </Stack>
         </ScrollView>
