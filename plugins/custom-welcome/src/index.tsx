@@ -84,7 +84,7 @@ function canSend(id: string, channelId: string): boolean {
 }
 /**
  * 못 보내는 스티커를 이미지 링크로 (FakeNitro 처럼).
- * [이름](주소) 로 쓰면 주소는 안 보이고 이미지만 뜬다.
+ * [𝅙](주소) 로 쓰면 (𝅙 는 거의 안 보이는 글자) 주소도 이름도 안 보이고 이미지만 뜬다.
  * 로티(움직이는 기본 스티커)는 이미지 주소가 없어서 못 바꾼다.
  */
 function stickerLink(id: string): string | undefined {
@@ -94,7 +94,7 @@ function stickerLink(id: string): string | undefined {
         if (format === 3) return
         const ext = format === 4 ? 'gif' : 'png'
         const name = String(st?.name ?? 'sticker').replace(/[\[\]()\\]/g, '') || 'sticker'
-        return `[${name}](https://media.discordapp.net/stickers/${id}.${ext}?size=160&name=${encodeURIComponent(name)})`
+        return `[\u{1D159}](https://media.discordapp.net/stickers/${id}.${ext}?size=160&name=${encodeURIComponent(name)})`
     } catch {}
 }
 
