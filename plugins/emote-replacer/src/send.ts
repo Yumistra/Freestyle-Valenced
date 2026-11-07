@@ -21,6 +21,24 @@ const HIDDEN = '\u{1D159}'
 const link = (url: string) => `[${HIDDEN}](${url})`
 const esc = (s: string) => s.replace(/[-\\/^$*+?.()|[\]{}]/g, '\\$&')
 const MAX_FILES = 10
+/** /replacer 와 이모트 버튼이 보내는 글에 쓰는 앞 글자 (설정과 상관없이) */
+const COMMAND_PREFIX = ';'
+/** 명령어로 보내는 글 (이 글은 ;이름 설정이 꺼져 있어도 바꾼다) */
+const forced = new Set<string>()
+
+/** 이모트 하나를 효과와 함께 보낸다 (/replacer, 이모트 버튼) */
+export function sendEmote(channelId: string, name: string, mods: string[]): boolean {
+    const clean = name.replace(/^<a?:(\w+):\d+>$/, '$1').replace(/^[;:]+|:+$/g, '').trim()
+    if (!/^[\w~]{2,}$/.test(clean)) return false
+    const content = `${COMMAND_PREFIX}${clean}${mods.map(m => `.${m}`).join('')}`
+    const p = plan(content, channelId, true)
+    if (!p.jobs.length && p.text === content) return false
+    const actions = find('sendMessage', 'receiveMessage')
+    if (typeof actions?.sendMessage !== 'function') return false
+    forced.add(content)
+    actions.sendMessage(channelId, { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, {})
+    return true
+}
 
 export function hasNitro() {
     try {
@@ -103,7 +121,7 @@ interface Plan {
 }
 
 /** 글에서 바꿀 것들을 찾아 자리 표시로 바꾼다 */
-function plan(content: string, channelId: string): Plan {
+function plan(content: string, channelId: string, force = false): Plan {
     const s = settings()
     const emotes = allEmotes()
     const lower: Record<string, string> = {}
@@ -144,12 +162,13 @@ function plan(content: string, channelId: string): Plan {
         const k = lower[name.toLowerCase()]
         return k ? urlJob(k, emotes[k], mods) : undefined
     }
-    const prefix = s.prefix || ''
+    const prefix = force ? COMMAND_PREFIX : s.prefix || ''
     const re =
-        s.requirePrefix && prefix
+        force || (s.requirePrefix && prefix)
             ? new RegExp(`(^|[^\\w/:])${esc(prefix)}([\\w~]{2,})((?:\\.[\\w-]+)*)`, 'g')
             : /(^|[^\w/:<])([\w~]{2,})((?:\.[\w-]+)*)(?![\w:>])/g
-    let text = outsideCode(content, part =>
+    // ;이름 바꾸기는 설정에서 켰을 때만 (명령어로 보낼 때는 늘)
+    let text = !force && !s.typing ? content : outsideCode(content, part =>
         part.replace(re, (all, before: string, name: string, modText: string) => {
             const mods = parseModifiers(modText)
             // 효과 자리에 효과가 아닌 것이 있으면 (예: 문장 끝 마침표) 이름만 바꾼다
@@ -286,7 +305,9 @@ export interface Rewritten {
 export function quickPlan(args: any[]): Plan | undefined {
     const [channelId, message] = args
     if (typeof channelId !== 'string' || !message || typeof message.content !== 'string') return
-    const p = plan(message.content, channelId)
+    const force = forced.has(message.content)
+    if (force) forced.delete(message.content)
+    const p = plan(message.content, channelId, force)
     if (p.text === message.content && !p.jobs.length) return
     return p
 }

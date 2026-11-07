@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 import { emoteStatus, loadEmotes, onEmotesChange, search } from './emotes'
 import { MODIFIERS } from './img'
-import { discordEmojis } from './send'
+import { discordEmojis, sendEmote } from './send'
 import { settings } from './store'
 import { tokenColor } from './suggest'
 
@@ -113,9 +113,12 @@ function Grid({ channelId }: { channelId: string }) {
                             key={name}
                             accessibilityLabel={name}
                             onPress={() => {
-                                const word = prefix + name + effects.map(e => `.${e}`).join('')
-                                insert(channelId, word)
-                                setAdded(word)
+                                // ;이름 을 쓰는 설정이면 입력창에 넣고, 아니면 바로 보낸다
+                                if (settings().typing) {
+                                    const word = prefix + name + effects.map(e => `.${e}`).join('')
+                                    insert(channelId, word)
+                                    setAdded(`Added ${word}`)
+                                } else setAdded(sendEmote(channelId, name, effects) ? `Sent ${name}` : `Couldn't send ${name}`)
                             }}
                             style={({ pressed }: any) => ({ width: 52, height: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}
                         >
@@ -129,7 +132,7 @@ function Grid({ channelId }: { channelId: string }) {
                 )}
             </ScrollView>
             <Text variant="text-xs/medium" color="text-muted" style={{ textAlign: 'center' }}>
-                {added ? `Added ${added}` : effects.length ? `Effects, ${effects.join(', ')}` : 'Pick effects, then tap an emote'}
+                {added ?? (effects.length ? `Effects, ${effects.join(', ')}` : settings().typing ? 'Pick effects, then tap an emote' : 'Pick effects, then tap an emote to send it')}
             </Text>
         </View>
     )

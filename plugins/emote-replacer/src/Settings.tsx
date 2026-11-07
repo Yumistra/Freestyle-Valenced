@@ -66,12 +66,16 @@ export default function SettingsPage() {
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }} keyboardShouldPersistTaps="handled">
             <Stack spacing={24}>
-                <TableRowGroup title="Typing">
+                <TableRowGroup title="Sending">
+                    <TableRow label="/replacer" subLabel="Use /replacer emoji: style: to send an emote, up to 3 styles" />
+                    <TableSwitchRow label="Type ;name" subLabel="Also replace ;name written in your messages" value={s.typing} onValueChange={(typing: boolean) => update({ typing })} />
+                    {s.typing ? (
                     <View style={{ padding: 12 }}>
                         <TextInput label="Prefix" value={s.prefix} placeholder=";" onChange={(prefix: string) => update({ prefix: prefix.replace(/\s/g, '').slice(0, 3) })} description={`Type ${s.prefix || ';'}name to send an emote.`} />
                     </View>
-                    <TableSwitchRow label="Require prefix" subLabel="Off, plain emote names are replaced too" value={s.requirePrefix} onValueChange={(requirePrefix: boolean) => update({ requirePrefix })} />
-                    <TableSwitchRow label="Suggestions" subLabel="Shows matching emotes and effects above the chat bar while you type" value={s.suggestions} onValueChange={(suggestions: boolean) => update({ suggestions })} />
+                    ) : null}
+                    {s.typing ? <TableSwitchRow label="Require prefix" subLabel="Off, plain emote names are replaced too" value={s.requirePrefix} onValueChange={(requirePrefix: boolean) => update({ requirePrefix })} /> : null}
+                    {s.typing ? <TableSwitchRow label="Suggestions" subLabel="Shows matching emotes and effects above the chat bar while you type" value={s.suggestions} onValueChange={(suggestions: boolean) => update({ suggestions })} /> : null}
                     <TableSwitchRow label="Send plain emotes as files" subLabel="Off, plain emotes go as small image links. Emotes with effects are always sent as files" value={s.plainAsFile} onValueChange={(plainAsFile: boolean) => update({ plainAsFile })} />
                     <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Emote button" subLabel="Adds a button to the chat bar to search and add emotes" value={s.button} onValueChange={(button: boolean) => update({ button })} />
                 </TableRowGroup>

@@ -2,10 +2,10 @@
 	"format": 1,
 	"id": "yumistra.emote-replacer",
 	"name": "Emote Replacer",
-	"description": "Type ;name to send emotes with effects, and send emojis or stickers you can't use as images.",
+	"description": "Send emotes with styles using /replacer, and send emojis or stickers you can't use as images.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

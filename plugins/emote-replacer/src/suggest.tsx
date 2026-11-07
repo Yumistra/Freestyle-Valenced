@@ -152,7 +152,7 @@ export function Suggestions({ channelId, inputRef }: { channelId?: string; input
     const [, tick] = useState(0)
     useEffect(() => onEmotesChange(() => tick(n => n + 1)), [])
     const discord = useMemo(() => (channelId ? discordEmojis(channelId) : new Map()), [channelId])
-    const list = useMemo(() => (channelId && s.suggestions ? items(text, channelId, discord) : []), [text, channelId, discord, s.suggestions, s.prefix, emoteStatus().count])
+    const list = useMemo(() => (channelId && s.typing && s.suggestions ? items(text, channelId, discord) : []), [text, channelId, discord, s.typing, s.suggestions, s.prefix, emoteStatus().count])
     const shown = useRef(false)
     if (shown.current !== list.length > 0) {
         shown.current = list.length > 0

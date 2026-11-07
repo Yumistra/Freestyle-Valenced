@@ -1,4 +1,6 @@
 export interface Settings {
+    /** 글에 ;이름 을 쓰면 바꾸기 (꺼도 /replacer 와 이모트 버튼은 된다) */
+    typing: boolean
     /** 이모트 이름 앞에 붙이는 글자 */
     prefix: string
     /** 앞 글자 없이 이름만 써도 바꿀지 */
@@ -22,6 +24,7 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
+    typing: false,
     prefix: ';',
     requirePrefix: true,
     showStandardEmotes: true,

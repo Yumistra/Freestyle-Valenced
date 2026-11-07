@@ -3,6 +3,7 @@ import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { after, instead } from '@valenced/patcher'
 import { findInReactFiber } from '@valenced/utils/react'
+import { addCommand } from './command'
 import { loadEmotes } from './emotes'
 import { EmoteButton } from './picker'
 import { quickPlan, rewrite, stickerNeedsWork } from './send'
@@ -44,6 +45,18 @@ export default plugin({
         bind(jsonStorage)
         loadEmotes()
         cleanup(
+            getModules(withProps('getBuiltInCommands') as any, (mod: any) => {
+                cleanup(
+                    instead(mod, 'getBuiltInCommands', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        const result = orig.apply(this, args)
+                        try {
+                            return addCommand(result, args?.[0])
+                        } catch {
+                            return result
+                        }
+                    }),
+                )
+            }) as any,
             getModules(withProps('sendMessage', 'deleteMessage') as any, (mod: any) => {
                 if (typeof mod?.sendMessage !== 'function') return
                 cleanup(
