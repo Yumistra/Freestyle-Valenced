@@ -68,19 +68,44 @@ function isWave(ids: any, options: any) {
 }
 
 let sendability: any
-/** 이 채널에서 이 스티커를 보낼 수 있는지. 모르면 보낼 수 있다고 본다 */
-function canSend(id: string, channelId: string): boolean {
+let stickerStore: any
+function stickers(): any {
     const S: any = Stores
+    if (S.StickersStore?.getStickerById) return S.StickersStore
+    try {
+        stickerStore ??= (lookupModule(withProps('getStickerById', 'getStickerPack') as any) as any)?.[0]
+    } catch {}
+    return stickerStore
+}
+function hasNitro() {
+    try {
+        const u = (Stores as any).UserStore?.getCurrentUser?.()
+        return !!u && u.premiumType != null && u.premiumType !== 0
+    } catch {
+        return false
+    }
+}
+/**
+ * 이 채널에서 이 스티커를 보낼 수 있는지.
+ *  - 디스코드의 isSendableSticker 가 "못 보낸다"고 하면 못 보낸다
+ *  - 그와 별도로, 니트로가 없으면 다른 서버 스티커는 못 보낸다 (DM 에서는 서버 스티커 전부)
+ *  - 니트로가 없는데 스티커 정보를 못 찾으면 못 보낸다고 본다 (보냈다가 실패하는 것보다 낫다)
+ */
+function canSend(id: string, channelId: string): boolean {
+    if (id === WAVE_STICKER) return true
+    const S: any = Stores
+    const sticker = stickers()?.getStickerById?.(id)
+    const channel = S.ChannelStore?.getChannel?.(channelId)
+    const user = S.UserStore?.getCurrentUser?.()
     try {
         sendability ??= (lookupModule(withProps('isSendableSticker') as any) as any)?.[0]
-        const sticker = S.StickersStore?.getStickerById?.(id)
-        const channel = S.ChannelStore?.getChannel?.(channelId)
-        const user = S.UserStore?.getCurrentUser?.()
-        if (!sticker || !channel || !user || typeof sendability?.isSendableSticker !== 'function') return true
-        return !!sendability.isSendableSticker(sticker, user, channel)
-    } catch {
-        return true
-    }
+        if (sticker && channel && user && typeof sendability?.isSendableSticker === 'function' && !sendability.isSendableSticker(sticker, user, channel)) return false
+    } catch {}
+    if (hasNitro()) return true
+    if (!sticker) return false
+    const g = sticker.guild_id ?? sticker.guildId
+    if (g == null) return true
+    return channel?.guild_id != null && String(channel.guild_id) === String(g)
 }
 /**
  * 못 보내는 스티커를 이미지 링크로 (FakeNitro 처럼).
@@ -89,7 +114,7 @@ function canSend(id: string, channelId: string): boolean {
  */
 function stickerLink(id: string): string | undefined {
     try {
-        const st = (Stores as any).StickersStore?.getStickerById?.(id)
+        const st = stickers()?.getStickerById?.(id)
         const format = st?.format_type ?? st?.formatType
         if (format === 3) return
         const ext = format === 4 ? 'gif' : 'png'
