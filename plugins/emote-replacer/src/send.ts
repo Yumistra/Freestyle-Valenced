@@ -325,8 +325,14 @@ export interface Rewritten {
 export function quickPlan(args: any[]): Plan | undefined {
     const [channelId, message] = args
     if (typeof channelId !== 'string' || !message || typeof message.content !== 'string') return
-    const force = forced.has(message.content)
-    if (force) forced.delete(message.content)
+    // 다른 플러그인이 앞에 글을 붙일 수 있어서 (예: Silent Messages 의 @silent) 들어 있는지로 본다
+    let force = false
+    for (const f of forced)
+        if (message.content.includes(f)) {
+            forced.delete(f)
+            force = true
+            break
+        }
     const p = plan(message.content, channelId, force)
     if (p.text === message.content && !p.jobs.length) return
     return p

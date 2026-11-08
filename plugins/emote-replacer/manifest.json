@@ -5,7 +5,7 @@
 	"description": "Send emotes with styles using /replacer, and send emojis or stickers you can't use as images.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

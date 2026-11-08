@@ -4,41 +4,13 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { sendEmote } from './send'
 
 /**
- * /replacer emoji: style: style2: style3:
+ * /replacer emoji: styles:
  * 디스코드 기본 명령어 목록(getBuiltInCommands)에 덧붙인다 (Ghost Ping 과 같은 방법).
  */
 
 const CHAT = 1
 const STRING = 3
 
-/** 고를 수 있는 효과 (디스코드 명령어 선택지는 25개까지) */
-export const STYLES = [
-    'flip',
-    'flap',
-    'spin',
-    'spin-fast',
-    'spin-hyper',
-    'spinrev',
-    'slide',
-    'sliderev',
-    'shake',
-    'rainbow',
-    'rainbow-fast',
-    'infinite',
-    'wiggle',
-    'wiggle-huge',
-    'wide',
-    'wide-extreme',
-    'rain',
-    'rain-glitter',
-    'rotate-90',
-    'rotate-180',
-    'reverse',
-    'hyperspeed',
-    'speed-2',
-    'resize-small',
-    'resize-large',
-]
 
 const find = (...props: string[]): any => {
     try {
@@ -83,12 +55,8 @@ export function makeCommand() {
         applicationId: '-1',
         untranslatedDescription: 'Send an emote, with styles',
         displayDescription: 'Send an emote, with styles',
-        // 디스코드 명령어 칸은 25개까지: emoji, styles(여러 개를 직접), style ~ style23(목록에서)
-        options: [
-            option('emoji', 'Emoji, opens the emoji panel', true),
-            option('styles', 'Any number of styles, like spin rainbow shake-fast', false),
-            ...Array.from({ length: 23 }, (_, i) => option(i ? `style${i + 1}` : 'style', i ? 'Another style' : 'Style', false, STYLES)),
-        ],
+        // styles 칸을 고르면 입력창 위에 효과 목록이 뜨고, 누르면 칸에 적힌다 (stylesBar.tsx)
+        options: [option('emoji', 'Emoji, opens the emoji panel', true), option('styles', 'Styles, pick from the list above or type like spin rainbow', false)],
         execute(args: any[], ctx: any) {
             const get = (n: string) => (Array.isArray(args) ? args.find(a => a?.name === n)?.value : undefined)
             const name = String(get('emoji') ?? '').trim()
@@ -96,8 +64,7 @@ export function makeCommand() {
                 .split(/[\s,]+/)
                 .map(x => x.replace(/^\.+/, '').trim())
                 .filter(Boolean)
-            const picked = Array.from({ length: 23 }, (_, i) => get(i ? `style${i + 1}` : 'style')).filter((x): x is string => typeof x === 'string' && !!x)
-            const styles = [...typed, ...picked]
+            const styles = typed
             const channelId = ctx?.channel?.id
             if (!channelId || !name) return
             if (!sendEmote(channelId, name, styles)) toast(`No emote named ${name.replace(/^[;:]+|:+$/g, '')}`)

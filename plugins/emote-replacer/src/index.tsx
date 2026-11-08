@@ -10,6 +10,7 @@ import { quickPlan, rewrite, stickerNeedsWork } from './send'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, settings } from './store'
 import { EmojiOptionWatcher } from './emojiOption'
+import { StylesBar } from './stylesBar'
 import { Suggestions } from './suggest'
 
 /**
@@ -35,6 +36,7 @@ function withSuggestions(props: any, original: any) {
     return (
         <>
             <Suggestions channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
+            <StylesBar channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             <EmojiOptionWatcher channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             {original}
         </>
