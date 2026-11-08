@@ -311,14 +311,16 @@ function SplitName({ name, colors, style, variant, userId, guildId, real, color 
     if (real && UWE) {
         const v = variant ?? 'text-sm/medium'
         const ts = find('TextStyleSheet')?.TextStyleSheet?.[v]
+        const fontSize = ts?.fontSize ?? 14
         const lineHeight = ts?.lineHeight ?? 18
-        status.variant = `${v} ${ts?.fontSize ?? '?'}/${lineHeight}`
+        status.variant = `${v} ${fontSize}/${lineHeight}`
+        // 글자 크기는 메시지 줄과 같게, 효과가 줄 높이를 조금 넘어도 자르지 않는다
         return (
-            <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
-                <FitName lineHeight={lineHeight}>
-                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} defaultColor={color ?? textColor()} lineClamp={1} effectDisplayType={1} />
-                </FitName>
-            </Boundary>
+            <View style={{ height: lineHeight, justifyContent: 'center', flexShrink: 0, overflow: 'visible' }}>
+                <Boundary fallback={<Text style={{ fontSize, color: color ?? textColor() }}>{name}</Text>}>
+                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize }} defaultColor={color ?? textColor()} lineClamp={1} effectDisplayType={1} />
+                </Boundary>
+            </View>
         )
     }
     const { Text: DText } = Design as any
@@ -392,7 +394,7 @@ function wrapperFor(type: any) {
     w = function BetterTextChannel(props: any) {
         const out = render(props)
         const sub = props?.subtitle
-        if (!sub?.split || !settings().realGradient) return out
+        if (!sub?.split) return out
         try {
             const r = splitTree(out, sub)
             if (r === out) status.split = 'Message line not found'
@@ -449,17 +451,13 @@ function preview(channel: any): Preview | undefined {
     const rest = system ? ` ${body}` : `: ${body}`
     const base = styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' as const }
     return {
-        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${s.realGradient}|${!!usernameWithEffects}`,
+        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${!!usernameWithEffects}`,
         // 표시 이름 스타일이 있으면 디스코드가 DM 목록에서 쓰는 이름 컴포넌트(UsernameWithEffects)로 똑같이 그린다
-        split:
-            styled.styled && usernameWithEffects
-                ? { name, colors: colors ?? [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: s.roleColor ? colorOf(authorId, channel.guild_id) : undefined }
-                : colors && colors.length > 1
-                  ? { name, colors, style: styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }, rest }
-                  : undefined,
+        // 이름은 언제나 디스코드 이름 컴포넌트로 (스타일이 없는 사람은 역할 색으로)
+        split: s.nameStyle && usernameWithEffects ? { name, colors: [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: s.roleColor ? colorOf(authorId, channel.guild_id) : undefined } : undefined,
         node: (
             <>
-                {colors ? <Gradient text={name} colors={colors} style={base} /> : <Text style={{ ...base, ...(color ? { color } : null) }}>{name}</Text>}
+                <Text style={{ fontWeight: '700', ...(s.roleColor && colorOf(authorId, channel.guild_id) ? { color: colorOf(authorId, channel.guild_id) } : null) }}>{name}</Text>
                 {rest}
             </>
         ),
@@ -523,7 +521,7 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
                                 status.lastError = String(e?.message ?? e)
                             }
                             const out = orig.apply(this, args)
-                            if (key !== 'renderChannelListItem' || !settings().realGradient) return out
+                            if (key !== 'renderChannelListItem') return out
                             try {
                                 return wrapRow(out)
                             } catch (e: any) {
@@ -553,8 +551,7 @@ function SettingsPage() {
                 <TableRowGroup title="Channel list">
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
-                    <TableSwitchRow label="Name style" subLabel="Uses the author's display name font and color" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
-                    <TableSwitchRow label="Real gradient" subLabel="Draws the name apart from the message so the gradient fits. Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
+                    <TableSwitchRow label="Name style" subLabel="Draws names with Discord's own name style, font, colors and effects" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">
