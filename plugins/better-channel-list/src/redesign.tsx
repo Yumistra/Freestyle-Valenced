@@ -505,6 +505,10 @@ export function patchBaseChannelItem(cleanup: (...f: any[]) => void) {
                         status.icons++
                         status.badges++
                         next.channelInfo = [dropLocks(p.channelInfo) ?? null, <VoiceBadge key="bcl-voice-badge" channel={channel} />]
+                        // 들어온 사람 목록은 왼쪽으로 들여써져 있어서(36), 줄 왼쪽 끝부터 쓰게 당긴다
+                        const kids = p.children
+                        const hasKids = Array.isArray(kids) ? kids.some((k: any) => k != null && k !== false) : kids != null && kids !== false
+                        if (hasKids) next.children = <View style={{ marginLeft: -36 }}>{kids}</View>
                         if (s.stripNameEmoji && typeof p.name?.props?.name === 'string') {
                             const clean = cleanName(p.name.props.name)
                             if (clean !== p.name.props.name) next.name = cloneElement(p.name, { name: clean })
