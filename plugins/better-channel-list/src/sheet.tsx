@@ -5,7 +5,9 @@ import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleW
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useMemo, useState } from 'react'
-import { FlatList, Image, Pressable, Text as RNText, View } from 'react-native'
+import { Dimensions, FlatList, Image, Pressable, Text as RNText, View } from 'react-native'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { EMOJI_COLORS } from './colors'
 import { EmojiTile } from './redesign'
 import { settings, update } from './store'
@@ -80,41 +82,70 @@ function EmojiSheet({ channel }: { channel: any }) {
             ;(ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY)
         } catch {}
     }
-    const body = (
-        <View style={{ paddingHorizontal: 16, paddingBottom: 16, gap: 10 }}>
+    // 디스코드 BottomSheet 는 펼친 채로 열 수 있고, 목록은 그 안에서 스크롤되는 BottomSheetFlatList 로
+    const BottomSheet = (Design as any).BottomSheet ?? findProp('BottomSheet', 'BottomSheetTitleHeader')
+    const List = findProp('BottomSheetFlatList') ?? FlatList
+    const header = (
+        <View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 10 }}>
             <Text variant="heading-lg/bold">{`Emoji for #${channel?.name ?? ''}`}</Text>
             <TextInput value={text} placeholder="Type an emoji, or search server emojis" onChange={setText} isClearable />
             {typed ? <Button text={`Use ${text.trim()}`} variant="primary" size="md" onPress={() => pick(text.trim())} /> : null}
             {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
-            <FlatList
-                data={cells}
-                numColumns={7}
-                keyExtractor={(c: Cell) => c.key}
-                style={{ height: 360 }}
-                keyboardShouldPersistTaps="handled"
-                initialNumToRender={70}
-                windowSize={5}
-                nestedScrollEnabled
-                ListEmptyComponent={
-                    <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
-                        No server emojis found
-                    </Text>
-                }
-                renderItem={({ item }: { item: Cell }) => (
-                    <Pressable accessibilityLabel={item.text ?? item.value} onPress={() => pick(item.value)} style={({ pressed }: any) => ({ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}>
-                        {item.id ? (
-                            <Image source={{ uri: `https://cdn.discordapp.com/emojis/${item.id}.png?size=48` }} style={{ width: 30, height: 30 }} resizeMode="contain" />
-                        ) : (
-                            <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
-                                {item.value}
-                            </RNText>
-                        )}
-                    </Pressable>
-                )}
-            />
         </View>
     )
-    return ActionSheet ? <ActionSheet>{body}</ActionSheet> : body
+    const list = (
+        <List
+            data={cells}
+            numColumns={7}
+            keyExtractor={(c: Cell) => c.key}
+            style={BottomSheet ? { flex: 1 } : { height: Math.round(Dimensions.get('window').height * 0.6) }}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 32 }}
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={84}
+            windowSize={7}
+            nestedScrollEnabled
+            ListEmptyComponent={
+                <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
+                    No server emojis found
+                </Text>
+            }
+            renderItem={({ item }: { item: Cell }) => (
+                <Pressable accessibilityLabel={item.text ?? item.value} onPress={() => pick(item.value)} style={({ pressed }: any) => ({ flex: 1 / 7, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}>
+                    {item.id ? (
+                        <Image source={{ uri: `https://cdn.discordapp.com/emojis/${item.id}.png?size=48` }} style={{ width: 30, height: 30 }} resizeMode="contain" />
+                    ) : (
+                        <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
+                            {item.value}
+                        </RNText>
+                    )}
+                </Pressable>
+            )}
+        />
+    )
+    if (BottomSheet)
+        return (
+            <BottomSheet startExpanded header={header}>
+                {list}
+            </BottomSheet>
+        )
+    return ActionSheet ? (
+        <ActionSheet>
+            {header}
+            {list}
+        </ActionSheet>
+    ) : (
+        <View>
+            {header}
+            {list}
+        </View>
+    )
+}
+
+/** 이름으로 내보낸 것 하나 찾기 */
+function findProp(name: string, ...with_: string[]): any {
+    try {
+        return (lookupModule(withProps(name, ...with_) as any) as any)?.[0]?.[name]
+    } catch {}
 }
 
 function openSheet(channel: any) {

@@ -5,7 +5,7 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { cloneElement } from 'react'
 import { Image, Text, View } from 'react-native'
 import { EMOJI_COLORS } from './colors'
-import { settings } from './store'
+import { settings, useSettings } from './store'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 
 /** 디스코드에 들어 있는 아이콘 (못 찾으면 undefined) */
@@ -143,6 +143,8 @@ function withAlpha(hex: string, a: number) {
 }
 
 export function EmojiTile({ channel, size, emoji, muted }: { channel?: any; size?: keyof typeof SIZES; emoji?: ChannelEmoji; muted?: boolean }) {
+    // 설정(바꾼 이모지, 크기)이 바뀌면 이 칸만 바로 다시 그린다
+    useSettings()
     const sz = SIZES[size ?? settings().iconSize] ?? SIZES.medium
     const e = emoji ?? channelEmoji(channel)
     const bg = withAlpha(EMOJI_COLORS[e.name] ?? '#607D8B', isDark() ? 0.2 : 0.16)
