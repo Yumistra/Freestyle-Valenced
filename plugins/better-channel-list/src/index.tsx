@@ -5,7 +5,7 @@ import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finde
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
-import { Component, useEffect, useState } from 'react'
+import { cloneElement, Component, useEffect, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
@@ -286,36 +286,79 @@ function SplitName({ name, colors, style, variant }: { name: string; colors: str
     )
 }
 
-function patchSubtitle(cleanup: (...f: any[]) => void) {
-    for (const path of ['modules/main_tabs_v2/native/shared_components/guild_channels/ChannelSubtitle.tsx', 'modules/launchpad/native/shared/ChannelSubtitle.tsx'])
-        cleanup(
-            getModuleWithImportedPath(path, (mod: any) => {
-                if (typeof mod?.renderChannelSubtitle !== 'function') return
-                status.split = 'Hooked'
-                cleanup(
-                    instead(mod, 'renderChannelSubtitle', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                        const p = args[0]
-                        const sp = p?.subtitle?.split
-                        if (!sp || !settings().realGradient) return orig.apply(this, args)
-                        try {
-                            // 오른쪽 글 줄은 디스코드가 원래대로 그리게 한다
-                            const right = orig.call(this, { ...p, subtitle: { type: 'voice', text: sp.rest.replace(/^\s+/, '') } })
-                            const variant = right?.props?.textProps?.variant ?? right?.props?.variant
-                            return (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
-                                    <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={variant} />
-                                    {/^\s/.test(sp.rest) ? <Text> </Text> : null}
-                                    <View style={{ flexShrink: 1, minWidth: 0 }}>{right}</View>
-                                </View>
-                            )
-                        } catch (e: any) {
-                            status.lastError = `Split, ${e?.message ?? e}`
-                            return orig.apply(this, args)
-                        }
-                    }),
-                )
-            }) as any,
+/** 원래 TextChannel 대신 그리는 컴포넌트 (같은 원래 컴포넌트에는 같은 것을 써서 다시 만들어지지 않게) */
+const wrappers = new WeakMap<any, any>()
+
+/** 그린 결과에서 subtitle 글 줄(Text)을 찾아 이름과 글로 나눈다 */
+function splitTree(node: any, sub: any, depth = 0): any {
+    if (!node || typeof node !== 'object' || depth > 12) return node
+    if (Array.isArray(node)) {
+        let changed = false
+        const out = node.map(n => {
+            const r = splitTree(n, sub, depth + 1)
+            if (r !== n) changed = true
+            return r
+        })
+        return changed ? out : node
+    }
+    const props = node.props
+    if (!props) return node
+    if (props.children === sub.text) {
+        const sp = sub.split
+        const rest = String(sp.rest).replace(/^\s+/, '')
+        status.split = 'Working'
+        return (
+            <View key={node.key ?? undefined} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+                <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} />
+                {/^\s/.test(sp.rest) ? <Text> </Text> : null}
+                {cloneElement(node, { style: [props.style, { flexShrink: 1 }] }, rest)}
+            </View>
         )
+    }
+    if (props.children == null) return node
+    const kids = splitTree(props.children, sub, depth + 1)
+    return kids === props.children ? node : cloneElement(node, undefined, ...(Array.isArray(kids) ? kids : [kids]))
+}
+
+function wrapperFor(type: any) {
+    let w = wrappers.get(type)
+    if (w) return w
+    const MEMO = Symbol.for('react.memo')
+    const render = type?.$$typeof === MEMO ? type.type : type
+    if (typeof render !== 'function') return
+    w = function BetterTextChannel(props: any) {
+        const out = render(props)
+        const sub = props?.subtitle
+        if (!sub?.split || !settings().realGradient) return out
+        try {
+            const r = splitTree(out, sub)
+            if (r === out) status.split = 'Message line not found'
+            return r
+        } catch (e: any) {
+            status.lastError = `Split, ${e?.message ?? e}`
+            return out
+        }
+    }
+    wrappers.set(type, w)
+    return w
+}
+
+/** renderChannelListItem 이 돌려준 것에서 우리 subtitle 을 받는 채널 컴포넌트를 바꿔 끼운다 */
+function wrapRow(el: any, depth = 0): any {
+    if (!el || typeof el !== 'object' || depth > 4) return el
+    if (Array.isArray(el)) return el.map(e => wrapRow(e, depth + 1))
+    const props = el.props
+    if (!props) return el
+    if (props.subtitle?.split && el.type && typeof el.type !== 'string') {
+        const w = wrapperFor(el.type)
+        if (w) {
+            if (status.split === 'Not found yet') status.split = 'Hooked'
+            return { ...el, type: w }
+        }
+    }
+    if (props.children == null || typeof props.children !== 'object') return el
+    const kids = wrapRow(props.children, depth + 1)
+    return kids === props.children ? el : { ...el, props: { ...props, children: kids } }
 }
 
 function preview(channel: any): Preview | undefined {
@@ -365,7 +408,13 @@ function fillPreviews(args: any[]) {
     const p = args[0]
     const gc = p?.guildChannels
     if (!gc || typeof gc.getChannelFromSectionRow !== 'function') return
-    const res = gc.getChannelFromSectionRow(p.section, p.row)
+    let res: any
+    try {
+        // 채널이 아닌 칸(서버 버튼 등)은 오류를 내서 넘긴다
+        res = gc.getChannelFromSectionRow(p.section, p.row)
+    } catch {
+        return
+    }
     const ch = res?.channel
     const rec = ch?.record
     if (!ch || !rec || !TEXTUAL.has(rec.type)) return
@@ -404,7 +453,14 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
                             } catch (e: any) {
                                 status.lastError = String(e?.message ?? e)
                             }
-                            return orig.apply(this, args)
+                            const out = orig.apply(this, args)
+                            if (key !== 'renderChannelListItem' || !settings().realGradient) return out
+                            try {
+                                return wrapRow(out)
+                            } catch (e: any) {
+                                status.lastError = `Split, ${e?.message ?? e}`
+                                return out
+                            }
                         }),
                     )
                     n++
@@ -476,7 +532,6 @@ export default plugin({
         onGuild()
 
         patchChannelList(cleanup)
-        patchSubtitle(cleanup)
         cleanup(() => {
             for (const ch of touched)
                 try {
