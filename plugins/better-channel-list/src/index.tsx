@@ -6,7 +6,7 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
-import { ScrollView } from 'react-native'
+import { ScrollView, Text } from 'react-native'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
 /**
@@ -98,7 +98,8 @@ function nameOf(userId: string, guildId?: string, fallback?: any) {
 
 function colorOf(userId: string, guildId?: string): string | undefined {
     try {
-        return (guildId && S().GuildMemberStore?.getMember?.(guildId, userId)?.colorString) || undefined
+        const mem = guildId ? S().GuildMemberStore?.getMember?.(guildId, userId) : undefined
+        return mem?.colorString || mem?.colorStrings?.primaryColor || undefined
     } catch {}
 }
 
@@ -121,7 +122,7 @@ function plain(m: any, guildId?: string): string {
         .replace(/[*_~`>#]+/g, '')
         .replace(/\s+/g, ' ')
         .trim()
-    if (text) return text
+    if (text) return (m?.embeds ?? []).length || (m?.components ?? []).length ? `${text}, Embed` : text
     const files = m?.attachments ?? []
     if (files.length) {
         const first = files[0]
@@ -132,7 +133,9 @@ function plain(m: any, guildId?: string): string {
     }
     const stickers = m?.stickerItems ?? m?.sticker_items ?? m?.stickers ?? []
     if (stickers.length) return `Sticker, ${stickers[0]?.name ?? ''}`.replace(/, $/, '')
-    if ((m?.embeds ?? []).length) return m.embeds[0]?.title ?? m.embeds[0]?.rawTitle ?? 'Embed'
+    if ((m?.embeds ?? []).length) return 'Embed'
+    // 컴포넌트로 만든 메시지 (봇 카드 등)
+    if ((m?.components ?? []).length) return 'Embed'
     if (m?.poll) return 'Poll'
     return ''
 }
@@ -148,7 +151,13 @@ const SYSTEM: Record<number, string> = { 6: 'pinned a message', 7: 'joined the s
  */
 const TEXTUAL = new Set([0, 5, 10, 11, 12])
 
-function previewText(channel: any): string | undefined {
+interface Preview {
+    /** 바뀌었는지 비교용 */
+    key: string
+    node: any
+}
+
+function preview(channel: any): Preview | undefined {
     const s = settings()
     if (!s.lastMessage) return
     let m: any
@@ -159,13 +168,25 @@ function previewText(channel: any): string | undefined {
     if (!m) return
     const authorId = m.author?.id
     try {
-        if (authorId && S().RelationshipStore?.isBlocked?.(authorId)) return 'Blocked message'
+        if (authorId && S().RelationshipStore?.isBlocked?.(authorId)) return { key: 'blocked', node: 'Blocked message' }
     } catch {}
     const system = SYSTEM[m.type]
     const body = system ?? plain(m, channel.guild_id)
     if (!body) return
     const name = s.showAuthor && authorId ? nameOf(authorId, channel.guild_id, m.author) : ''
-    return name ? (system ? `${name} ${body}` : `${name}: ${body}`) : body
+    if (!name) return { key: body, node: body }
+    // 이름은 서버 별명, 역할 색으로 굵게 (메시지의 이름처럼)
+    const color = s.roleColor ? colorOf(authorId, channel.guild_id) : undefined
+    const rest = system ? ` ${body}` : `: ${body}`
+    return {
+        key: `${name}|${color}|${rest}`,
+        node: (
+            <>
+                <Text style={{ fontWeight: '700', ...(color ? { color } : null) }}>{name}</Text>
+                {rest}
+            </>
+        ),
+    }
 }
 
 /** 우리가 subtitle 을 넣은 채널 줄 (끄면 다시 뺀다) */
@@ -186,11 +207,11 @@ function fillPreviews(args: any[]) {
     const ours = touched.has(ch)
     // 디스코드가 원래 넣은 subtitle 은 건드리지 않는다
     if (!ours && ch.subtitle != null) return
-    const text = settings().lastMessage ? previewText(rec) : undefined
+    const pv = settings().lastMessage ? preview(rec) : undefined
     try {
-        if (text) {
-            // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 글 한 줄을 그대로 보여 준다
-            if (ch.subtitle?.text !== text) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text }, writable: true, configurable: true, enumerable: true })
+        if (pv) {
+            // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 text 를 한 줄로 그대로 보여 준다
+            if (ch.subtitle?.key !== pv.key) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text: pv.node, key: pv.key }, writable: true, configurable: true, enumerable: true })
             touched.add(ch)
             status.withMessage++
         } else if (ours) {
@@ -242,6 +263,7 @@ function SettingsPage() {
                 <TableRowGroup title="Channel list">
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
+                    <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
