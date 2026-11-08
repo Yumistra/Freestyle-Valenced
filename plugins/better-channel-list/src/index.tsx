@@ -96,6 +96,15 @@ function nameOf(userId: string, guildId?: string, fallback?: any) {
     }
 }
 
+/** 그라데이션 역할 색 (primary, secondary, tertiary) */
+function roleColors(userId: string, guildId?: string): string[] | undefined {
+    try {
+        const cs = guildId ? S().GuildMemberStore?.getMember?.(guildId, userId)?.colorStrings : undefined
+        const list = [cs?.primaryColor, cs?.secondaryColor, cs?.tertiaryColor].filter((x: any) => typeof x === 'string' && x) as string[]
+        return list.length > 1 ? list : undefined
+    } catch {}
+}
+
 function colorOf(userId: string, guildId?: string): string | undefined {
     try {
         const mem = guildId ? S().GuildMemberStore?.getMember?.(guildId, userId) : undefined
@@ -152,8 +161,36 @@ const SYSTEM: Record<number, string> = { 6: 'pinned a message', 7: 'joined the s
 const TEXTUAL = new Set([0, 5, 10, 11, 12])
 
 /** 표시 이름 스타일 (폰 디스코드는 글꼴과 색을 쓴다) */
-function nameStyle(userId: string, guildId: string | undefined, fallback: any): { fontFamily?: string; color?: string } {
-    const out: { fontFamily?: string; color?: string } = {}
+const hexOf = (c: any): string | undefined => (typeof c === 'number' ? `#${(c >>> 0).toString(16).padStart(6, '0').slice(-6)}` : typeof c === 'string' && c ? (c.startsWith('#') ? c : `#${c}`) : undefined)
+
+function mix(a: string, b: string, t: number) {
+    const p = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+    const [x, y] = [p(a), p(b)]
+    return `#${x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** 글자마다 색을 조금씩 바꿔 그라데이션처럼 (글 한 줄 칸이라 진짜 그라데이션은 못 그린다) */
+function Gradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
+    const chars = [...text]
+    if (colors.length < 2 || chars.length < 2) return <Text style={{ ...style, color: colors[0] }}>{text}</Text>
+    const seg = colors.length - 1
+    return (
+        <Text style={style}>
+            {chars.map((ch, i) => {
+                const t = (i / (chars.length - 1)) * seg
+                const k = Math.min(seg - 1, Math.floor(t))
+                return (
+                    <Text key={i} style={{ color: mix(colors[k], colors[k + 1], t - k) }}>
+                        {ch}
+                    </Text>
+                )
+            })}
+        </Text>
+    )
+}
+
+function nameStyle(userId: string, guildId: string | undefined, fallback: any): { fontFamily?: string; color?: string; colors?: string[] } {
+    const out: { fontFamily?: string; color?: string; colors?: string[] } = {}
     try {
         const user = S().UserStore?.getUser?.(userId) ?? fallback
         if (!user) return out
@@ -161,9 +198,9 @@ function nameStyle(userId: string, guildId: string | undefined, fallback: any): 
         const family = fontId != null ? find('DISPLAY_NAME_STYLES_FONT_FAMILY_MAP')?.DISPLAY_NAME_STYLES_FONT_FAMILY_MAP?.[fontId] : undefined
         if (typeof family === 'string') out.fontFamily = family
         const styles = (guildId ? S().GuildMemberStore?.getMember?.(guildId, userId)?.displayNameStyles : undefined) ?? user.displayNameStyles ?? user.display_name_styles
-        const c = styles?.colors?.[0]
-        if (typeof c === 'number') out.color = `#${(c >>> 0).toString(16).padStart(6, '0').slice(-6)}`
-        else if (typeof c === 'string') out.color = c.startsWith('#') ? c : `#${c}`
+        const list = (Array.isArray(styles?.colors) ? styles.colors : []).map(hexOf).filter(Boolean) as string[]
+        if (list.length) out.color = list[0]
+        if (list.length > 1) out.colors = list
     } catch {}
     return out
 }
@@ -195,12 +232,14 @@ function preview(channel: any): Preview | undefined {
     // 이름은 서버 별명, 역할 색으로 굵게 (메시지의 이름처럼)
     const styled = s.nameStyle ? nameStyle(authorId, channel.guild_id, m.author) : {}
     const color = styled.color ?? (s.roleColor ? colorOf(authorId, channel.guild_id) : undefined)
+    const colors = styled.color ? styled.colors : s.roleColor ? roleColors(authorId, channel.guild_id) : undefined
     const rest = system ? ` ${body}` : `: ${body}`
+    const base = styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' as const }
     return {
-        key: `${name}|${color}|${styled.fontFamily}|${rest}`,
+        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}`,
         node: (
             <>
-                <Text style={{ ...(styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }), ...(color ? { color } : null) }}>{name}</Text>
+                {colors ? <Gradient text={name} colors={colors} style={base} /> : <Text style={{ ...base, ...(color ? { color } : null) }}>{name}</Text>}
                 {rest}
             </>
         ),
