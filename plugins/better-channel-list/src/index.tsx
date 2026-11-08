@@ -657,6 +657,7 @@ function SettingsPage() {
                 </TableRowGroup>
                 <TableRowGroup title="Redesign">
                     <TableSwitchRow label="Emoji icons" subLabel="Shows each channel's emoji in a colored square instead of the channel icon" value={s.redesign} onValueChange={(redesign: boolean) => update({ redesign })} />
+                    <TableSwitchRow label="Guess emojis" subLabel="Channels without a Discord emoji get one from their name, like 💬 for general or 🤖 for bots" value={s.autoEmoji} disabled={!s.redesign} onValueChange={(autoEmoji: boolean) => (update({ autoEmoji }), redraw())} />
                 </TableRowGroup>
                 <TableRadioGroup title="Icon size" value={s.iconSize} onChange={(iconSize: any) => update({ iconSize })}>
                     {(['medium', 'small', 'tiny'] as const).map(k => (
@@ -667,7 +668,7 @@ function SettingsPage() {
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
                     <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}${status.variant ? `, ${status.variant}` : ''}`} />
-                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons${rstatus.error ? `, ${rstatus.error}` : ''}`} />
+                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons, ${rstatus.fromDiscord.size} channels with a Discord emoji${rstatus.error ? `, ${rstatus.error}` : ''}`} />
                     <TableRow label="Voice rows" subLabel={rstatus.voice.trim() || 'Not drawn yet'} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>

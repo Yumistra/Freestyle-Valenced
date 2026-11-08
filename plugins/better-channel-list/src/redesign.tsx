@@ -42,7 +42,7 @@ export const SIZES = {
     tiny: { box: 20, emoji: 14, radius: 10 },
 } as const
 
-export const status = { icons: 0, badges: 0, nameIcons: 0, voice: '', error: '' }
+export const status = { icons: 0, badges: 0, nameIcons: 0, voice: '', error: '', fromDiscord: new Set<string>() }
 
 const typeName = (t: any): string => (typeof t === 'string' ? t : t?.displayName ?? t?.name ?? t?.type?.displayName ?? t?.type?.name ?? t?.render?.name ?? (t?.$$typeof ? String(t.$$typeof.description ?? '?') : '?'))
 const rootName = (n: any): string => (Array.isArray(n) ? `[${n.length}]` : n && typeof n === 'object' ? typeName(n.type) : String(n))
@@ -56,8 +56,72 @@ export function channelEmoji(channel: any): ChannelEmoji {
     const own = settings().icons?.[channel?.id]
     if (own) return { name: own }
     const e = channel?.iconEmoji ?? channel?.icon_emoji
-    if (e?.name || e?.id) return { name: e.name ?? '', id: e.id ?? undefined }
+    if (e?.name || e?.id) {
+        status.fromDiscord.add(channel.id)
+        return { name: e.name ?? '', id: e.id ?? undefined }
+    }
+    if (settings().autoEmoji !== false) {
+        const guess = guessEmoji(channel)
+        if (guess) return { name: guess }
+    }
     return { name: '🌐' }
+}
+
+/** 채널 이름 안의 첫 이모지 */
+// 휴대폰 JS 엔진이 \p{...} 를 모르면 이모지 범위로 대신한다
+const EMOJI_RE: RegExp = (() => {
+    try {
+        return new RegExp('(\\p{Extended_Pictographic}(?:\\uFE0F|\\u200D\\p{Extended_Pictographic}|[\\u{1F3FB}-\\u{1F3FF}])*|[\\u{1F1E6}-\\u{1F1FF}]{2})', 'u')
+    } catch {}
+    try {
+        return new RegExp('((?:[\\u{1F300}-\\u{1FAFF}]|[\\u{2600}-\\u{27BF}])(?:\\uFE0F|\\u200D(?:[\\u{1F300}-\\u{1FAFF}]|[\\u{2600}-\\u{27BF}]))*|[\\u{1F1E6}-\\u{1F1FF}]{2})', 'u')
+    } catch {
+        return /(?!)/
+    }
+})()
+
+/** 이름에 들어 있는 낱말로 고르는 이모지 (디스코드가 정한 이모지가 없는 채널용) */
+const KEYWORDS: Array<[RegExp, string]> = [
+    [/rule|규칙/, '📜'],
+    [/announce|news|update|공지|소식/, '📢'],
+    [/welcome|hello|intro|환영|인사/, '👋'],
+    [/role|역할/, '🏷️'],
+    [/faq|question|help|support|ask|질문|도움/, '❓'],
+    [/general|chat|lounge|talk|main|일반|잡담|채팅/, '💬'],
+    [/off[-_ ]?topic|random|misc/, '🎲'],
+    [/meme|funny|shitpost|밈/, '😂'],
+    [/media|image|pic|photo|art|gallery|사진|그림|짤/, '🖼️'],
+    [/video|clip|영상/, '🎬'],
+    [/music|song|playlist|음악|노래/, '🎵'],
+    [/game|gaming|play|게임/, '🎮'],
+    [/bot|command|cmd|봇|명령/, '🤖'],
+    [/dev|code|coding|program|github|git|개발|코딩/, '💻'],
+    [/plugin|addon|extension|mod|플러그인/, '🧩'],
+    [/theme|design|style|테마|디자인/, '🎨'],
+    [/request|suggest|idea|feedback|요청|건의|제안/, '💡'],
+    [/bug|issue|report|버그|신고/, '🐛'],
+    [/log|audit|기록/, '📋'],
+    [/staff|mod|admin|관리/, '🛡️'],
+    [/event|giveaway|이벤트/, '🎉'],
+    [/partner|파트너/, '🤝'],
+    [/link|resource|repo|자료/, '🔗'],
+    [/stream|live|방송/, '📺'],
+    [/afk|sleep|잠수/, '💤'],
+    [/pet|animal|cat|dog|동물/, '🐾'],
+    [/food|cook|음식/, '🍔'],
+    [/vent|serious/, '🫂'],
+    [/nsfw/, '🔞'],
+]
+
+export function guessEmoji(channel: any): string | undefined {
+    const name = String(channel?.name ?? '')
+    const m = EMOJI_RE.exec(name)
+    if (m) return m[1]
+    const low = name.toLowerCase()
+    for (const [re, emoji] of KEYWORDS) if (re.test(low)) return emoji
+    if (channel?.type === 2) return '🔊'
+    if (channel?.type === 13) return '🎙️'
+    if (channel?.type === 15 || channel?.type === 16) return '🗂️'
 }
 
 function isDark() {

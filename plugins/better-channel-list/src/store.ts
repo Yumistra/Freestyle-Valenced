@@ -15,6 +15,8 @@ export interface Settings {
     showAuthor: boolean
     /** 채널 아이콘을 이모지 칸으로 (원래 플러그인의 Redesign) */
     redesign: boolean
+    /** 디스코드가 정한 이모지가 없으면 채널 이름으로 고르기 */
+    autoEmoji: boolean
     /** 이모지 칸 크기 */
     iconSize: 'medium' | 'small' | 'tiny'
     /** 직접 바꾼 채널 이모지 (채널 ID → 이모지) */
@@ -22,7 +24,7 @@ export interface Settings {
     /** 어느 채널에 미리보기를 보일지 */
     mode: 'all' | 'unreads' | 'default'
 }
-export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, mode: 'all', redesign: true, iconSize: 'medium', icons: {} }
+export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, mode: 'all', redesign: true, autoEmoji: true, iconSize: 'medium', icons: {} }
 
 let storage: any
 export const bind = (s: any) => (storage = s)
