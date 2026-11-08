@@ -8,6 +8,8 @@ import { EMOJI_COLORS } from './colors'
 import { emojiColor } from './png'
 import { settings, update, useSettings } from './store'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { instead } from '@valenced/patcher'
 
 /** 디스코드에 들어 있는 아이콘 (못 찾으면 undefined) */
 const icon = (name: string): any => {
@@ -481,4 +483,38 @@ export function activePosts(channel: any): number {
     } catch {
         return 0
     }
+}
+
+/**
+ * 음성 채널 줄은 BaseChannelItem 이 icon, name, channelInfo 를 받아 그린다.
+ * 줄 컴포넌트들을 감싸면 안에 든 사람 목록 폭이 좁아져서, BaseChannelItem 자체에서 받는 값만 바꾼다.
+ * 채널은 icon(ChannelIcon) 이 받는 channel 로 안다.
+ */
+export function patchBaseChannelItem(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModuleWithImportedPath('modules/guild_sidebar/native/BaseChannelItem.tsx', (mod: any) => {
+            if (typeof mod?.default !== 'function') return
+            cleanup(
+                instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    const p = args[0]
+                    const channel = p?.icon?.props?.channel
+                    const s = settings()
+                    if (!s.redesign || !channel || !(channel.type === ChannelTypes.VOICE || channel.type === ChannelTypes.STAGE)) return orig.apply(this, args)
+                    try {
+                        const next: any = { ...p, icon: <EmojiTile channel={channel} muted={p.mode === 'muted' || p.icon?.props?.muted} locked={isLimited(channel)} /> }
+                        status.icons++
+                        status.badges++
+                        next.channelInfo = [dropLocks(p.channelInfo) ?? null, <VoiceBadge key="bcl-voice-badge" channel={channel} />]
+                        if (s.stripNameEmoji && typeof p.name?.props?.name === 'string') {
+                            const clean = cleanName(p.name.props.name)
+                            if (clean !== p.name.props.name) next.name = cloneElement(p.name, { name: clean })
+                        }
+                        return orig.apply(this, [next, ...args.slice(1)])
+                    } catch {
+                        return orig.apply(this, args)
+                    }
+                }),
+            )
+        }) as any,
+    )
 }

@@ -8,7 +8,7 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { cloneElement, Component, forwardRef, useEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
-import { activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
+import { patchBaseChannelItem, activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
 import { patchSheet } from './sheet'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
@@ -446,10 +446,8 @@ function wrapperFor(type: any) {
                 status.lastError = `Split, ${e?.message ?? e}`
             }
         try {
-            out = redesignTree(out, props?.channel, !!props?.muted, (el: any) => {
-                const iw = wrapperFor(el.type)
-                return iw ? { ...el, type: iw } : el
-            })
+            // 음성 채널은 patchBaseChannelItem 이 맡는다 (안쪽 컴포넌트를 감싸지 않는다)
+            out = redesignTree(out, props?.channel, !!props?.muted)
         } catch (e: any) {
             status.lastError = `Redesign, ${e?.message ?? e}`
         }
@@ -466,7 +464,7 @@ function wrapRow(el: any, depth = 0): any {
     if (Array.isArray(el)) return el.map(e => wrapRow(e, depth + 1))
     const props = el.props
     if (!props) return el
-    if ((props.subtitle?.split || props.channel) && el.type && typeof el.type !== 'string') {
+    if ((props.subtitle?.split || (props.channel && props.channel.type !== 2 && props.channel.type !== 13)) && el.type && typeof el.type !== 'string') {
         const w = wrapperFor(el.type)
         if (props.channel?.type === 2 || props.channel?.type === 13) rstatus.voice = (rstatus.voice + ` row${w ? '' : ' (cannot wrap)'}`).slice(-160)
         if (w) {
@@ -672,6 +670,7 @@ export default plugin({
 
         patchChannelList(cleanup)
         patchSheet(cleanup, redraw)
+        patchBaseChannelItem(cleanup)
         cleanup(
             getModuleWithImportedPath('modules/display_name_styles/native/UsernameWithEffects.tsx', (mod: any) => {
                 usernameWithEffects = mod?.default ?? mod
