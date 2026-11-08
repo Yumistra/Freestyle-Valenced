@@ -7,7 +7,8 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { cloneElement, Component, useEffect, useState } from 'react'
-import { ScrollView, Text, View } from 'react-native'
+import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
+import { activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
 /**
@@ -316,7 +317,7 @@ function SplitName({ name, colors, style, variant, userId, guildId, real, color 
         status.variant = `${v} ${fontSize}/${lineHeight}`
         // 글자 크기는 메시지 줄과 같게, 효과가 줄 높이를 조금 넘어도 자르지 않는다
         return (
-            <View style={{ height: lineHeight, justifyContent: 'center', flexShrink: 0, overflow: 'visible' }}>
+            <View style={{ justifyContent: 'center', flexShrink: 0 }}>
                 <Boundary fallback={<Text style={{ fontSize, color: color ?? textColor() }}>{name}</Text>}>
                     <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize, ...(color ? { color } : null) }} lineClamp={1} effectDisplayType={1} />
                 </Boundary>
@@ -391,18 +392,23 @@ function wrapperFor(type: any) {
     const MEMO = Symbol.for('react.memo')
     const render = type?.$$typeof === MEMO ? type.type : type
     if (typeof render !== 'function') return
-    w = function BetterTextChannel(props: any) {
-        const out = render(props)
+    w = function BetterChannelRow(props: any) {
+        let out = render(props)
         const sub = props?.subtitle
-        if (!sub?.split) return out
+        if (sub?.split)
+            try {
+                const r = splitTree(out, sub)
+                if (r === out) status.split = 'Message line not found'
+                out = r
+            } catch (e: any) {
+                status.lastError = `Split, ${e?.message ?? e}`
+            }
         try {
-            const r = splitTree(out, sub)
-            if (r === out) status.split = 'Message line not found'
-            return r
+            out = redesignTree(out, props?.channel)
         } catch (e: any) {
-            status.lastError = `Split, ${e?.message ?? e}`
-            return out
+            status.lastError = `Redesign, ${e?.message ?? e}`
         }
+        return out
     }
     wrappers.set(type, w)
     return w
@@ -414,10 +420,10 @@ function wrapRow(el: any, depth = 0): any {
     if (Array.isArray(el)) return el.map(e => wrapRow(e, depth + 1))
     const props = el.props
     if (!props) return el
-    if (props.subtitle?.split && el.type && typeof el.type !== 'string') {
+    if ((props.subtitle?.split || (settings().redesign && props.channel)) && el.type && typeof el.type !== 'string') {
         const w = wrapperFor(el.type)
         if (w) {
-            if (status.split === 'Not found yet') status.split = 'Hooked'
+            if (props.subtitle?.split && status.split === 'Not found yet') status.split = 'Hooked'
             return { ...el, type: w }
         }
     }
@@ -484,11 +490,18 @@ function fillPreviews(args: any[]) {
     }
     const ch = res?.channel
     const rec = ch?.record
-    if (!ch || !rec || !TEXTUAL.has(rec.type)) return
+    const forum = rec?.type === ChannelTypes.FORUM || rec?.type === ChannelTypes.MEDIA
+    if (!ch || !rec || (!TEXTUAL.has(rec.type) && !forum)) return
     const ours = touched.has(ch)
     // 디스코드가 원래 넣은 subtitle 은 건드리지 않는다
     if (!ours && ch.subtitle != null) return
-    const pv = settings().lastMessage ? preview(rec) : undefined
+    const s = settings()
+    let pv: Preview | undefined
+    if (forum) {
+        // 원래 플러그인처럼 Medium 일 때 포럼 아래에 열린 글 수
+        const n = s.redesign && s.iconSize === 'medium' ? activePosts(rec) : 0
+        if (n > 0) pv = { key: `posts|${n}`, node: `${n} active ${n === 1 ? 'post' : 'posts'}` }
+    } else pv = s.lastMessage ? preview(rec) : undefined
     try {
         if (pv) {
             // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 text 를 한 줄로 그대로 보여 준다
@@ -521,7 +534,16 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
                                 status.lastError = String(e?.message ?? e)
                             }
                             const out = orig.apply(this, args)
-                            if (key !== 'renderChannelListItem') return out
+                            if (key === 'getChannelListItemSize') {
+                                if (typeof out !== 'number' || out <= 0 || !settings().redesign) return out
+                                try {
+                                    const p = args[0]
+                                    const rec = p?.guildChannels?.getChannelFromSectionRow?.(p.section, p.row)?.channel?.record
+                                    return extraHeight(rec, out)
+                                } catch {
+                                    return out
+                                }
+                            }
                             try {
                                 return wrapRow(out)
                             } catch (e: any) {
@@ -537,8 +559,65 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
     )
 }
 
+/** 채널 이모지 바꾸기 (원래 플러그인의 "Edit Emoji Icon", 나만 보인다) */
+function EmojiIcons() {
+    const { TableRowGroup, TableRow, TextInput, Button, Stack } = Design as any
+    const s = useSettings()
+    const [open, setOpen] = useState<string | null>(null)
+    const [text, setText] = useState('')
+    const guildId = S().SelectedGuildStore?.getGuildId?.()
+    const guild = guildId ? S().GuildStore?.getGuild?.(guildId) : undefined
+    let list: any[] = []
+    try {
+        const all = S().ChannelStore?.getMutableGuildChannelsForGuild?.(guildId) ?? {}
+        list = Object.values(all)
+            .filter((c: any) => [0, 2, 5, 13, 15, 16].includes(c?.type))
+            .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
+    } catch {}
+    const save = (id: string, emoji: string | null) => {
+        const icons = { ...(settings().icons ?? {}) }
+        if (emoji) icons[id] = emoji
+        else delete icons[id]
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+        update({ icons })
+        setOpen(null)
+        redraw()
+    }
+    const changed = Object.keys(s.icons ?? {}).length
+    return (
+        <TableRowGroup title={guild ? `Emoji icons, ${guild.name}` : 'Emoji icons'}>
+            <TableRow label="Only you see these" subLabel={guild ? 'Tap a channel to change its emoji' : 'Open a server first, then come back here'} />
+            {list.map((c: any) => (
+                <View key={c.id}>
+                    <TableRow
+                        label={c.name}
+                        subLabel={s.icons?.[c.id] ? 'Changed' : undefined}
+                        icon={<EmojiTile emoji={channelEmoji(c)} size="small" />}
+                        arrow
+                        onPress={() => {
+                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+                            setOpen(open === c.id ? null : c.id)
+                            setText(s.icons?.[c.id] ?? '')
+                        }}
+                    />
+                    {open === c.id ? (
+                        <View style={{ padding: 12 }}>
+                            <Stack spacing={8}>
+                                <TextInput label="Emoji" value={text} placeholder="🌐" onChange={setText} onSubmitEditing={() => save(c.id, text.trim() || null)} />
+                                <Button text="Save" variant="primary" size="md" disabled={!text.trim()} onPress={() => save(c.id, text.trim())} />
+                                {s.icons?.[c.id] ? <Button text="Reset" variant="secondary" size="md" onPress={() => save(c.id, null)} /> : null}
+                            </Stack>
+                        </View>
+                    ) : null}
+                </View>
+            ))}
+            {changed ? <TableRow label="Reset all emoji icons" subLabel={`${changed} changed`} onPress={() => (update({ icons: {} }), redraw())} /> : null}
+        </TableRowGroup>
+    )
+}
+
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableSwitchRow, TableRow } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRow, TableRadioGroup, TableRadioRow } = Design as any
     const s = useSettings()
     const [, tick] = useState(0)
     useEffect(() => {
@@ -554,9 +633,19 @@ function SettingsPage() {
                     <TableSwitchRow label="Name style" subLabel="Draws names with Discord's own name style, font, colors and effects" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
+                <TableRowGroup title="Redesign">
+                    <TableSwitchRow label="Emoji icons" subLabel="Shows each channel's emoji in a colored square instead of the channel icon" value={s.redesign} onValueChange={(redesign: boolean) => update({ redesign })} />
+                </TableRowGroup>
+                <TableRadioGroup title="Icon size" value={s.iconSize} onChange={(iconSize: any) => update({ iconSize })}>
+                    {(['medium', 'small', 'tiny'] as const).map(k => (
+                        <TableRadioRow key={k} label={k[0].toUpperCase() + k.slice(1)} subLabel={k === 'medium' ? 'Also shows active posts under forums' : undefined} value={k} disabled={!s.redesign} />
+                    ))}
+                </TableRadioGroup>
+                <EmojiIcons />
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
                     <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}${status.variant ? `, ${status.variant}` : ''}`} />
+                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons`} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
