@@ -9,12 +9,14 @@ export interface Settings {
     realGradient: boolean
     /** 예전 버전에서 켜진 realGradient 를 한 번 끄기 위한 표시 */
     gradientReset?: boolean
+    /** 1.0.12 에서 realGradient 를 한 번 다시 켜기 위한 표시 */
+    splitReset?: boolean
     /** 보낸 사람 이름 보이기 */
     showAuthor: boolean
     /** 어느 채널에 미리보기를 보일지 */
     mode: 'all' | 'unreads' | 'default'
 }
-export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: false, showAuthor: true, mode: 'all' }
+export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, mode: 'all' }
 
 let storage: any
 export const bind = (s: any) => (storage = s)

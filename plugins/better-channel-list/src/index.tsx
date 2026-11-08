@@ -21,7 +21,7 @@ import { bind, DEFAULTS, settings, update, useSettings } from './store'
 const S = () => Stores as any
 
 /** 설정 화면 Status */
-const status = { hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
+const status = { split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
 const find = (...props: string[]): any => {
     try {
         return (lookupModule(withProps(...props) as any) as any)?.[0]
@@ -213,7 +213,8 @@ function Gradient({ text, colors, style }: { text: string; colors: string[]; sty
     const masked = find('MaskedView')?.MaskedView
     const gradient = find('LinearGradient', 'LinearGradientNativeComponent')?.LinearGradient
     const fallback = <CharGradient text={text} colors={colors} style={style} />
-    if (!settings().realGradient || !masked || !gradient || colors.length < 2) return fallback
+    // 글 줄 안에서는 항상 글자마다 색 (진짜 그라데이션은 SplitName 이 줄을 나눠 그린다)
+    if (true || !masked || !gradient || colors.length < 2) return fallback
     const M = masked
     const G = gradient
     const textStyle = { ...NAME_TEXT, ...style }
@@ -250,6 +251,71 @@ interface Preview {
     /** 바뀌었는지 비교용 */
     key: string
     node: any
+    /** 이름과 나머지 글을 따로 그릴 때 쓰는 값 (진짜 그라데이션) */
+    split?: { name: string; colors: string[]; style: any; rest: string }
+}
+
+/**
+ * 진짜 그라데이션을 글 줄 안에 끼우면 자리가 어긋나서, 줄을 둘로 나눠 그린다.
+ * 왼쪽은 그라데이션 이름(View), 오른쪽은 디스코드가 그리는 원래 글 줄(": 메시지").
+ * 글자 크기는 디스코드 글 줄의 variant 를 그대로 쓴다.
+ */
+function SplitName({ name, colors, style, variant }: { name: string; colors: string[]; style: any; variant?: string }) {
+    const { Text: DText } = Design as any
+    const M = find('MaskedView')?.MaskedView
+    const G = find('LinearGradient', 'LinearGradientNativeComponent')?.LinearGradient
+    const label = (extra?: any) => (
+        <DText variant={variant ?? 'text-sm/medium'} color="text-default" lineClamp={1} maxFontSizeMultiplier={1.75} style={{ ...style, ...extra }}>
+            {name}
+        </DText>
+    )
+    const fallback = (
+        <DText variant={variant ?? 'text-sm/medium'} lineClamp={1} maxFontSizeMultiplier={1.75}>
+            <CharGradient text={name} colors={colors} style={style} />
+        </DText>
+    )
+    if (!M || !G) return fallback
+    return (
+        <Boundary fallback={fallback}>
+            <M maskElement={label()}>
+                <G colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                    {label({ opacity: 0 })}
+                </G>
+            </M>
+        </Boundary>
+    )
+}
+
+function patchSubtitle(cleanup: (...f: any[]) => void) {
+    for (const path of ['modules/main_tabs_v2/native/shared_components/guild_channels/ChannelSubtitle.tsx', 'modules/launchpad/native/shared/ChannelSubtitle.tsx'])
+        cleanup(
+            getModuleWithImportedPath(path, (mod: any) => {
+                if (typeof mod?.renderChannelSubtitle !== 'function') return
+                status.split = 'Hooked'
+                cleanup(
+                    instead(mod, 'renderChannelSubtitle', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        const p = args[0]
+                        const sp = p?.subtitle?.split
+                        if (!sp || !settings().realGradient) return orig.apply(this, args)
+                        try {
+                            // 오른쪽 글 줄은 디스코드가 원래대로 그리게 한다
+                            const right = orig.call(this, { ...p, subtitle: { type: 'voice', text: sp.rest.replace(/^\s+/, '') } })
+                            const variant = right?.props?.textProps?.variant ?? right?.props?.variant
+                            return (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+                                    <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={variant} />
+                                    {/^\s/.test(sp.rest) ? <Text> </Text> : null}
+                                    <View style={{ flexShrink: 1, minWidth: 0 }}>{right}</View>
+                                </View>
+                            )
+                        } catch (e: any) {
+                            status.lastError = `Split, ${e?.message ?? e}`
+                            return orig.apply(this, args)
+                        }
+                    }),
+                )
+            }) as any,
+        )
 }
 
 function preview(channel: any): Preview | undefined {
@@ -277,7 +343,8 @@ function preview(channel: any): Preview | undefined {
     const rest = system ? ` ${body}` : `: ${body}`
     const base = styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' as const }
     return {
-        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}`,
+        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${s.realGradient}`,
+        split: colors && colors.length > 1 ? { name, colors, style: styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }, rest } : undefined,
         node: (
             <>
                 {colors ? <Gradient text={name} colors={colors} style={base} /> : <Text style={{ ...base, ...(color ? { color } : null) }}>{name}</Text>}
@@ -309,7 +376,7 @@ function fillPreviews(args: any[]) {
     try {
         if (pv) {
             // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 text 를 한 줄로 그대로 보여 준다
-            if (ch.subtitle?.key !== pv.key) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text: pv.node, key: pv.key }, writable: true, configurable: true, enumerable: true })
+            if (ch.subtitle?.key !== pv.key) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text: pv.node, key: pv.key, split: pv.split }, writable: true, configurable: true, enumerable: true })
             touched.add(ch)
             status.withMessage++
         } else if (ours) {
@@ -362,11 +429,12 @@ function SettingsPage() {
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
                     <TableSwitchRow label="Name style" subLabel="Uses the author's display name font and color" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
-                    <TableSwitchRow label="Real gradient (experimental)" subLabel="Can overlap or hide names. Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
+                    <TableSwitchRow label="Real gradient" subLabel="Draws the name apart from the message so the gradient fits. Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
+                    <TableRow label="Split names" subLabel={status.split} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
@@ -379,7 +447,8 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
         // 1.0.10 에서 기본으로 켜졌던 진짜 그라데이션은 이름이 겹치거나 안 보여서 한 번 끈다
-        if (!settings().gradientReset) update({ realGradient: false, gradientReset: true })
+        // 1.0.12 부터 줄을 나눠 그려서 다시 켠다 (한 번만)
+        if (!settings().splitReset) update({ realGradient: true, gradientReset: true, splitReset: true })
         const subs: Array<[string, (e: any) => void]> = [
             ['MESSAGE_PREVIEWS_LOADED', onPreviews],
             ['MESSAGE_CREATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
@@ -407,6 +476,7 @@ export default plugin({
         onGuild()
 
         patchChannelList(cleanup)
+        patchSubtitle(cleanup)
         cleanup(() => {
             for (const ch of touched)
                 try {
