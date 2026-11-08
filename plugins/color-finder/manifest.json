@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.color-finder",
+	"name": "Color Finder",
+	"description": "Finds which theme color (semantic token) paints a part of Discord, by lighting it up.",
+	"author": "Yumistra",
+	"icon": "PaintPaletteIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
