@@ -318,7 +318,7 @@ function SplitName({ name, colors, style, variant, userId, guildId, real, color 
         return (
             <View style={{ height: lineHeight, justifyContent: 'center', flexShrink: 0, overflow: 'visible' }}>
                 <Boundary fallback={<Text style={{ fontSize, color: color ?? textColor() }}>{name}</Text>}>
-                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize }} defaultColor={color ?? textColor()} lineClamp={1} effectDisplayType={1} />
+                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize, ...(color ? { color } : null) }} lineClamp={1} effectDisplayType={1} />
                 </Boundary>
             </View>
         )
@@ -373,7 +373,7 @@ function splitTree(node: any, sub: any, depth = 0): any {
         const rest = String(sp.rest).replace(/^\s+/, '')
         status.split = 'Working'
         return (
-            <View key={node.key ?? undefined} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+            <View key={node.key ?? undefined} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0 }}>
                 <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} userId={sp.userId} guildId={sp.guildId} real={sp.real} color={sp.color} />
                 {/^\s/.test(sp.rest) ? <Text> </Text> : null}
                 {cloneElement(node, { style: [props.style, { flexShrink: 1 }] }, rest)}
@@ -454,7 +454,7 @@ function preview(channel: any): Preview | undefined {
         key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${!!usernameWithEffects}`,
         // 표시 이름 스타일이 있으면 디스코드가 DM 목록에서 쓰는 이름 컴포넌트(UsernameWithEffects)로 똑같이 그린다
         // 이름은 언제나 디스코드 이름 컴포넌트로 (스타일이 없는 사람은 역할 색으로)
-        split: s.nameStyle && usernameWithEffects ? { name, colors: [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: s.roleColor ? colorOf(authorId, channel.guild_id) : undefined } : undefined,
+        split: s.nameStyle && usernameWithEffects ? { name, colors: [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: !nameStyle(authorId, channel.guild_id, m.author).styled && s.roleColor ? colorOf(authorId, channel.guild_id) : undefined } : undefined,
         node: (
             <>
                 <Text style={{ fontWeight: '700', ...(s.roleColor && colorOf(authorId, channel.guild_id) ? { color: colorOf(authorId, channel.guild_id) } : null) }}>{name}</Text>
