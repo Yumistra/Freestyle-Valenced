@@ -60,7 +60,7 @@ import kotlin.math.sqrt
 private const val ACCESSORIES_VIEW = "com.discord.chat.presentation.message.MessageAccessoriesView"
 private const val FONT_MANAGER = "com.facebook.react.common.assets.ReactFontManager"
 /** 이보다 오래전에 닿은 줄은 쓰지 않는다 */
-private const val TOUCH_TTL = 4000L
+private const val TOUCH_TTL = 10000L
 /** 메시지를 옆으로 당길 때 보이는 연필 아이콘 (SwipeHelper 가 이 리소스로 editIcon 을 만든다) */
 private const val SWIPE_EDIT_ICON = "ic_swipe_edit"
 private const val SWIPE_REPLY_ICON = "ic_swipe_reply"
@@ -163,11 +163,28 @@ private class Rv(private val r: Recycler) {
 
     /** 항목 id (어댑터가 고정 id 를 쓴다. 없으면 위치로) */
     fun idOf(list: View, child: View): Long? {
-        val pos = r.adapterPosition(list, child) ?: return null
+        val pos = r.adapterPosition(list, child) ?: byName(list, child) ?: return null
         if (pos < 0) return null
-        val id = r.itemId(list, child) ?: -1L
+        val id = r.itemId(list, child) ?: named(list, "getChildItemId", child) as? Long ?: -1L
         return if (id == -1L) -1000L - pos else id
     }
+
+    /** 모양으로 못 찾았을 때: 이름이 남아 있으면 RecyclerView 공개 메서드로 */
+    private val namedCache = HashMap<String, Method?>()
+    private fun named(list: View, name: String, child: View): Any? = try {
+        val m = namedCache.getOrPut(name) {
+            try {
+                r.rv.getMethod(name, View::class.java)
+            } catch (e: Throwable) {
+                null
+            }
+        }
+        m?.invoke(list, child)
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun byName(list: View, child: View): Int? = named(list, "getChildAdapterPosition", child) as? Int
 
     /** 0 = 멈춤 */
     fun scrollState(list: View): Int = r.scrollState(list)
@@ -732,16 +749,19 @@ val messageActionsPlugin = plugin {
         val added = WeakHashMap<View, IntArray>()
 
         val cl = classLoader
-        // 디스코드 버전마다 안쪽 이름이 바뀔 수 있다. 못 찾으면 JS 가 다른 방식(창)으로 보여 주게 "norow" 만 돌려준다
+        // 디스코드 버전마다 안쪽 이름이 바뀔 수 있다. 못 찾으면 JS 가 오류 로그를 복사하게 이유를 "err:…" 로 돌려준다
+        var recyclerError = ""
         val recycler = try {
             Recycler(cl)
         } catch (e: Throwable) {
+            recyclerError = e.toString()
             null
         }
         val chatListView = findChatListClass(cl)
         if (recycler == null || chatListView == null) {
             log.w("Chat list not found (recycler=${recycler != null}, chat=${chatListView != null}); inline buttons disabled")
-            registerNativeAsyncMethod("${manifest.id}.showActions") { "norow" }
+            val why = "err:Chat list not found. recycler=${recycler?.describe() ?: "missing ($recyclerError)"}, chatList=${chatListView?.name ?: "missing"}"
+            registerNativeAsyncMethod("${manifest.id}.showActions") { why }
             registerNativeMethod("${manifest.id}.setSwipeButtons") { true }
             registerNativeMethod("${manifest.id}.ping") { "pong" }
             return@start
@@ -879,6 +899,27 @@ val messageActionsPlugin = plugin {
                 },
             ),
         )
+        // 채팅 목록이 onInterceptTouchEvent 를 따로 고쳐 쓰는 버전도 있어서, 손가락이 닿는 순간은 dispatchTouchEvent 에서도 기억한다
+        try {
+            hooks.add(
+                XposedHelpers.findAndHookMethod(
+                    ViewGroup::class.java,
+                    "dispatchTouchEvent",
+                    MotionEvent::class.java,
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val list = param.thisObject as? ViewGroup ?: return
+                            val ev = param.args[0] as? MotionEvent ?: return
+                            if (ev.actionMasked != MotionEvent.ACTION_DOWN || !chatListView.isInstance(list)) return
+                            val row = childUnder(list, ev.x, ev.y) ?: return
+                            touched = Touched(WeakReference(list), WeakReference(row), SystemClock.uptimeMillis())
+                        }
+                    },
+                ),
+            )
+        } catch (e: Throwable) {
+            log.w("dispatchTouchEvent not hooked: $e")
+        }
         hooks.add(
             XposedHelpers.findAndHookMethod(
                 rvClass,
@@ -929,7 +970,7 @@ val messageActionsPlugin = plugin {
 
         /**
          * args[0]: JSON {buttons:[{id,label,icon,colors:{bg,bgActive,border,borderActive,fg},confirm?:{label,colors}}], font:{family,size}, radius, inset}
-         * 돌려주는 값: 누른 버튼 id, 닫으면 "", 띄울 줄이 없으면 "norow"
+         * 돌려주는 값: 누른 버튼 id, 닫으면 "", 못 띄우면 "err:<이유>"
          */
         registerNativeAsyncMethod("${manifest.id}.showActions") { args ->
             val opts = try {
@@ -938,15 +979,15 @@ val messageActionsPlugin = plugin {
                 JSONObject()
             }
             withContext(Dispatchers.Main) {
-                val t = touched ?: return@withContext "norow"
+                val t = touched ?: return@withContext "err:No touch on the chat list was recorded. ${recycler.describe()} chat=${chatListView.name}"
                 val list = t.list.get()
                 val row = t.row.get()
-                if (list == null || row == null || !row.isAttachedToWindow || row.parent !== list ||
-                    SystemClock.uptimeMillis() - t.at > TOUCH_TTL
-                ) {
-                    return@withContext "norow"
+                val age = SystemClock.uptimeMillis() - t.at
+                if (list == null || row == null || !row.isAttachedToWindow || row.parent !== list || age > TOUCH_TTL) {
+                    return@withContext "err:Touched row is gone. list=${list != null}, row=${row != null}, attached=${row?.isAttachedToWindow}, sameParent=${row?.parent === list}, age=${age}ms"
                 }
-                val id = rv.idOf(list, row) ?: return@withContext "norow"
+                val id = rv.idOf(list, row)
+                    ?: return@withContext "err:Could not read the row id. ${recycler.describe()} row=${row.javaClass.name}"
                 active?.finishNow()
                 suspendCancellableCoroutine { cont ->
                     val font = opts.optJSONObject("font")
@@ -961,7 +1002,7 @@ val messageActionsPlugin = plugin {
                         cont.invokeOnCancellation { list.post { bar.close("") } }
                     } catch (e: Throwable) {
                         log.e("showActions: $e")
-                        if (cont.isActive) cont.resume("norow")
+                        if (cont.isActive) cont.resume("err:Could not draw the buttons. ${android.util.Log.getStackTraceString(e).take(1500)}")
                     }
                 }
             }

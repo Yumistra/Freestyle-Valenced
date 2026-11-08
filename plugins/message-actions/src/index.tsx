@@ -6,6 +6,7 @@ import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { getModules, lookupModule, lookupModules } from '@valenced/modules/finders'
 import { withDependencies, withProps } from '@valenced/modules/finders/filters'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { useState } from 'react'
@@ -300,6 +301,24 @@ function buttonRadius() {
 const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
 
 /** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
+const VERSION = '1.0.6'
+
+/** 버튼을 못 띄우면 오류 로그를 복사해 두고 알려 준다 */
+function reportFailure(reason: string) {
+    const log = [
+        'Message Actions error log',
+        `Plugin ${VERSION}`,
+        `Reason: ${reason}`,
+    ].join('\n')
+    try {
+        Clipboard.setString(log)
+        toast('Message Actions: buttons failed, error log copied')
+    } catch {
+        toast(`Message Actions: buttons failed. ${reason}`)
+    }
+}
+
+/** 안드로이드가 메시지 밑에 버튼을 끼워 넣는다. 누른 버튼 id, 닫으면 "", 못 하면 null (오류 로그 복사) */
 async function showButtons(message: any): Promise<string | null> {
     const buttons: any[] = []
     if (isMine(message) && editableOf(message)) buttons.push({ id: 'edit', label: 'Edit', icon: ICON('pencilicon'), colors: variantColors('secondary') })
@@ -313,9 +332,22 @@ async function showButtons(message: any): Promise<string | null> {
     const opts = { buttons, font: buttonFont(), radius: buttonRadius(), inset: 68 }
     try {
         const r = await Promise.resolve((callNativeMethod as any)(`${NATIVE_ID}.showActions`, [JSON.stringify(opts)]))
-        if (r === 'norow' || typeof r !== 'string') return null
+        if (typeof r !== 'string') {
+            reportFailure(`Unexpected reply from Android: ${JSON.stringify(r)}`)
+            return null
+        }
+        // 예전 안드로이드 부분은 이유 없이 이것만 돌려준다
+        if (r === 'norow' || r === 'notouch' || r === 'nochat') {
+            reportFailure(`${r} (older Android part, no details)`)
+            return null
+        }
+        if (r.startsWith('err:')) {
+            reportFailure(r.slice(4))
+            return null
+        }
         return r
-    } catch {
+    } catch (e: any) {
+        reportFailure(`Android part not reachable: ${String(e?.stack ?? e?.message ?? e)}`)
         return null
     }
 }
@@ -323,7 +355,7 @@ async function showButtons(message: any): Promise<string | null> {
 /** 밑에 버튼으로 고르게 한다. 못 띄우면 가운데 창으로 */
 async function inlineActions(handlers: any, message: any, channel: any, chatInputRef?: any, source?: string, extra?: any[]) {
     const choice = await showButtons(message)
-    if (choice === null) return openActions(handlers, message, channel, chatInputRef, source, extra)
+    if (choice === null) return
     if (choice === 'edit') edit(handlers, message, channel, chatInputRef, source, extra)
     else if (choice === 'delete') remove(message, channel)
 }
