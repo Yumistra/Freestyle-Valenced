@@ -580,6 +580,18 @@ function EmojiIcons() {
         // 내가 볼 수 있는 채널만 (GuildChannelStore 의 SELECTABLE, VOCAL)
         const gc = S().GuildChannelStore?.getChannels?.(guildId) ?? {}
         list = [...(gc.SELECTABLE ?? []), ...(gc.VOCAL ?? [])].map((x: any) => x?.channel ?? x)
+        // 음성 채널이 빠져 있으면 서버 채널에서 보이는 음성 채널을 더한다
+        if (!list.some((c: any) => c?.type === 2 || c?.type === 13)) {
+            const all: any = S().ChannelStore?.getMutableGuildChannelsForGuild?.(guildId) ?? {}
+            const can = (c: any) => {
+                try {
+                    return S().PermissionStore?.can?.(BigInt(1024), c) ?? true
+                } catch {
+                    return true
+                }
+            }
+            for (const c of Object.values(all) as any[]) if ((c?.type === 2 || c?.type === 13) && can(c)) list.push(c)
+        }
             .filter((c: any) => [0, 2, 5, 13, 15, 16].includes(c?.type))
             .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
     } catch {}

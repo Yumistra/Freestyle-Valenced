@@ -246,6 +246,31 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         }
         const props = node.props
         if (!props) return node
+        // 음성 채널 줄(BaseChannelItem)은 아이콘과 이름을 icon, name 으로 받는다
+        if (!iconDone && props.icon && typeof props.icon === 'object' && props.name && typeof props.name === 'object') {
+            iconDone = true
+            status.icons++
+            const patch: any = { icon: <EmojiTile channel={channel} muted={muted} /> }
+            if (voice) {
+                status.badges++
+                patch.channelInfo = (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        {props.channelInfo ?? null}
+                        <VoiceBadge channel={channel} />
+                    </View>
+                )
+            }
+            if (isLimited(channel) || isNSFW(channel)) {
+                status.nameIcons++
+                patch.name = (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1 }}>
+                        <View style={{ flexShrink: 1, minWidth: 0 }}>{props.name}</View>
+                        <NameIcons channel={channel} />
+                    </View>
+                )
+            }
+            return cloneElement(node, patch)
+        }
         const textName = props.children === name || (Array.isArray(props.children) && props.children.length === 1 && props.children[0] === name)
         if (!nameDone && textName) {
             nameDone = true
