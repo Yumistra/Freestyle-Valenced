@@ -78,7 +78,13 @@ export function watchEmojiOption(): () => void {
             const channelId = (Stores as any).SelectedChannelStore?.getChannelId?.()
             if (!channelId) return
             const cmd = store.getActiveCommand?.(channelId)
-            const active = store.getActiveOptionName?.(channelId)
+            // 칸이 눌렸는지는 칸마다의 상태(isActive)에 있다 (ApplicationCommandOptionItem 이 이것으로 칸을 칠한다)
+            let active = store.getActiveOptionName?.(channelId)
+            if (!active) {
+                const states = store.getOptionStates?.(channelId) ?? {}
+                for (const [name, st] of Object.entries<any>(states)) if (st?.isActive) active = name
+                if (!active) for (const n of ['emoji', 'styles']) if (store.getOptionState?.(channelId, n)?.isActive) active = n
+            }
             if (cmd?.id === COMMAND_ID) status.option = `Active option, ${active ?? 'none'}`
             const state = store.getOptionState?.(channelId, 'emoji')
             const has = !!state?.hasValue

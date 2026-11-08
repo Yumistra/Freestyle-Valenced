@@ -36,7 +36,8 @@ function useStylesActive(channelId?: string) {
         if (!channelId || !store) return
         const check = () => {
             try {
-                const next = store.getActiveCommand?.(channelId)?.id === COMMAND_ID && store.getActiveOptionName?.(channelId) === 'styles'
+                const ours = store.getActiveCommand?.(channelId)?.id === COMMAND_ID
+                const next = ours && (store.getActiveOptionName?.(channelId) === 'styles' || !!store.getOptionState?.(channelId, 'styles')?.isActive || !!store.getOptionStates?.(channelId)?.styles?.isActive)
                 setOn(prev => {
                     if (prev !== next) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
                     return next
