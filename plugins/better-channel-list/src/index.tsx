@@ -2,7 +2,7 @@ import { Dispatcher } from '@valenced/discord/common/flux'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { getModules, lookupModule } from '@valenced/modules/finders'
+import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
@@ -61,6 +61,18 @@ function request(guildId: string | null | undefined, channelIds?: string[], forc
     }
 }
 
+/** 채널 목록을 다시 그리게 한다 (마지막 메시지가 바뀌었을 때) */
+let redrawTimer: any
+function redraw() {
+    clearTimeout(redrawTimer)
+    redrawTimer = setTimeout(() => {
+        try {
+            const store = S().ChannelListStore ?? find('getGuild', 'getGuildWithoutChangingCommunityRows')
+            store?.emitChange?.()
+        } catch {}
+    }, 150)
+}
+
 function onPreviews({ messages }: any) {
     if (!Array.isArray(messages)) return
     status.received += messages.length
@@ -70,6 +82,7 @@ function onPreviews({ messages }: any) {
             Dispatcher.dispatch({ type: 'LOAD_MESSAGES_SUCCESS', channelId: m.channel_id, hasMoreAfter: false, hasMoreBefore: true, isAfter: true, isBefore: false, isStale: true, limit: 1, messages: [m] } as any)
         } catch {}
     }
+    redraw()
 }
 
 // ── 미리보기 글 만들기 ─────────────────────────────────────────────────────
@@ -126,118 +139,84 @@ function plain(m: any, guildId?: string): string {
 
 const SYSTEM: Record<number, string> = { 6: 'pinned a message', 7: 'joined the server', 8: 'boosted the server', 18: 'started a thread' }
 
-function useLastMessage(channelId: string) {
-    const read = () => {
-        try {
-            const list = S().MessageStore?.getMessages?.(channelId)
-            return list?.last?.() ?? list?._array?.[list._array.length - 1]
-        } catch {}
-    }
-    const [m, setM] = useState(read)
-    useEffect(() => {
-        const store = S().MessageStore
-        const on = () => {
-            const next = read()
-            setM((prev: any) => (prev?.id === next?.id && prev?.content === next?.content ? prev : next))
-        }
-        store?.addChangeListener?.(on)
-        on()
-        return () => store?.removeChangeListener?.(on)
-    }, [channelId])
-    return m
+// ── 채널 목록 (channel_list_v2/native/renderRedesignChannelListItem) ─────
+/**
+ * 채널 줄은 renderChannelListItem({ guildChannels, section, row, ... }) 이 그리고,
+ * 줄 높이는 getChannelListItemSize({ guildChannels, section, row, ... }) 가 정한다.
+ * 둘 다 guildChannels.getChannelFromSectionRow(section, row).channel 의 subtitle 이 있으면
+ * 이름 아래에 한 줄을 더 그리고 그만큼 높게 잡는다. 그래서 그 자리에 마지막 메시지를 넣는다.
+ */
+const TEXTUAL = new Set([0, 5, 10, 11, 12])
+
+function previewText(channel: any): string | undefined {
+    const s = settings()
+    if (!s.lastMessage) return
+    let m: any
+    try {
+        const list = S().MessageStore?.getMessages?.(channel.id)
+        m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+    } catch {}
+    if (!m) return
+    const authorId = m.author?.id
+    try {
+        if (authorId && S().RelationshipStore?.isBlocked?.(authorId)) return 'Blocked message'
+    } catch {}
+    const system = SYSTEM[m.type]
+    const body = system ?? plain(m, channel.guild_id)
+    if (!body) return
+    const name = s.showAuthor && authorId ? nameOf(authorId, channel.guild_id, m.author) : ''
+    return name ? (system ? `${name} ${body}` : `${name}: ${body}`) : body
 }
 
-function LastMessage({ channel }: { channel: any }) {
-    const { Text } = Design as any
-    const s = useSettings()
-    const m = useLastMessage(channel.id)
-    if (!m || !s.lastMessage) return null
-    const guildId = channel.guild_id
-    const authorId = m.author?.id
-    let blocked = false
-    try {
-        blocked = !!authorId && !!S().RelationshipStore?.isBlocked?.(authorId)
-    } catch {}
-    if (blocked)
-        return (
-            <Text variant="text-sm/medium" color="text-muted" numberOfLines={1}>
-                Blocked message
-            </Text>
-        )
-    const system = SYSTEM[m.type]
-    const body = system ?? plain(m, guildId)
-    const name = authorId ? nameOf(authorId, guildId, m.author) : ''
-    const color = s.roleColor && authorId ? colorOf(authorId, guildId) : undefined
-    return (
-        <Text variant="text-sm/medium" color="text-muted" numberOfLines={1}>
-            {s.showAuthor && name ? (
-                <Text variant="text-sm/semibold" color={color ? undefined : 'text-default'} style={color ? { color } : undefined}>
-                    {system ? `${name} ` : `${name}: `}
-                </Text>
-            ) : null}
-            {body}
-        </Text>
+function withPreviews(args: any[]): any[] {
+    const p = args[0]
+    const gc = p?.guildChannels
+    if (!gc || typeof gc.getChannelFromSectionRow !== 'function' || !settings().lastMessage) return args
+    const proxy = Object.create(gc)
+    proxy.getChannelFromSectionRow = function (section: any, row: any) {
+        const res = gc.getChannelFromSectionRow(section, row)
+        const ch = res?.channel
+        const rec = ch?.record
+        if (!rec || ch.subtitle != null || !TEXTUAL.has(rec.type)) return res
+        const text = previewText(rec)
+        if (!text) return res
+        status.withMessage++
+        const c2 = Object.create(ch)
+        Object.defineProperty(c2, 'subtitle', { value: text, enumerable: true })
+        const r2 = Object.create(res)
+        Object.defineProperty(r2, 'channel', { value: c2, enumerable: true })
+        return r2
+    }
+    return [{ ...p, guildChannels: proxy }, ...args.slice(1)]
+}
+
+function patchChannelList(cleanup: (...f: any[]) => void) {
+    status.hook = 'Looking for the channel list'
+    cleanup(
+        getModuleWithImportedPath('modules/channel_list_v2/native/renderRedesignChannelListItem.tsx', (mod: any) => {
+            let n = 0
+            for (const key of ['renderChannelListItem', 'getChannelListItemSize'])
+                if (typeof mod?.[key] === 'function') {
+                    cleanup(
+                        instead(mod, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                            if (key === 'renderChannelListItem') status.rows++
+                            try {
+                                args = withPreviews(args)
+                            } catch (e: any) {
+                                status.lastError = String(e?.message ?? e)
+                            }
+                            return orig.apply(this, args)
+                        }),
+                    )
+                    n++
+                }
+            status.hook = n === 2 ? 'Hooked' : `Hooked ${n} of 2`
+        }) as any,
     )
 }
 
-// ── 디스코드의 채널 목록 메시지 미리보기 켜기 ────────────────────────────────
-/**
- * 폰 디스코드에는 채널 목록 메시지 미리보기가 이미 있다 (새 채널 목록 디자인).
- * 서버마다의 설정(mobileRedesignChannelListSettings.messagePreviews)이 없으면
- * MessagePreviewSetting.getSetting() 값을 쓰는데, 이 값을 'all' 또는 'unreads' 로 돌려준다.
- */
-function patchPreviewSetting(cleanup: (...f: any[]) => void) {
-    const want = () => {
-        const m = settings().mode
-        return settings().lastMessage && m !== 'default' ? m : undefined
-    }
-    const done = new WeakSet<object>()
-    const apply = (mod: any) => {
-        if (!mod || typeof mod !== 'object') return
-        // 이름이 버전마다 조금 다를 수 있어서 MessagePreview 가 든 설정을 찾는다
-        const key = 'MessagePreviewSetting' in mod ? 'MessagePreviewSetting' : Object.keys(mod).find(k => /^MessagePreview/i.test(k) && typeof mod[k]?.getSetting === 'function')
-        const setting = key ? mod[key] : undefined
-        if (!setting || done.has(setting)) return
-        done.add(setting)
-        let n = 0
-        for (const fn of ['getSetting', 'useSetting'])
-            if (typeof setting[fn] === 'function') {
-                cleanup(
-                    instead(setting, fn, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                        status.rows++
-                        return want() ?? orig.apply(this, args)
-                    }),
-                )
-                n++
-            }
-        status.hook = n ? `Hooked ${key} (${n})` : `${key} has no getSetting`
-    }
-    status.hook = 'Looking for MessagePreviewSetting'
-    try {
-        cleanup(getModules(withProps('MessagePreviewSetting') as any, apply) as any)
-    } catch (e: any) {
-        status.lastError = String(e?.message ?? e)
-    }
-    // 사용자 설정 모듈 (UseLegacyChatInput 이 같이 있다)
-    try {
-        cleanup(getModules(withProps('UseLegacyChatInput') as any, apply) as any)
-    } catch {}
-}
-
-// ── 채널 줄 (예전 방식, 지금은 안 씀) ──────────────────────────────────────
-/** 글을 쓰는 채널 (텍스트, 공지, 스레드) */
-const TEXTUAL = new Set([0, 5, 10, 11, 12])
-
-function withLastMessage(props: any) {
-    status.rows++
-    const ch = props?.channel
-    if (!ch?.id || props?.subtitle || !settings().lastMessage || !TEXTUAL.has(ch.type)) return props
-    status.withMessage++
-    return { ...props, subtitle: <LastMessage channel={ch} /> }
-}
-
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableSwitchRow, TableRow, TableRadioGroup, TableRadioRow } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRow } = Design as any
     const s = useSettings()
     const [, tick] = useState(0)
     useEffect(() => {
@@ -248,16 +227,11 @@ function SettingsPage() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
                 <TableRowGroup title="Channel list">
-                    <TableSwitchRow label="Last message" subLabel="Turns on Discord's own message previews in the channel list" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
+                    <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
+                    <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
                 </TableRowGroup>
-                {s.lastMessage ? (
-                    <TableRadioGroup title="Show previews for" defaultValue={s.mode} onChange={(mode: any) => update({ mode })}>
-                        <TableRadioRow label="All channels" value="all" />
-                        <TableRadioRow label="Unread channels" value="unreads" />
-                    </TableRadioGroup>
-                ) : null}
                 <TableRowGroup title="Status">
-                    <TableRow label="Message previews" subLabel={`${status.hook}, read ${status.rows} times`} />
+                    <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
@@ -271,6 +245,8 @@ export default plugin({
         bind(jsonStorage)
         const subs: Array<[string, (e: any) => void]> = [
             ['MESSAGE_PREVIEWS_LOADED', onPreviews],
+            ['MESSAGE_CREATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
+            ['MESSAGE_UPDATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
             ['CHANNEL_SELECT', (e: any) => request(e?.guildId)],
             ['CHANNEL_UPDATES', (e: any) => e?.channels?.some?.((c: any) => c?.guild_id === S().SelectedGuildStore?.getGuildId?.()) && request(S().SelectedGuildStore?.getGuildId?.(), undefined, true)],
             ['GUILD_MEMBER_UPDATE', (e: any) => e?.user?.id === S().UserStore?.getCurrentUser?.()?.id && request(e?.guildId, undefined, true)],
@@ -293,7 +269,7 @@ export default plugin({
         cleanup(() => guildStore?.removeChangeListener?.(onGuild))
         onGuild()
 
-        patchPreviewSetting(cleanup)
+        patchChannelList(cleanup)
     },
     SettingsComponent: SettingsPage,
 } as any)
