@@ -314,7 +314,7 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         }
         const props = node.props
         if (!props) return node
-        if (depth > 0 && typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
+        if (typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
             const w = wrap?.(node)
             trace(`inner ${typeName(node.type)}${w && w !== node ? '' : ' (cannot wrap)'}`)
             if (w && w !== node) {
