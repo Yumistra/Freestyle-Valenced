@@ -4,8 +4,8 @@ import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { useMemo, useState } from 'react'
-import { Dimensions, FlatList, Image, Pressable, Text as RNText, View } from 'react-native'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { Dimensions, FlatList, Image, Pressable, ScrollView, Text as RNText, TouchableOpacity, View } from 'react-native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { EMOJI_COLORS } from './colors'
@@ -49,40 +49,176 @@ const UNICODE = Object.keys(EMOJI_COLORS)
 
 /** 이모지 고르기 창의 한 칸 */
 type Cell = { key: string; value: string; id?: string; text?: string }
+/** 목록의 한 줄: 묶음 제목이거나 이모지 한 줄 */
+type Row = { key: string; header?: string; cells?: Cell[] }
+/** 아래 바의 버튼 하나 (서버 아이콘 또는 기본 이모지 종류) */
+type Tab = { key: string; label: string; icon?: string; emoji?: string; row: number }
 
 const SHEET_KEY = 'bcl-emoji-sheet'
+const COLS = 8
+const HEADER_H = 34
+
+/** 기본 이모지 종류 (유니코드 순서에서 시작하는 자리) */
+const CATEGORIES: Array<[string, string, string]> = [
+    ['People', '😀', '😀'],
+    ['Nature', '🐵', '🐶'],
+    ['Food', '🍇', '🍔'],
+    ['Travel', '🌍', '🚗'],
+    ['Activities', '🎃', '⚽'],
+    ['Objects', '👓', '💡'],
+    ['Symbols', '🏧', '❤️'],
+    ['Flags', '🏁', '🏳️'],
+]
+
+/** 서버와 이모지 목록은 창을 열 때마다 새로 만들지 않고 한 번 만들어 둔다 */
+let unicodeSections: Array<[string, string, Cell[]]> | undefined
+function unicode() {
+    if (unicodeSections) return unicodeSections
+    const keys = Object.keys(EMOJI_COLORS)
+    const starts = CATEGORIES.map(([, first]) => keys.indexOf(first))
+    unicodeSections = CATEGORIES.map(([name, , icon], i) => {
+        const from = Math.max(0, starts[i])
+        const to = i + 1 < starts.length && starts[i + 1] > from ? starts[i + 1] : keys.length
+        return [name, icon, keys.slice(from, to).map(u => ({ key: u, value: u }))] as [string, string, Cell[]]
+    }).filter(s => s[2].length)
+    return unicodeSections
+}
+
+function guildSections(firstGuild?: string): Array<{ id: string; name: string; icon?: string; cells: Cell[] }> {
+    const out: Array<{ id: string; name: string; icon?: string; cells: Cell[] }> = []
+    try {
+        const S: any = Stores
+        let ids: string[] = S.SortedGuildStore?.getFlattenedGuildIds?.() ?? Object.keys(S.GuildStore?.getGuilds?.() ?? {})
+        if (firstGuild) ids = [firstGuild, ...ids.filter(i => i !== firstGuild)]
+        for (const id of ids) {
+            const g = S.GuildStore?.getGuild?.(id)
+            const cells: Cell[] = []
+            for (const e of S.EmojiStore?.getGuildEmoji?.(id) ?? []) if (e?.id && e.available !== false) cells.push({ key: e.id, id: e.id, text: String(e.name), value: `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>` })
+            if (!cells.length) continue
+            out.push({ id, name: g?.name ?? 'Server', icon: g?.icon ? `https://cdn.discordapp.com/icons/${id}/${g.icon}.png?size=64` : undefined, cells })
+        }
+    } catch {}
+    return out
+}
+
+function chunk(cells: Cell[], prefix: string): Row[] {
+    const rows: Row[] = []
+    for (let i = 0; i < cells.length; i += COLS) rows.push({ key: `${prefix}-${i}`, cells: cells.slice(i, i + COLS) })
+    return rows
+}
+
+/** 이모지 한 칸 (다시 그릴 필요가 없어서 memo) */
+const EmojiCell = memo(function EmojiCell({ cell, size, onPick }: { cell: Cell; size: number; onPick: (v: string) => void }) {
+    return (
+        <TouchableOpacity accessibilityLabel={cell.text ?? cell.value} activeOpacity={0.5} onPress={() => onPick(cell.value)} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+            {cell.id ? (
+                <Image source={{ uri: `https://cdn.discordapp.com/emojis/${cell.id}.png?size=48` }} style={{ width: size * 0.66, height: size * 0.66 }} resizeMode="contain" fadeDuration={0} />
+            ) : (
+                <RNText allowFontScaling={false} style={{ fontSize: size * 0.56 }}>
+                    {cell.value}
+                </RNText>
+            )}
+        </TouchableOpacity>
+    )
+})
+
+const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size: number; onPick: (v: string) => void }) {
+    const { Text } = Design as any
+    if (row.header)
+        return (
+            <View style={{ height: HEADER_H, justifyContent: 'flex-end', paddingBottom: 6, paddingHorizontal: 4 }}>
+                <Text variant="text-xs/semibold" color="text-muted" lineClamp={1}>
+                    {row.header.toUpperCase()}
+                </Text>
+            </View>
+        )
+    return (
+        <View style={{ flexDirection: 'row', height: size }}>
+            {row.cells!.map(c => (
+                <EmojiCell key={c.key} cell={c} size={size} onPick={onPick} />
+            ))}
+        </View>
+    )
+})
 
 /**
  * 이모지 고르기 창 (아래에서 올라오는 창, 뒤는 어둡게 깔린다).
- * 위에 글칸(폰 이모지 자판으로 넣거나 붙여 넣기, 영어로 서버 이모지 찾기), 아래에 내 서버 이모지와 기본 이모지.
+ * 디스코드 이모지 창처럼 서버별로 묶고, 아래 바에서 서버나 이모지 종류를 누르면 그곳으로 간다.
+ * 글칸에는 폰 이모지 자판으로 넣거나 붙여 넣을 수 있고, 영어로 치면 서버 이모지를 찾는다.
  */
 function EmojiSheet({ channel }: { channel: any }) {
     const { ActionSheet, TextInput, Button, Text } = Design as any
     const [text, setText] = useState('')
-    const servers = useMemo(() => {
-        const out: Cell[] = []
-        try {
-            const S: any = Stores
-            const guilds = Object.keys(S.GuildStore?.getGuilds?.() ?? {})
-            // 이 채널 서버의 이모지를 먼저
-            guilds.sort((a, b) => (a === channel?.guild_id ? -1 : b === channel?.guild_id ? 1 : 0))
-            for (const g of guilds)
-                for (const e of S.EmojiStore?.getGuildEmoji?.(g) ?? [])
-                    if (e?.id && e.available !== false) out.push({ key: e.id, id: e.id, text: String(e.name), value: `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>` })
-        } catch {}
-        return out
-    }, [])
-    const unicode = useMemo<Cell[]>(() => Object.keys(EMOJI_COLORS).map(u => ({ key: u, value: u })), [])
+    const [active, setActive] = useState(0)
+    const listRef = useRef<any>(null)
+    const width = Dimensions.get('window').width
+    const size = Math.floor((width - 24) / COLS)
+
+    const guilds = useMemo(() => guildSections(channel?.guild_id), [])
+    // 줄 목록과 아래 바 버튼, 각 줄의 위치 (줄 높이가 정해져 있어 바로 그 자리로 갈 수 있다)
+    const { rows, tabs, offsets } = useMemo(() => {
+        const rows: Row[] = []
+        const tabs: Tab[] = []
+        for (const g of guilds) {
+            tabs.push({ key: g.id, label: g.name, icon: g.icon, row: rows.length })
+            rows.push({ key: `h-${g.id}`, header: g.name }, ...chunk(g.cells, g.id))
+        }
+        for (const [name, cells] of unicode().map(u => [u[0], u[2]] as const)) {
+            const icon = unicode().find(u => u[0] === name)![1]
+            tabs.push({ key: `u-${name}`, label: name, emoji: icon, row: rows.length })
+            rows.push({ key: `h-${name}`, header: name }, ...chunk(cells, name))
+        }
+        const offsets: number[] = []
+        let y = 0
+        for (const r of rows) {
+            offsets.push(y)
+            y += r.header ? HEADER_H : size
+        }
+        return { rows, tabs, offsets }
+    }, [guilds, size])
+
     const q = text.trim().toLowerCase()
     const typed = !!q && !/^[a-z0-9_ ]+$/i.test(q)
-    const cells = q && !typed ? servers.filter(c => c.text!.toLowerCase().includes(q)) : [...servers, ...unicode]
-    const pick = (v: string) => {
+    const searchRows = useMemo(() => {
+        if (!q || typed) return undefined
+        const hits: Cell[] = []
+        for (const g of guilds) for (const c of g.cells) if (c.text!.toLowerCase().includes(q)) hits.push(c)
+        return chunk(hits.slice(0, 400), 's')
+    }, [q, typed, guilds])
+
+    const pick = useCallback((v: string) => {
         setIcon(channel.id, v)
         try {
             ;(ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY)
         } catch {}
+    }, [])
+
+    const data = searchRows ?? rows
+    const layout = useCallback(
+        (_: any, index: number) => {
+            if (searchRows) return { length: size, offset: size * index, index }
+            return { length: rows[index]?.header ? HEADER_H : size, offset: offsets[index] ?? 0, index }
+        },
+        [searchRows, rows, offsets, size],
+    )
+    const onScroll = useCallback(
+        (e: any) => {
+            if (searchRows) return
+            const y = e.nativeEvent.contentOffset.y + 1
+            let t = 0
+            for (let i = 0; i < tabs.length; i++) if (offsets[tabs[i].row] <= y) t = i
+            setActive(a => (a === t ? a : t))
+        },
+        [searchRows, tabs, offsets],
+    )
+    const jump = (i: number) => {
+        setText('')
+        setActive(i)
+        try {
+            listRef.current?.scrollToOffset?.({ offset: offsets[tabs[i].row], animated: false })
+        } catch {}
     }
-    // 디스코드 BottomSheet 는 펼친 채로 열 수 있고, 목록은 그 안에서 스크롤되는 BottomSheetFlatList 로
+
     const BottomSheet = (Design as any).BottomSheet ?? findProp('BottomSheet', 'BottomSheetTitleHeader')
     const List = findProp('BottomSheetFlatList') ?? FlatList
     const header = (
@@ -93,50 +229,68 @@ function EmojiSheet({ channel }: { channel: any }) {
             {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
         </View>
     )
+    const bar = searchRows ? null : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
+            {tabs.map((t, i) => (
+                <TouchableOpacity key={t.key} accessibilityLabel={t.label} activeOpacity={0.6} onPress={() => jump(i)} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
+                    {t.icon ? (
+                        <Image source={{ uri: t.icon }} style={{ width: 28, height: 28, borderRadius: 14 }} fadeDuration={0} />
+                    ) : t.emoji ? (
+                        <RNText allowFontScaling={false} style={{ fontSize: 22 }}>
+                            {t.emoji}
+                        </RNText>
+                    ) : (
+                        <Text variant="text-xs/bold">{t.label.slice(0, 2)}</Text>
+                    )}
+                </TouchableOpacity>
+            ))}
+        </ScrollView>
+    )
     const list = (
         <List
-            data={cells}
-            numColumns={7}
-            keyExtractor={(c: Cell) => c.key}
-            style={BottomSheet ? { flex: 1 } : { height: Math.round(Dimensions.get('window').height * 0.6) }}
-            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 32 }}
+            ref={listRef}
+            data={data}
+            keyExtractor={(r: Row) => r.key}
+            getItemLayout={layout}
+            renderItem={({ item }: { item: Row }) => <EmojiRow row={item} size={size} onPick={pick} />}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
             keyboardShouldPersistTaps="handled"
-            initialNumToRender={84}
-            windowSize={7}
-            nestedScrollEnabled
+            initialNumToRender={14}
+            maxToRenderPerBatch={8}
+            updateCellsBatchingPeriod={30}
+            windowSize={5}
+            removeClippedSubviews
+            onScroll={onScroll}
+            scrollEventThrottle={64}
             ListEmptyComponent={
                 <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
                     No server emojis found
                 </Text>
             }
-            renderItem={({ item }: { item: Cell }) => (
-                <Pressable accessibilityLabel={item.text ?? item.value} onPress={() => pick(item.value)} style={({ pressed }: any) => ({ flex: 1 / 7, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}>
-                    {item.id ? (
-                        <Image source={{ uri: `https://cdn.discordapp.com/emojis/${item.id}.png?size=48` }} style={{ width: 30, height: 30 }} resizeMode="contain" />
-                    ) : (
-                        <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
-                            {item.value}
-                        </RNText>
-                    )}
-                </Pressable>
-            )}
         />
+    )
+    const body = (
+        <View style={{ flex: 1, height: BottomSheet ? undefined : Math.round(Dimensions.get('window').height * 0.7) }}>
+            {list}
+            {bar}
+        </View>
     )
     if (BottomSheet)
         return (
             <BottomSheet startExpanded header={header}>
-                {list}
+                {body}
             </BottomSheet>
         )
     return ActionSheet ? (
         <ActionSheet>
             {header}
-            {list}
+            {body}
         </ActionSheet>
     ) : (
         <View>
             {header}
-            {list}
+            {body}
         </View>
     )
 }
