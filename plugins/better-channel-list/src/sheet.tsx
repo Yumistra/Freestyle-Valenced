@@ -147,11 +147,11 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
     )
 })
 
-/** 아래 바 (디스코드 이모지 창처럼 서버 목록). 한 눈에 다 보이게 여러 줄로 놓고, 누르면 그 서버 이모지만 보여 준다 */
+/** 아래 바 (디스코드 이모지 창처럼 서버 목록). 옆으로 밀어 볼 수 있고, 누르면 그 서버 이모지만 보여 준다 */
 const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; active: number; onJump: (i: number) => void }) {
     const { Text } = Design as any
     return (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }}>
+        <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 4, paddingTop: 8, gap: 4 }}>
             {tabs.map((t, i) => (
                 <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => onJump(i)} style={{ width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
                     {t.icon ? (
@@ -165,7 +165,7 @@ const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; act
                     )}
                 </Pressable>
             ))}
-        </View>
+        </ScrollView>
     )
 })
 
@@ -174,12 +174,13 @@ const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; act
  * 디스코드 이모지 창처럼 서버별로 묶고, 아래 바에서 서버나 이모지 종류를 누르면 그곳으로 간다.
  * 글칸에는 폰 이모지 자판으로 넣거나 붙여 넣을 수 있고, 영어로 치면 서버 이모지를 찾는다.
  */
-function EmojiSheet({ channel }: { channel: any }) {
+function EmojiSheet({ channel, alertKey }: { channel: any; alertKey: string }) {
     const { ActionSheet, TextInput, Button, Text } = Design as any
     const [text, setText] = useState('')
     const listRef = useRef<any>(null)
-    const width = Dimensions.get('window').width
-    const size = Math.floor((width - 24) / COLS)
+    // 가운데 창 안쪽 폭 (창 바깥 여백과 안쪽 여백을 뺀다)
+    const width = Math.min(Dimensions.get('window').width - 64, 420) - 32
+    const size = Math.floor(width / COLS)
 
     const guilds = useMemo(() => guildSections(channel?.guild_id), [])
     // 줄 목록과 아래 바 버튼, 각 줄의 위치 (줄 높이가 정해져 있어 바로 그 자리로 갈 수 있다)
@@ -212,9 +213,7 @@ function EmojiSheet({ channel }: { channel: any }) {
 
     const pick = useCallback((v: string) => {
         setIcon(channel.id, v)
-        try {
-            ;(ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY)
-        } catch {}
+        close(alertKey)
     }, [])
 
     const data = searchRows ?? rows
@@ -236,62 +235,39 @@ function EmojiSheet({ channel }: { channel: any }) {
     const renderItem = useCallback(({ item }: { item: Row }) => <EmojiRow row={item} size={size} onPick={pick} />, [size, pick])
     const keyOf = useCallback((r: Row) => r.key, [])
 
-    const BottomSheet = (Design as any).BottomSheet ?? findProp('BottomSheet', 'BottomSheetTitleHeader')
-    const List = findProp('BottomSheetFlatList') ?? FlatList
-    const header = (
-        <View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 10 }}>
-            <Text variant="heading-lg/bold">{`Emoji for #${channel?.name ?? ''}`}</Text>
+    return (
+        <View style={{ alignSelf: 'stretch', gap: 8 }}>
             <TextInput value={text} placeholder="Type an emoji, or search server emojis" onChange={setText} isClearable />
             {typed ? <Button text={`Use ${text.trim()}`} variant="primary" size="md" onPress={() => pick(text.trim())} /> : null}
-            {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
+            <FlatList
+                ref={listRef}
+                data={data}
+                keyExtractor={keyOf}
+                getItemLayout={layout}
+                renderItem={renderItem}
+                style={{ height: Math.min(HEADER_H + size * 6, Math.round(Dimensions.get('window').height * 0.42)), width: size * COLS, alignSelf: 'center' }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                initialNumToRender={10}
+                maxToRenderPerBatch={6}
+                updateCellsBatchingPeriod={40}
+                windowSize={3}
+                removeClippedSubviews
+                ListEmptyComponent={
+                    <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
+                        No server emojis found
+                    </Text>
+                }
+            />
+            {searchRows ? null : <TabBar tabs={tabs} active={tab} onJump={jump} />}
         </View>
     )
-    const bar = searchRows ? null : <TabBar tabs={tabs} active={tab} onJump={jump} />
-    const list = (
-        <List
-            ref={listRef}
-            data={data}
-            keyExtractor={keyOf}
-            getItemLayout={layout}
-            renderItem={renderItem}
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
-            keyboardShouldPersistTaps="handled"
-            initialNumToRender={12}
-            maxToRenderPerBatch={6}
-            updateCellsBatchingPeriod={40}
-            windowSize={3}
-            removeClippedSubviews
-            ListEmptyComponent={
-                <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
-                    No server emojis found
-                </Text>
-            }
-        />
-    )
-    const body = (
-        <View style={{ flex: 1, height: BottomSheet ? undefined : Math.round(Dimensions.get('window').height * 0.7) }}>
-            {list}
-            {bar}
-        </View>
-    )
-    if (BottomSheet)
-        return (
-            <BottomSheet startExpanded header={header}>
-                {body}
-            </BottomSheet>
-        )
-    return ActionSheet ? (
-        <ActionSheet>
-            {header}
-            {body}
-        </ActionSheet>
-    ) : (
-        <View>
-            {header}
-            {body}
-        </View>
-    )
+}
+
+function close(key: string) {
+    try {
+        ;(AlertActionCreators as any).dismissAlert(key)
+    } catch {}
 }
 
 /** 이름으로 내보낸 것 하나 찾기 */
@@ -301,9 +277,23 @@ function findProp(name: string, ...with_: string[]): any {
     } catch {}
 }
 
+/** 가운데 창으로 연다 (디스코드 확인 창과 같은 모양) */
 function openSheet(channel: any) {
+    const { AlertModal, AlertActionButton } = Design as any
+    const key = `${SHEET_KEY}-${seq++}`
+    const changed = !!settings().icons?.[channel?.id]
     try {
-        ;(ActionSheetActionCreators as any).openLazy(Promise.resolve({ default: EmojiSheet }), SHEET_KEY, { channel })
+        ;(AlertActionCreators as any).openAlert(
+            key,
+            <AlertModal
+                title={`Emoji for #${channel?.name ?? ''}`}
+                extraContent={<EmojiSheet channel={channel} alertKey={key} />}
+                actions={[
+                    changed ? <AlertActionButton key="reset" text="Reset to default" variant="destructive" onPress={() => setIcon(channel.id, null)} /> : null,
+                    <AlertActionButton key="cancel" text="Cancel" variant="secondary" />,
+                ].filter(Boolean)}
+            />,
+        )
         return true
     } catch {
         return false
