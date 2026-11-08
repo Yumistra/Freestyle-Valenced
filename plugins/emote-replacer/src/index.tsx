@@ -9,9 +9,8 @@ import { EmoteButton } from './picker'
 import { quickPlan, rewrite, stickerNeedsWork } from './send'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, settings } from './store'
-import { inputRefs, watchEmojiOption } from './emojiOption'
 import { status } from './status'
-import { StylesBar } from './stylesBar'
+import { EmojiBar, StylesBar } from './stylesBar'
 import { Suggestions } from './suggest'
 
 /**
@@ -34,12 +33,11 @@ function insertButton(tree: any) {
 
 /** 입력창 위 "답장 중" 줄 자리에 자동 완성 줄을 같이 그린다 */
 function withSuggestions(props: any, original: any) {
-    const id = props?.channel?.id
-    if (id && props?.chatInputRef) inputRefs.set(String(id), props.chatInputRef)
     status.contextBar = 'Drawn'
     return (
         <>
             <Suggestions channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
+            <EmojiBar channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             <StylesBar channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             {original}
         </>
@@ -51,7 +49,6 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
         loadEmotes()
-        cleanup(watchEmojiOption())
         cleanup(
             getModules(withProps('getBuiltInCommands') as any, (mod: any) => {
                 cleanup(

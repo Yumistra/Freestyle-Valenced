@@ -80,8 +80,6 @@ export default function SettingsPage() {
 
                 <TableRowGroup title="Status">
                     <TableRow label="Chat bar" subLabel={status.contextBar} />
-                    <TableRow label="Commands" subLabel={`${status.store}, ${status.option}`} />
-                    <TableRow label="Emoji panel" subLabel={status.panel} />
                 </TableRowGroup>
 
                 <TableRowGroup title="Without Nitro">

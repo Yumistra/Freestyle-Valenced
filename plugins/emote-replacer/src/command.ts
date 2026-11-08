@@ -56,7 +56,7 @@ export function makeCommand() {
         untranslatedDescription: 'Send an emote, with styles',
         displayDescription: 'Send an emote, with styles',
         // styles 칸을 고르면 입력창 위에 효과 목록이 뜨고, 누르면 칸에 적힌다 (stylesBar.tsx)
-        options: [option('emoji', 'Emoji, opens the emoji panel', true), option('styles', 'Styles, pick from the list above or type like spin rainbow', false)],
+        options: [option('emoji', 'Emoji, pick from the list above or type its name', true), option('styles', 'Styles, pick from the list above or type like spin rainbow', false)],
         execute(args: any[], ctx: any) {
             const get = (n: string) => (Array.isArray(args) ? args.find(a => a?.name === n)?.value : undefined)
             const name = String(get('emoji') ?? '').trim()
