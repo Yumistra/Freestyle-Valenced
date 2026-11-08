@@ -184,12 +184,14 @@ function token(names: string[], fallback: string) {
 const textColor = () => token(['TEXT_DEFAULT', 'TEXT_NORMAL'], '#dbdee1')
 const badgeColor = () => token(['BACKGROUND_SECONDARY_ALT', 'BACKGROUND_MOD_SUBTLE', 'BACKGROUND_TERTIARY'], '#232428')
 
+const NAME_MARK = '__bclName'
+
 /** 이 노드 안에 채널 이름 글이 있는지 */
 function hasName(node: any, name: string, depth = 0): boolean {
     if (!node || typeof node !== 'object' || depth > 10) return false
     if (Array.isArray(node)) return node.some(n => hasName(n, name, depth + 1))
     const c = node.props?.children
-    if (c === name) return true
+    if (c === name || node.props?.[NAME_MARK]) return true
     return c != null && typeof c === 'object' && hasName(c, name, depth + 1)
 }
 
@@ -210,14 +212,21 @@ export function redesignTree(out: any, channel: any, muted?: boolean): any {
     const walk = (node: any, depth: number): any => {
         if (!node || typeof node !== 'object' || depth > 14) return node
         if (Array.isArray(node)) {
-            let list = node
-            // 이름 칸을 찾고, 그 앞 칸(아이콘)을 바꾼다
+            // 안쪽부터 고친다 (가장 안쪽의 "아이콘, 이름 칸" 줄을 찾도록)
+            let changed = false
+            let list = node.map(n => {
+                const r = walk(n, depth + 1)
+                if (r !== n) changed = true
+                return r
+            })
+            // 이름 칸 바로 앞 칸(아이콘)을 바꾼다. 이름 칸이 맨 앞이면 이 줄이 아니다
             if (!iconDone) {
-                const i = node.findIndex(n => hasName(n, name))
-                if (i > 0 && node[i - 1] && typeof node[i - 1] === 'object' && !hasName(node[i - 1], name)) {
+                const i = list.findIndex(n => hasName(n, name))
+                if (i > 0 && list[i - 1] && typeof list[i - 1] === 'object' && !hasName(list[i - 1], name)) {
                     iconDone = true
+                    changed = true
                     status.icons++
-                    list = [...node]
+                    list = [...list]
                     list[i - 1] = <EmojiTile key="bcl-icon" channel={channel} muted={muted} />
                     if (voice) {
                         status.badges++
@@ -225,26 +234,20 @@ export function redesignTree(out: any, channel: any, muted?: boolean): any {
                     }
                 }
             }
-            let changed = list !== node
-            const mapped = list.map(n => {
-                const r = walk(n, depth + 1)
-                if (r !== n) changed = true
-                return r
-            })
-            return changed ? mapped : node
+            return changed ? list : node
         }
         const props = node.props
         if (!props) return node
-        if (!nameDone && props.children === name) {
+        const textName = props.children === name || (Array.isArray(props.children) && props.children.length === 1 && props.children[0] === name)
+        if (!nameDone && textName) {
             nameDone = true
-            if (!isLimited(channel) && !isNSFW(channel)) return node
+            const limited = isLimited(channel)
+            const nsfw = isNSFW(channel)
+            if (!limited && !nsfw) return node
             status.nameIcons++
-            return (
-                <View key={node.key ?? 'bcl-name'} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1, alignSelf: 'stretch' }}>
-                    {cloneElement(node, { style: [props.style, { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' }] })}
-                    <NameIcons channel={channel} />
-                </View>
-            )
+            // 이름 글 안에 작은 글자로 붙인다 (이름 칸을 나누면 이름 폭이 0 이 된다)
+            const color = mutedColor()
+            return cloneElement(node, { [NAME_MARK]: true }, name, limited ? <Text key="l" style={{ color, fontSize: 12 }}>{'  🔒︎'}</Text> : null, nsfw ? <Text key="n" style={{ color, fontSize: 12 }}>{'  ⚠︎'}</Text> : null)
         }
         const c = props.children
         if (c == null || typeof c !== 'object') return node

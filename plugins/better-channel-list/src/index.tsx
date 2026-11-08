@@ -569,8 +569,9 @@ function EmojiIcons() {
     const guild = guildId ? S().GuildStore?.getGuild?.(guildId) : undefined
     let list: any[] = []
     try {
-        const all = S().ChannelStore?.getMutableGuildChannelsForGuild?.(guildId) ?? {}
-        list = Object.values(all)
+        // 내가 볼 수 있는 채널만 (GuildChannelStore 의 SELECTABLE, VOCAL)
+        const gc = S().GuildChannelStore?.getChannels?.(guildId) ?? {}
+        list = [...(gc.SELECTABLE ?? []), ...(gc.VOCAL ?? [])].map((x: any) => x?.channel ?? x)
             .filter((c: any) => [0, 2, 5, 13, 15, 16].includes(c?.type))
             .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
     } catch {}
