@@ -189,7 +189,8 @@ function fillPreviews(args: any[]) {
     const text = settings().lastMessage ? previewText(rec) : undefined
     try {
         if (text) {
-            if (ch.subtitle !== text) Object.defineProperty(ch, 'subtitle', { value: text, writable: true, configurable: true, enumerable: true })
+            // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 글 한 줄을 그대로 보여 준다
+            if (ch.subtitle?.text !== text) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text }, writable: true, configurable: true, enumerable: true })
             touched.add(ch)
             status.withMessage++
         } else if (ours) {
