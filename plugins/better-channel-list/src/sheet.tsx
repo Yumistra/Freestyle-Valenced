@@ -147,17 +147,17 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
     )
 })
 
-/** 아래 바 (디스코드 이모지 창처럼 서버 목록). 누르면 그 서버 이모지만 보여 준다 */
+/** 아래 바 (디스코드 이모지 창처럼 서버 목록). 한 눈에 다 보이게 여러 줄로 놓고, 누르면 그 서버 이모지만 보여 준다 */
 const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; active: number; onJump: (i: number) => void }) {
     const { Text } = Design as any
     return (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }}>
             {tabs.map((t, i) => (
-                <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => onJump(i)} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
+                <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => onJump(i)} style={{ width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
                     {t.icon ? (
-                        <Image source={{ uri: t.icon }} style={{ width: 28, height: 28, borderRadius: 14 }} fadeDuration={0} />
+                        <Image source={{ uri: t.icon }} style={{ width: 26, height: 26, borderRadius: 13 }} fadeDuration={0} />
                     ) : t.emoji ? (
-                        <RNText allowFontScaling={false} style={{ fontSize: 22 }}>
+                        <RNText allowFontScaling={false} style={{ fontSize: 20 }}>
                             {t.emoji}
                         </RNText>
                     ) : (
@@ -165,7 +165,7 @@ const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; act
                     )}
                 </Pressable>
             ))}
-        </ScrollView>
+        </View>
     )
 })
 

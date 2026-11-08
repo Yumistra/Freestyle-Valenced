@@ -35,4 +35,16 @@ export function useSettings(): Settings {
     storage?.use?.()
     return settings()
 }
-export const update = (patch: Partial<Settings>) => storage?.set({ ...settings(), ...patch }, true)
+/**
+ * 저장. 저장 파일을 아직 안 읽었는데 통째로 덮어쓰면 바꾼 이모지 같은 것이 지워지므로,
+ * 읽은 뒤에만 통째로 쓰고, 아니면 먼저 읽고 나서 쓴다.
+ */
+export async function update(patch: Partial<Settings>) {
+    if (!storage) return
+    if (!storage.cache) {
+        try {
+            await storage.get?.()
+        } catch {}
+    }
+    return storage.set({ ...settings(), ...patch }, true)
+}

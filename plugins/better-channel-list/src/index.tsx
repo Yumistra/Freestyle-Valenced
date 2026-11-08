@@ -638,9 +638,8 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
-        // 1.0.10 에서 기본으로 켜졌던 진짜 그라데이션은 이름이 겹치거나 안 보여서 한 번 끈다
-        // 1.0.12 부터 줄을 나눠 그려서 다시 켠다 (한 번만)
-        if (!settings().splitReset) update({ realGradient: true, gradientReset: true, splitReset: true })
+        // 저장 파일을 확실히 읽고 나서 다시 그린다 (바꾼 이모지가 처음부터 보이게)
+        Promise.resolve(jsonStorage?.get?.()).then(() => redraw()).catch(() => {})
         const subs: Array<[string, (e: any) => void]> = [
             ['MESSAGE_PREVIEWS_LOADED', onPreviews],
             ['MESSAGE_CREATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
