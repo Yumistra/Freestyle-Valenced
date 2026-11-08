@@ -21,7 +21,7 @@ import { bind, DEFAULTS, settings, update, useSettings } from './store'
 const S = () => Stores as any
 
 /** 설정 화면 Status */
-const status = { names: 'Not found yet', split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
+const status = { variant: '', names: 'Not found yet', split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
 const find = (...props: string[]): any => {
     try {
         return (lookupModule(withProps(...props) as any) as any)?.[0]
@@ -263,12 +263,21 @@ interface Preview {
  */
 function SplitName({ name, colors, style, variant, userId, guildId, real }: { name: string; colors: string[]; style: any; variant?: string; userId?: string; guildId?: string; real?: boolean }) {
     const UWE = usernameWithEffects
-    if (real && UWE)
+    if (real && UWE) {
+        // 디스코드 이름 컴포넌트는 크기를 따로 정해서, 메시지 줄 글자 크기를 직접 넣고 줄 높이 밖으로 못 나가게 자른다
+        const v = variant ?? 'text-sm/medium'
+        const ts = find('TextStyleSheet')?.TextStyleSheet?.[v]
+        const fontSize = ts?.fontSize ?? 14
+        const lineHeight = ts?.lineHeight ?? 18
+        status.variant = `${v} ${fontSize}/${lineHeight}`
         return (
-            <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
-                <UWE userId={userId} guildId={guildId} userName={name} variant={variant ?? 'text-sm/medium'} lineClamp={1} ellipsizeMode="tail" effectDisplayType={1} />
-            </Boundary>
+            <View style={{ height: lineHeight, maxHeight: lineHeight, overflow: 'hidden', justifyContent: 'center', flexShrink: 0 }}>
+                <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
+                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize, lineHeight }} lineClamp={1} ellipsizeMode="tail" effectDisplayType={1} />
+                </Boundary>
+            </View>
         )
+    }
     const { Text: DText } = Design as any
     const M = find('MaskedView')?.MaskedView
     const G = find('LinearGradient', 'LinearGradientNativeComponent')?.LinearGradient
@@ -507,7 +516,7 @@ function SettingsPage() {
                 </TableRowGroup>
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
-                    <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}`} />
+                    <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}${status.variant ? `, ${status.variant}` : ''}`} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
