@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.lag-finder",
+	"name": "Lag Finder",
+	"description": "Finds which plugin makes Discord lag, by turning plugins off half at a time.",
+	"author": "Yumistra",
+	"icon": "MagnifyingGlassIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
