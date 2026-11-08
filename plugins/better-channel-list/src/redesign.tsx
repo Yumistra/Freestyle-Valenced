@@ -391,19 +391,6 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
                     </View>
                 )
             }
-            // 음성 채널에 들어온 사람 목록(children)은 이름 칸 안에 있어서, 오른쪽 칸이 넓어지면 좁게 눌린다.
-            // 줄 아래로 빼서 가로를 다 쓰게 한다 (이름이 시작하는 자리에 맞춘다)
-            const kids = props.children
-            const hasKids = Array.isArray(kids) ? kids.some(k => k != null && k !== false) : kids != null && kids !== false
-            if (voice && hasKids) {
-                const sz = SIZES[s.iconSize] ?? SIZES.medium
-                return (
-                    <View key={node.key ?? 'bcl-voice'}>
-                        {cloneElement(node, { ...patch, children: null })}
-                        <View style={{ paddingLeft: 8 + sz.box + 10, paddingRight: 8 }}>{kids}</View>
-                    </View>
-                )
-            }
             return cloneElement(node, patch)
         }
         const textName = props.children === name || (Array.isArray(props.children) && props.children.length === 1 && props.children[0] === name)
