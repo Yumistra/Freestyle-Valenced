@@ -126,20 +126,46 @@ function patchReanimated(cleanup: (...f: Array<() => void>) => void) {
     )
 }
 
-export function patchNoAnimations(cleanup: (...f: Array<() => void>) => void) {
+/** 켜져 있을 때만 건다. 꺼 두면 디스코드를 전혀 건드리지 않는다 (꺼도 화면 이동이 깨지는 일이 없게) */
+function install(): () => void {
+    const undo: Array<() => void> = []
+    const add = (...f: Array<() => void>) => undo.push(...f.filter(x => typeof x === 'function'))
     for (const [name, fn] of [
         ['animated', patchAnimated],
         ['store', patchReducedMotion],
     ] as const) {
         try {
-            cleanup(fn())
+            add(fn())
         } catch (e) {
             report(`noAnimations.${name}`, e)
         }
     }
     try {
-        patchReanimated(cleanup)
+        patchReanimated(add)
     } catch (e) {
         report('noAnimations.reanimated', e)
     }
+    return () => {
+        for (const f of undo.reverse())
+            try {
+                f()
+            } catch {}
+    }
+}
+
+export function patchNoAnimations(cleanup: (...f: Array<() => void>) => void) {
+    let uninstall: (() => void) | undefined
+    const sync = () => {
+        const want = !!settings().noAnimations
+        if (want && !uninstall) uninstall = install()
+        else if (!want && uninstall) {
+            uninstall()
+            uninstall = undefined
+        }
+    }
+    sync()
+    cleanup(onSettingsChange(sync) as any, () => {
+        uninstall?.()
+        uninstall = undefined
+    })
 }

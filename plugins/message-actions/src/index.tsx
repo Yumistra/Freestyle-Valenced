@@ -300,6 +300,22 @@ function buttonRadius() {
 const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
 
 /** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
+/** 버튼을 못 띄워 창으로 보여 줄 때, 이유를 한 번만 알려 준다 */
+const told = new Set<string>()
+function whyNoButtons(reason: string) {
+    if (told.has(reason)) return
+    told.add(reason)
+    const text =
+        reason === 'native'
+            ? 'Message Actions: buttons need the Android part of the plugin, which is not loaded. Showing a dialog instead'
+            : reason === 'nochat'
+              ? 'Message Actions: this Discord version is not supported for buttons yet. Showing a dialog instead'
+              : 'Message Actions: could not find the message on screen. Showing a dialog instead'
+    try {
+        ToastActionCreators.open(`message-actions-why-${seq++}`, { text })
+    } catch {}
+}
+
 async function showButtons(message: any): Promise<string | null> {
     const buttons: any[] = []
     if (isMine(message) && editableOf(message)) buttons.push({ id: 'edit', label: 'Edit', icon: ICON('pencilicon'), colors: variantColors('secondary') })
@@ -313,9 +329,13 @@ async function showButtons(message: any): Promise<string | null> {
     const opts = { buttons, font: buttonFont(), radius: buttonRadius(), inset: 68 }
     try {
         const r = await Promise.resolve((callNativeMethod as any)(`${NATIVE_ID}.showActions`, [JSON.stringify(opts)]))
-        if (r === 'norow' || typeof r !== 'string') return null
+        if (r === 'norow' || r === 'notouch' || r === 'nochat' || typeof r !== 'string') {
+            whyNoButtons(typeof r === 'string' ? r : 'native')
+            return null
+        }
         return r
     } catch {
+        whyNoButtons('native')
         return null
     }
 }

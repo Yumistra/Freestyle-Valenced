@@ -741,7 +741,7 @@ val messageActionsPlugin = plugin {
         val chatListView = findChatListClass(cl)
         if (recycler == null || chatListView == null) {
             log.w("Chat list not found (recycler=${recycler != null}, chat=${chatListView != null}); inline buttons disabled")
-            registerNativeAsyncMethod("${manifest.id}.showActions") { "norow" }
+            registerNativeAsyncMethod("${manifest.id}.showActions") { "nochat" }
             registerNativeMethod("${manifest.id}.setSwipeButtons") { true }
             registerNativeMethod("${manifest.id}.ping") { "pong" }
             return@start
@@ -938,7 +938,7 @@ val messageActionsPlugin = plugin {
                 JSONObject()
             }
             withContext(Dispatchers.Main) {
-                val t = touched ?: return@withContext "norow"
+                val t = touched ?: return@withContext "notouch"
                 val list = t.list.get()
                 val row = t.row.get()
                 if (list == null || row == null || !row.isAttachedToWindow || row.parent !== list ||
