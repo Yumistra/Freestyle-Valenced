@@ -205,6 +205,17 @@ function filterStickerCategories(cats: any[], guild: string | undefined): any[] 
     return res
 }
 
+/** 이모지 고르기의 쓰임 (EmojiIntention): 0 이 반응, 3 이 채팅 */
+const REACTION = 0
+let storage: any
+const reactionsOnly = () => !!storage?.cache?.reactionsOnly
+/** "반응에서만" 이면 반응이 아닌 곳(채팅 등)의 고르기는 그대로 둔다 */
+function skip(args: any[]) {
+    if (!reactionsOnly()) return false
+    const intention = args.find(a => typeof a === 'number')
+    return intention !== REACTION
+}
+
 function patchModule(mod: any, cleanup: (...f: any[]) => void, patched: WeakSet<object>) {
     if (!mod || typeof mod !== 'object' || patched.has(mod)) return
     patched.add(mod)
@@ -228,54 +239,32 @@ function patchModule(mod: any, cleanup: (...f: any[]) => void, patched: WeakSet<
             err(`patch ${name}`, e)
         }
     }
-    hook('useEmojiCategories', (res, args) => filterCategories(res, guildOf(args[1], args[2])))
-    hook('useEmojiSearchResults', (res, args) => filterSearch(res, guildOf(args[1], undefined)))
-    hook('useStickerCategories', (res, args) => filterStickerCategories(res, guildOf(args[0], undefined)))
+    hook('useEmojiCategories', (res, args) => (skip(args) ? res : filterCategories(res, guildOf(args[1], args[2]))))
+    hook('useEmojiSearchResults', (res, args) => (skip(args) ? res : filterSearch(res, guildOf(args[1], undefined))))
+    // 스티커는 반응에 못 쓰니 "반응에서만" 이면 건드리지 않는다
+    hook('useStickerCategories', (res, args) => (reactionsOnly() ? res : filterStickerCategories(res, guildOf(args[0], undefined))))
     hook('searchAllStickers', res => {
-        if (!Array.isArray(res)) return res
+        if (!Array.isArray(res) || reactionsOnly()) return res
         const nitro = hasNitro()
         const guild = selectedGuild()
         return res.filter((st: any) => !stickerLocked(st, nitro, guild))
     })
 }
 
-function SettingsPage() {
-    const { Stack, TableRowGroup, TableRow } = Design as any
-    const [, tick] = useState(0)
-    useEffect(() => {
-        const t = setInterval(() => tick(n => n + 1), 1000)
-        return () => clearInterval(t)
-    }, [])
-    const nitro = hasNitro()
+function SettingsPage({ api }: { api: any }) {
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow } = Design as any
+    storage ??= api?.jsonStorage
+    storage?.use?.()
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
-                <TableRowGroup title="Status">
-                    <TableRow
-                        icon={<TableRowAssetIcon name="InfoIcon" />}
-                        label="Hooks"
-                        subLabel={status.patched.length ? `Hooked, ${status.patched.join(', ')}` : status.found ? 'Found, but not hooked' : 'Not found yet'}
-                    />
-                    <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Nitro" subLabel={nitro ? 'Yes, nothing is hidden' : 'No'} />
-                    <TableRow
+                <TableRowGroup title="Where">
+                    <TableSwitchRow
                         icon={<TableRowAssetIcon name="ReactionIcon" />}
-                        label="Emoji picker"
-                        subLabel={
-                            status.calls
-                                ? `Opened, last time hid ${status.lastSections} servers and ${status.lastEmojis} emojis${status.lastGuild ? '' : ', outside a server'}`
-                                : 'Not opened since Discord started'
-                        }
+                        label="Only in reactions"
+                        value={reactionsOnly()}
+                        onValueChange={(v: boolean) => storage?.set({ ...(storage.cache ?? {}), reactionsOnly: v }, true)}
                     />
-                    <TableRow
-                        icon={<TableRowAssetIcon name="StickerIcon" />}
-                        label="Sticker picker"
-                        subLabel={
-                            status.stickerCalls
-                                ? `Opened, last time hid ${status.lastPacks} packs and ${status.lastStickers} stickers`
-                                : 'Not opened since Discord started'
-                        }
-                    />
-                    {status.errors.length ? <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Errors" subLabel={status.errors.slice(-3).join('\n')} /> : null}
                 </TableRowGroup>
             </Stack>
         </ScrollView>
@@ -283,7 +272,9 @@ function SettingsPage() {
 }
 
 export default plugin({
-    start({ cleanup }: any) {
+    jsonStorage: { load: true, default: { reactionsOnly: false } },
+    start({ cleanup, jsonStorage }: any) {
+        storage = jsonStorage
         const patched = new WeakSet<object>()
         for (const prop of ['useEmojiCategories', 'useStickerCategories', 'searchAllStickers']) {
             try {
