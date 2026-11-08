@@ -586,7 +586,7 @@ function SettingsPage() {
                     <TableSwitchRow label="Name style" subLabel="Draws names with Discord's own name style, font, colors and effects" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
-                <TableRowGroup title="Redesign">
+                <TableRowGroup title="Emoji">
                     <TableSwitchRow label="Emoji icons" subLabel="Shows each channel's emoji in a colored square instead of the channel icon" value={s.redesign} onValueChange={(redesign: boolean) => update({ redesign })} />
                     <TableSwitchRow label="Guess emojis" subLabel="Channels without a Discord emoji get one from their name, like 💬 for general or 🤖 for bots" value={s.autoEmoji} disabled={!s.redesign} onValueChange={(autoEmoji: boolean) => (update({ autoEmoji }), redraw())} />
                 </TableRowGroup>

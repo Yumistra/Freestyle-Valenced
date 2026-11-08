@@ -1,3 +1,4 @@
+import { ActionSheetActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
@@ -66,10 +67,18 @@ function setIcon(channelId: string, value: string | null) {
 /** 창 닫기 (onClose 가 없을 때) */
 function hideSheet() {
     try {
-        const m: any = (lookupModuleWithImportedPath('modules/action_sheet/native/ActionSheetActionCreators.tsx' as any) as any)?.[0]
-        ;(m?.hideActionSheet ?? m?.default?.hideActionSheet)?.()
+        ;(ActionSheetActionCreators as any).hideActionSheet()
     } catch {}
 }
+
+const nameOf = (t: any): string => t?.name || t?.displayName || t?.type?.name || t?.type?.displayName || t?.render?.name || ''
+/** 줄 묶음(ActionSheetRow.Group) 인지 */
+function isGroup(n: any) {
+    if (!n || typeof n !== 'object' || Array.isArray(n)) return false
+    const G = (Design as any).ActionSheetRow?.Group
+    return (G && n.type === G) || /ActionSheetRowGroup$/.test(nameOf(n.type))
+}
+const flat = (c: any): any[] => (Array.isArray(c) ? c.flatMap(flat) : [c])
 
 /** 창 안의 ActionSheet(showGradient 를 받는 것) 맨 앞에 우리 줄 묶음을 넣는다 */
 function addRows(node: any, channel: any, close: () => void, depth = 0): any {
@@ -85,7 +94,7 @@ function addRows(node: any, channel: any, close: () => void, depth = 0): any {
     }
     const props = node.props
     if (!props) return node
-    if (props.showGradient !== undefined && 'header' in props) {
+    if ((props.showGradient !== undefined && 'header' in props) || flat(props.children).some(isGroup)) {
         const { ActionSheetRow } = Design as any
         if (!ActionSheetRow?.Group) return node
         const Reaction: any = lookupGeneratedIconComponent('ReactionIcon' as any) ?? lookupGeneratedIconComponent('EmojiSmileIcon' as any)
@@ -118,6 +127,7 @@ function addRows(node: any, channel: any, close: () => void, depth = 0): any {
             </ActionSheetRow.Group>
         )
         const kids = Array.isArray(props.children) ? props.children : [props.children]
+        if (kids.some((k: any) => k?.key === 'bcl-emoji')) return node
         return { ...node, props: { ...props, children: [group, ...kids] } }
     }
     if (props.children == null || typeof props.children !== 'object') return node
@@ -150,31 +160,54 @@ function wrapInner(type: any, channel: any, close: () => void) {
 export function patchSheet(cleanup: (...f: any[]) => void, redraw: () => void) {
     redrawList = redraw
     bindOne(cleanup, EMOJI, m => (emojiFn = firstFn(m, 'openEmojiPickerActionSheet') ?? emojiFn))
-    bindOne(cleanup, SHEET, (mod: any) => {
-        if (typeof mod?.default !== 'function') return
+    const patched = new WeakSet<any>()
+    const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
+        const out = orig.apply(self, args)
+        const p = args[0]
+        const channel = p?.channel
+        if (!channel || !settings().redesign) return out
+        const close = () => {
+            try {
+                if (typeof p?.onClose === 'function') p.onClose()
+                else hideSheet()
+            } catch {}
+        }
+        try {
+            const direct = addRows(out, channel, close)
+            if (direct !== out) return direct
+            // 바깥 컴포넌트가 안쪽 컴포넌트 하나만 돌려주면 그 안쪽을 감싼다
+            if (out?.type && typeof out.type !== 'string') {
+                const w = wrapInner(out.type, channel, close)
+                if (w) return { ...out, type: w }
+            }
+        } catch {}
+        return out
+    }
+    /** 창 모듈의 default 를 고친다. 고칠 수 없는 모듈이면 고친 사본을 돌려준다 */
+    const patchMod = (mod: any) => {
+        if (!mod || typeof mod.default !== 'function' || patched.has(mod)) return mod
+        try {
+            cleanup(instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                return render(args, orig, this)
+            }))
+            patched.add(mod)
+            return mod
+        } catch {
+            const Original = mod.default
+            return { ...mod, default: (props: any) => render([props], Original, undefined) }
+        }
+    }
+    // 디스코드는 창을 ActionSheetActionCreators.openLazy(모듈 Promise, 이름, props) 로 연다
+    try {
         cleanup(
-            instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                const out = orig.apply(this, args)
-                const p = args[0]
-                const channel = p?.channel
-                if (!channel || !settings().redesign) return out
-                const close = () => {
-                    try {
-                        if (typeof p?.onClose === 'function') p.onClose()
-                        else hideSheet()
-                    } catch {}
-                }
+            instead(ActionSheetActionCreators as any, 'openLazy', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                 try {
-                    // 바깥 컴포넌트는 안쪽 컴포넌트 하나를 돌려준다. 그 안쪽을 감싼다
-                    if (out?.type && typeof out.type !== 'string') {
-                        const w = wrapInner(out.type, channel, close)
-                        if (w) return { ...out, type: w }
-                    }
-                    return addRows(out, channel, close)
-                } catch {
-                    return out
-                }
+                    const [sheet, key] = args
+                    if (typeof key === 'string' && /ChannelLongPress/i.test(key) && typeof sheet?.then === 'function') args[0] = sheet.then((m: any) => patchMod(m))
+                } catch {}
+                return orig.apply(this, args)
             }),
         )
-    })
+    } catch {}
+    bindOne(cleanup, SHEET, (mod: any) => void patchMod(mod))
 }
