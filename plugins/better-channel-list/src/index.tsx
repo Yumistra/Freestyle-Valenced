@@ -1,3 +1,4 @@
+import { Tokens } from '@valenced/discord/common/tokens'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
@@ -243,7 +244,7 @@ function nameStyle(userId: string, guildId: string | undefined, fallback: any): 
         const list = (Array.isArray(styles?.colors) ? styles.colors : []).map(hexOf).filter(Boolean) as string[]
         if (list.length) out.color = list[0]
         if (list.length > 1) out.colors = list
-        if (styles && (list.length || styles.effectId != null || styles.effect_id != null || styles.fontId != null || styles.font_id != null)) out.styled = true
+        if (list.length || out.fontFamily) out.styled = true
     } catch {}
     return out
 }
@@ -253,7 +254,7 @@ interface Preview {
     key: string
     node: any
     /** 이름과 나머지 글을 따로 그릴 때 쓰는 값 (진짜 그라데이션) */
-    split?: { name: string; colors: string[]; style: any; rest: string; userId?: string; guildId?: string; real?: boolean }
+    split?: { name: string; colors: string[]; style: any; rest: string; userId?: string; guildId?: string; real?: boolean; color?: string }
 }
 
 /**
@@ -261,21 +262,63 @@ interface Preview {
  * 왼쪽은 그라데이션 이름(View), 오른쪽은 디스코드가 그리는 원래 글 줄(": 메시지").
  * 글자 크기는 디스코드 글 줄의 variant 를 그대로 쓴다.
  */
-function SplitName({ name, colors, style, variant, userId, guildId, real }: { name: string; colors: string[]; style: any; variant?: string; userId?: string; guildId?: string; real?: boolean }) {
+function textColor() {
+    try {
+        const t: any = (Tokens as any).default
+        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
+        for (const n of ['TEXT_DEFAULT', 'TEXT_NORMAL', 'HEADER_PRIMARY']) {
+            const key = t?.colors?.[n]
+            if (!key) continue
+            const c = t.internal.resolveSemanticColor(theme, key)
+            if (typeof c === 'string' && c) return c
+        }
+    } catch {}
+    return undefined
+}
+
+/**
+ * 디스코드 이름 컴포넌트는 채팅 크기로 그려서, 그린 크기를 재고 메시지 한 줄 높이에 맞게 줄인다.
+ * 재기 전에는 안 보이게 둔다.
+ */
+function FitName({ lineHeight, children }: { lineHeight: number; children: any }) {
+    const [m, setM] = useState<{ w: number; h: number } | null>(null)
+    const k = m && m.h > 0 ? Math.min(1, lineHeight / m.h) : 1
+    const w = m ? m.w * k : 0
+    return (
+        <View style={{ width: w, height: lineHeight, overflow: 'hidden', flexShrink: 0 }}>
+            <View
+                onLayout={(e: any) => {
+                    const { width, height } = e.nativeEvent.layout
+                    if (!m || Math.abs(m.w - width) > 0.5 || Math.abs(m.h - height) > 0.5) setM({ w: width, h: height })
+                }}
+                style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    opacity: m ? 1 : 0,
+                    // 가운데 기준으로 줄어드니 왼쪽 위로 다시 옮긴다
+                    transform: m ? [{ translateX: -(m.w * (1 - k)) / 2 }, { translateY: -(m.h * (1 - k)) / 2 + (lineHeight - m.h * k) / 2 }, { scale: k }] : [],
+                }}
+            >
+                {children}
+            </View>
+        </View>
+    )
+}
+
+function SplitName({ name, colors, style, variant, userId, guildId, real, color }: { name: string; colors: string[]; style: any; variant?: string; userId?: string; guildId?: string; real?: boolean; color?: string }) {
     const UWE = usernameWithEffects
     if (real && UWE) {
-        // 디스코드 이름 컴포넌트는 크기를 따로 정해서, 메시지 줄 글자 크기를 직접 넣고 줄 높이 밖으로 못 나가게 자른다
         const v = variant ?? 'text-sm/medium'
         const ts = find('TextStyleSheet')?.TextStyleSheet?.[v]
-        const fontSize = ts?.fontSize ?? 14
         const lineHeight = ts?.lineHeight ?? 18
-        status.variant = `${v} ${fontSize}/${lineHeight}`
+        status.variant = `${v} ${ts?.fontSize ?? '?'}/${lineHeight}`
         return (
-            <View style={{ height: lineHeight, maxHeight: lineHeight, overflow: 'hidden', justifyContent: 'center', flexShrink: 0 }}>
-                <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
-                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} style={{ fontSize, lineHeight }} lineClamp={1} ellipsizeMode="tail" effectDisplayType={1} />
-                </Boundary>
-            </View>
+            <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
+                <FitName lineHeight={lineHeight}>
+                    <UWE userId={userId} guildId={guildId} userName={name} variant={v} defaultColor={color ?? textColor()} lineClamp={1} effectDisplayType={1} />
+                </FitName>
+            </Boundary>
         )
     }
     const { Text: DText } = Design as any
@@ -329,7 +372,7 @@ function splitTree(node: any, sub: any, depth = 0): any {
         status.split = 'Working'
         return (
             <View key={node.key ?? undefined} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
-                <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} userId={sp.userId} guildId={sp.guildId} real={sp.real} />
+                <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} userId={sp.userId} guildId={sp.guildId} real={sp.real} color={sp.color} />
                 {/^\s/.test(sp.rest) ? <Text> </Text> : null}
                 {cloneElement(node, { style: [props.style, { flexShrink: 1 }] }, rest)}
             </View>
@@ -410,7 +453,7 @@ function preview(channel: any): Preview | undefined {
         // 표시 이름 스타일이 있으면 디스코드가 DM 목록에서 쓰는 이름 컴포넌트(UsernameWithEffects)로 똑같이 그린다
         split:
             styled.styled && usernameWithEffects
-                ? { name, colors: colors ?? [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true }
+                ? { name, colors: colors ?? [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: s.roleColor ? colorOf(authorId, channel.guild_id) : undefined }
                 : colors && colors.length > 1
                   ? { name, colors, style: styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }, rest }
                   : undefined,
