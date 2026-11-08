@@ -5,21 +5,19 @@ import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleW
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useMemo, useState } from 'react'
-import { Image, Pressable, ScrollView, Text as RNText, View } from 'react-native'
+import { FlatList, Image, Pressable, Text as RNText, View } from 'react-native'
 import { EMOJI_COLORS } from './colors'
 import { EmojiTile } from './redesign'
 import { settings, update } from './store'
 
 /**
  * 채널을 꾹 누르면 나오는 창(ChannelLongPressActionSheet) 맨 위에 "Emoji" 줄을 넣는다.
- * 누르면 디스코드 이모지 고르기 창이 열리고, 고른 이모지가 그 채널의 아이콘이 된다 (나만 보인다).
+ * 누르면 이모지 고르기 창(플러그인 창)이 열리고, 고른 이모지가 그 채널의 아이콘이 된다 (나만 보인다).
  * 바꾼 채널이면 "Reset emoji" 줄도 넣는다.
  */
 
 const SHEET = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
-const EMOJI = 'modules/emoji_picker/native/openEmojiPickerActionSheet.tsx'
 
-let emojiFn: ((props: any) => void) | undefined
 const firstFn = (m: any, name: string) => (typeof m?.[name] === 'function' ? m[name] : typeof m?.default === 'function' ? m.default : undefined)
 
 function bindOne(cleanup: (...f: any[]) => void, path: string, set: (m: any) => void) {
@@ -38,40 +36,6 @@ function emojiValue(e: any): string | undefined {
     return e.surrogates ?? e.optionallyDiverseSequence ?? undefined
 }
 
-const EXPRESSION = 'modules/expression_picker/native/openExpressionPickerActionSheet.tsx'
-let expressionFn: ((props: any) => void) | undefined
-
-/** 경로로 모듈을 찾고, 아직 안 불렸으면 불러 본다 */
-function load(path: string, name: string) {
-    try {
-        const [ex, id] = lookupModuleWithImportedPath(path) as any
-        let m = ex
-        if (!m && id !== undefined) m = (globalThis as any).__r?.(id)
-        return firstFn(m, name)
-    } catch {}
-}
-
-function openPicker(channel: any, onPick: (v: string) => void): boolean {
-    emojiFn ??= load(EMOJI, 'openEmojiPickerActionSheet')
-    expressionFn ??= load(EXPRESSION, 'openExpressionPickerActionSheet')
-    const onPressEmoji = (e: any) => {
-        const v = emojiValue(e)
-        if (v) onPick(v)
-    }
-    if (emojiFn)
-        try {
-            emojiFn({ channel, onPressEmoji })
-            return true
-        } catch {}
-    // 채팅 입력창의 이모지, GIF, 스티커 창 (이모지 탭만 쓴다)
-    if (expressionFn)
-        try {
-            expressionFn({ channelId: channel.id, onPressEmoji, onPressGIF: () => {}, onPressSticker: () => {}, onDismiss: () => {} })
-            return true
-        } catch {}
-    return false
-}
-
 let seq = 0
 function toast(text: string) {
     try {
@@ -81,66 +45,81 @@ function toast(text: string) {
 
 const UNICODE = Object.keys(EMOJI_COLORS)
 
+/** 이모지 고르기 창의 한 칸 */
+type Cell = { key: string; value: string; id?: string; text?: string }
+
+const SHEET_KEY = 'bcl-emoji-sheet'
+
 /**
- * 디스코드 이모지 창을 못 열 때 쓰는 창.
- * 위에 글칸(폰 이모지 자판으로 넣거나 붙여 넣기), 아래에 내 서버 이모지와 기본 이모지 목록.
+ * 이모지 고르기 창 (아래에서 올라오는 창, 뒤는 어둡게 깔린다).
+ * 위에 글칸(폰 이모지 자판으로 넣거나 붙여 넣기, 영어로 서버 이모지 찾기), 아래에 내 서버 이모지와 기본 이모지.
  */
-function Picker({ onPick }: { onPick: (v: string) => void }) {
-    const { TextInput, Button, Text } = Design as any
+function EmojiSheet({ channel }: { channel: any }) {
+    const { ActionSheet, TextInput, Button, Text } = Design as any
     const [text, setText] = useState('')
     const servers = useMemo(() => {
-        const out: any[] = []
+        const out: Cell[] = []
         try {
             const S: any = Stores
             const guilds = Object.keys(S.GuildStore?.getGuilds?.() ?? {})
-            for (const g of guilds) for (const e of S.EmojiStore?.getGuildEmoji?.(g) ?? []) if (e?.id && e.available !== false) out.push(e)
+            // 이 채널 서버의 이모지를 먼저
+            guilds.sort((a, b) => (a === channel?.guild_id ? -1 : b === channel?.guild_id ? 1 : 0))
+            for (const g of guilds)
+                for (const e of S.EmojiStore?.getGuildEmoji?.(g) ?? [])
+                    if (e?.id && e.available !== false) out.push({ key: e.id, id: e.id, text: String(e.name), value: `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>` })
         } catch {}
         return out
     }, [])
+    const unicode = useMemo<Cell[]>(() => Object.keys(EMOJI_COLORS).map(u => ({ key: u, value: u })), [])
     const q = text.trim().toLowerCase()
-    const isEmoji = !!q && !/^[a-z0-9_]+$/i.test(q)
-    const custom = (q && !isEmoji ? servers.filter(e => String(e.name).toLowerCase().includes(q)) : servers).slice(0, 120)
-    const cell = { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8 } as const
-    return (
-        <View style={{ alignSelf: 'stretch', gap: 8 }}>
-            <TextInput value={text} placeholder="Type an emoji or search server emojis" onChange={setText} isClearable />
-            {isEmoji ? <Button text={`Use ${text.trim()}`} variant="primary" size="md" onPress={() => onPick(text.trim())} /> : null}
-            <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 4 }}>
-                {custom.map(e => (
-                    <Pressable key={e.id} accessibilityLabel={e.name} onPress={() => onPick(`<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`)} style={({ pressed }: any) => ({ ...cell, opacity: pressed ? 0.5 : 1 })}>
-                        <Image source={{ uri: `https://cdn.discordapp.com/emojis/${e.id}.png?size=48` }} style={{ width: 32, height: 32 }} resizeMode="contain" />
-                    </Pressable>
-                ))}
-                {!q
-                    ? UNICODE.map(u => (
-                          <Pressable key={u} accessibilityLabel={u} onPress={() => onPick(u)} style={({ pressed }: any) => ({ ...cell, opacity: pressed ? 0.5 : 1 })}>
-                              <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
-                                  {u}
-                              </RNText>
-                          </Pressable>
-                      ))
-                    : null}
-                {q && !isEmoji && !custom.length ? (
-                    <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16 }}>
-                        No server emojis found
-                    </Text>
-                ) : null}
-            </ScrollView>
-        </View>
-    )
-}
-
-function openOwnPicker(channel: any) {
-    const { AlertModal, AlertActionButton } = Design as any
-    const key = `bcl-emoji-${seq++}`
-    const done = (v: string) => {
+    const typed = !!q && !/^[a-z0-9_ ]+$/i.test(q)
+    const cells = q && !typed ? servers.filter(c => c.text!.toLowerCase().includes(q)) : [...servers, ...unicode]
+    const pick = (v: string) => {
         setIcon(channel.id, v)
         try {
-            ;(AlertActionCreators as any).dismissAlert(key)
+            ;(ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY)
         } catch {}
     }
+    const body = (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 16, gap: 10 }}>
+            <Text variant="heading-lg/bold">{`Emoji for #${channel?.name ?? ''}`}</Text>
+            <TextInput value={text} placeholder="Type an emoji, or search server emojis" onChange={setText} isClearable />
+            {typed ? <Button text={`Use ${text.trim()}`} variant="primary" size="md" onPress={() => pick(text.trim())} /> : null}
+            {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
+            <FlatList
+                data={cells}
+                numColumns={7}
+                keyExtractor={(c: Cell) => c.key}
+                style={{ height: 360 }}
+                keyboardShouldPersistTaps="handled"
+                initialNumToRender={70}
+                windowSize={5}
+                nestedScrollEnabled
+                ListEmptyComponent={
+                    <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
+                        No server emojis found
+                    </Text>
+                }
+                renderItem={({ item }: { item: Cell }) => (
+                    <Pressable accessibilityLabel={item.text ?? item.value} onPress={() => pick(item.value)} style={({ pressed }: any) => ({ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 8, opacity: pressed ? 0.5 : 1 })}>
+                        {item.id ? (
+                            <Image source={{ uri: `https://cdn.discordapp.com/emojis/${item.id}.png?size=48` }} style={{ width: 30, height: 30 }} resizeMode="contain" />
+                        ) : (
+                            <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
+                                {item.value}
+                            </RNText>
+                        )}
+                    </Pressable>
+                )}
+            />
+        </View>
+    )
+    return ActionSheet ? <ActionSheet>{body}</ActionSheet> : body
+}
+
+function openSheet(channel: any) {
     try {
-        ;(AlertActionCreators as any).openAlert(key, <AlertModal title={`Emoji for #${channel.name}`} extraContent={<Picker onPick={done} />} actions={<AlertActionButton text="Cancel" variant="secondary" />} />)
+        ;(ActionSheetActionCreators as any).openLazy(Promise.resolve({ default: EmojiSheet }), SHEET_KEY, { channel })
         return true
     } catch {
         return false
@@ -200,7 +179,7 @@ function addRows(node: any, channel: any, close: () => void, depth = 0): any {
             } catch {}
             // 창이 닫힌 뒤에 이모지 창을 연다
             setTimeout(() => {
-                if (!openPicker(channel, v => setIcon(channel.id, v)) && !openOwnPicker(channel)) toast('Could not open the emoji picker')
+                if (!openSheet(channel)) toast('Could not open the emoji picker')
             }, 350)
         }
         const group = (
@@ -257,8 +236,6 @@ function wrapInner(type: any, channel: any, close: () => void) {
 
 export function patchSheet(cleanup: (...f: any[]) => void, redraw: () => void) {
     redrawList = redraw
-    bindOne(cleanup, EMOJI, m => (emojiFn = firstFn(m, 'openEmojiPickerActionSheet') ?? emojiFn))
-    bindOne(cleanup, EXPRESSION, m => (expressionFn = firstFn(m, 'openExpressionPickerActionSheet') ?? expressionFn))
     const patched = new WeakSet<any>()
     const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
         const out = orig.apply(self, args)
