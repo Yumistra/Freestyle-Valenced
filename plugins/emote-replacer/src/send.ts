@@ -27,8 +27,27 @@ const COMMAND_PREFIX = ';'
 const forced = new Set<string>()
 
 /** 이모트 하나를 효과와 함께 보낸다 (/replacer, 이모트 버튼) */
+/** 유니코드 이모지 (😀) 를 그림으로: Twemoji 그림을 쓴다 */
+const transient: Record<string, string> = {}
+function unicodeName(text: string): string | undefined {
+    const t = text.trim()
+    if (!t || /[\w\s<>:;]/.test(t)) return
+    const cps = [...t].map(c => c.codePointAt(0)!.toString(16))
+    // 변형 선택자(fe0f)는 ZWJ 가 없을 때 Twemoji 파일 이름에서 빠진다
+    const hex = (t.includes('\u200d') ? cps : cps.filter(c => c !== 'fe0f')).join('-')
+    const key = `u_${hex.replace(/-/g, '_')}`
+    transient[key] = `https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/${hex}.png`
+    return key
+}
+
 export function sendEmote(channelId: string, name: string, mods: string[]): boolean {
-    const clean = name.replace(/^<a?:(\w+):\d+>$/, '$1').replace(/^[;:]+|:+$/g, '').trim()
+    const actions0 = find('sendMessage', 'receiveMessage')
+    // 효과 없는 유니코드 이모지는 그냥 글로
+    if (!mods.length && unicodeName(name) && typeof actions0?.sendMessage === 'function') {
+        actions0.sendMessage(channelId, { content: name.trim(), tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, {})
+        return true
+    }
+    const clean = unicodeName(name) ?? name.replace(/^<a?:(\w+):\d+>$/, '$1').replace(/^[;:]+|:+$/g, '').trim()
     if (!/^[\w~]{2,}$/.test(clean)) return false
     const content = `${COMMAND_PREFIX}${clean}${mods.map(m => `.${m}`).join('')}`
     const p = plan(content, channelId, true)
@@ -154,6 +173,7 @@ function plan(content: string, channelId: string, force = false): Plan {
     }
     // 순서: 내 이모트, 같은 이름의 디스코드 이모지 (대소문자까지 같은 것 먼저)
     const resolve = (name: string, mods: Array<[string, string]>): string | undefined => {
+        if (force && transient[name]) return urlJob('emoji', transient[name], mods)
         if (s.customEmotes[name]) return urlJob(name, s.customEmotes[name], mods)
         const found = discordFind(name)
         if (found?.length && found[0].name === name) return emojiJob(found, mods)

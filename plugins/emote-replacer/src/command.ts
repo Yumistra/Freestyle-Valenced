@@ -65,6 +65,8 @@ function option(name: string, description: string, required = false, choices?: s
     }
 }
 
+export const COMMAND_ID = '-73932'
+
 let command: any
 export function makeCommand() {
     if (command) return command
@@ -73,7 +75,7 @@ export function makeCommand() {
         inputType = find('ApplicationCommandInputType')?.ApplicationCommandInputType?.BUILT_IN_TEXT ?? 1
     } catch {}
     command = {
-        id: '-73932',
+        id: COMMAND_ID,
         untranslatedName: 'replacer',
         displayName: 'replacer',
         type: CHAT,
@@ -81,11 +83,21 @@ export function makeCommand() {
         applicationId: '-1',
         untranslatedDescription: 'Send an emote, with styles',
         displayDescription: 'Send an emote, with styles',
-        options: [option('emoji', 'Emote or emoji name', true), option('style', 'Style', false, STYLES), option('style2', 'Another style', false, STYLES), option('style3', 'Another style', false, STYLES)],
+        // 디스코드 명령어 칸은 25개까지: emoji, styles(여러 개를 직접), style ~ style23(목록에서)
+        options: [
+            option('emoji', 'Emoji, opens the emoji panel', true),
+            option('styles', 'Any number of styles, like spin rainbow shake-fast', false),
+            ...Array.from({ length: 23 }, (_, i) => option(i ? `style${i + 1}` : 'style', i ? 'Another style' : 'Style', false, STYLES)),
+        ],
         execute(args: any[], ctx: any) {
             const get = (n: string) => (Array.isArray(args) ? args.find(a => a?.name === n)?.value : undefined)
             const name = String(get('emoji') ?? '').trim()
-            const styles = ['style', 'style2', 'style3'].map(get).filter((x): x is string => typeof x === 'string' && !!x)
+            const typed = String(get('styles') ?? '')
+                .split(/[\s,]+/)
+                .map(x => x.replace(/^\.+/, '').trim())
+                .filter(Boolean)
+            const picked = Array.from({ length: 23 }, (_, i) => get(i ? `style${i + 1}` : 'style')).filter((x): x is string => typeof x === 'string' && !!x)
+            const styles = [...typed, ...picked]
             const channelId = ctx?.channel?.id
             if (!channelId || !name) return
             if (!sendEmote(channelId, name, styles)) toast(`No emote named ${name.replace(/^[;:]+|:+$/g, '')}`)
