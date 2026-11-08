@@ -19,6 +19,9 @@ import { bind, DEFAULTS, settings, update, useSettings } from './store'
  */
 
 const S = () => Stores as any
+
+/** 설정 화면 Status */
+const status = { hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
 const find = (...props: string[]): any => {
     try {
         return (lookupModule(withProps(...props) as any) as any)?.[0]
@@ -48,13 +51,19 @@ function request(guildId: string | null | undefined, channelIds?: string[], forc
     const ids = channelIds ?? selectable(guildId)
     if (!ids.length) return
     try {
-        socket()?.requestLastMessages?.(guildId, ids)
+        const sock = socket()
+        if (typeof sock?.requestLastMessages !== 'function') status.lastError = 'No gateway socket'
+        sock?.requestLastMessages?.(guildId, ids)
+        status.asked++
         if (!channelIds) asked.set(guildId, Date.now())
-    } catch {}
+    } catch (e: any) {
+        status.lastError = String(e?.message ?? e)
+    }
 }
 
 function onPreviews({ messages }: any) {
     if (!Array.isArray(messages)) return
+    status.received += messages.length
     for (const m of messages) {
         try {
             if (!m?.channel_id || S().MessageStore?.getMessage?.(m.channel_id, m.id)) continue
@@ -176,14 +185,21 @@ function LastMessage({ channel }: { channel: any }) {
 const TEXTUAL = new Set([0, 5, 10, 11, 12])
 
 function withLastMessage(props: any) {
+    status.rows++
     const ch = props?.channel
     if (!ch?.id || props?.subtitle || !settings().lastMessage || !TEXTUAL.has(ch.type)) return props
+    status.withMessage++
     return { ...props, subtitle: <LastMessage channel={ch} /> }
 }
 
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableSwitchRow } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRow } = Design as any
     const s = useSettings()
+    const [, tick] = useState(0)
+    useEffect(() => {
+        const t = setInterval(() => tick(n => n + 1), 1000)
+        return () => clearInterval(t)
+    }, [])
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
@@ -191,6 +207,10 @@ function SettingsPage() {
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
+                </TableRowGroup>
+                <TableRowGroup title="Status">
+                    <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
+                    <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
         </ScrollView>
@@ -228,9 +248,10 @@ export default plugin({
         cleanup(
             getModuleWithImportedPath('modules/guild_sidebar/native/ChannelItem.tsx', (mod: any) => {
                 const item = mod?.default
-                if (!item) return
+                if (!item) return void (status.hook = 'Module has no default')
                 const key = typeof item === 'function' ? 'default' : typeof item?.type === 'function' ? 'type' : undefined
-                if (!key) return
+                if (!key) return void (status.hook = `Unknown shape, ${typeof item}`)
+                status.hook = `Hooked (${key})`
                 cleanup(
                     instead(key === 'default' ? mod : item, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                         try {
