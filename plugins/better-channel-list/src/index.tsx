@@ -5,8 +5,8 @@ import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finde
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
-import { useEffect, useState } from 'react'
-import { ScrollView, Text } from 'react-native'
+import { Component, useEffect, useState } from 'react'
+import { ScrollView, Text, View } from 'react-native'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
 /**
@@ -169,8 +169,8 @@ function mix(a: string, b: string, t: number) {
     return `#${x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')}`
 }
 
-/** 글자마다 색을 조금씩 바꿔 그라데이션처럼 (글 한 줄 칸이라 진짜 그라데이션은 못 그린다) */
-function Gradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
+/** 글자마다 색을 조금씩 바꿔 그라데이션처럼 (진짜 그라데이션을 못 그릴 때) */
+function CharGradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
     const chars = [...text]
     if (colors.length < 2 || chars.length < 2) return <Text style={{ ...style, color: colors[0] }}>{text}</Text>
     const seg = colors.length - 1
@@ -186,6 +186,47 @@ function Gradient({ text, colors, style }: { text: string; colors: string[]; sty
                 )
             })}
         </Text>
+    )
+}
+
+/**
+ * 진짜 그라데이션: 이름 글자 모양(MaskedView) 안에 LinearGradient 를 칠한다.
+ * 글 줄 안에 끼워 넣는 작은 View 라서, 글자 크기를 칸 글자와 맞춰 준다.
+ * 그리다 오류가 나면 글자마다 색 방식으로 바꾼다.
+ */
+const NAME_TEXT = { fontSize: 14, lineHeight: 18 }
+
+class Boundary extends Component<{ fallback: any; children: any }, { failed: boolean }> {
+    state = { failed: false }
+    static getDerivedStateFromError() {
+        return { failed: true }
+    }
+    componentDidCatch(e: any) {
+        status.lastError = `Gradient, ${e?.message ?? e}`
+    }
+    render() {
+        return this.state.failed ? this.props.fallback : this.props.children
+    }
+}
+
+function Gradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
+    const masked = find('MaskedView')?.MaskedView
+    const gradient = find('LinearGradient', 'LinearGradientNativeComponent')?.LinearGradient
+    const fallback = <CharGradient text={text} colors={colors} style={style} />
+    if (!settings().realGradient || !masked || !gradient || colors.length < 2) return fallback
+    const M = masked
+    const G = gradient
+    const textStyle = { ...NAME_TEXT, ...style }
+    return (
+        <Boundary fallback={fallback}>
+            <View style={{ marginBottom: -4 }}>
+                <M maskElement={<Text style={textStyle}>{text}</Text>}>
+                    <G colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                        <Text style={{ ...textStyle, opacity: 0 }}>{text}</Text>
+                    </G>
+                </M>
+            </View>
+        </Boundary>
     )
 }
 
@@ -321,6 +362,7 @@ function SettingsPage() {
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
                     <TableSwitchRow label="Name style" subLabel="Uses the author's display name font and color" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
+                    <TableSwitchRow label="Real gradient" subLabel="Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">

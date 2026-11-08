@@ -5,12 +5,14 @@ export interface Settings {
     roleColor: boolean
     /** 표시 이름 스타일 (글꼴, 색) */
     nameStyle: boolean
+    /** 그라데이션 이름을 진짜 그라데이션으로 */
+    realGradient: boolean
     /** 보낸 사람 이름 보이기 */
     showAuthor: boolean
     /** 어느 채널에 미리보기를 보일지 */
     mode: 'all' | 'unreads' | 'default'
 }
-export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, showAuthor: true, mode: 'all' }
+export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, mode: 'all' }
 
 let storage: any
 export const bind = (s: any) => (storage = s)
