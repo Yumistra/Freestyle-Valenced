@@ -1,4 +1,4 @@
-import { ActionSheetActionCreators } from '@valenced/discord/actions'
+import { ActionSheetActionCreators, ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
@@ -35,23 +35,44 @@ function emojiValue(e: any): string | undefined {
     return e.surrogates ?? e.optionallyDiverseSequence ?? undefined
 }
 
-function openPicker(channel: any, onPick: (v: string) => void) {
+const EXPRESSION = 'modules/expression_picker/native/openExpressionPickerActionSheet.tsx'
+let expressionFn: ((props: any) => void) | undefined
+
+/** 경로로 모듈을 찾고, 아직 안 불렸으면 불러 본다 */
+function load(path: string, name: string) {
     try {
-        emojiFn ??= firstFn((lookupModuleWithImportedPath(EMOJI) as any)?.[0], 'openEmojiPickerActionSheet')
+        const [ex, id] = lookupModuleWithImportedPath(path) as any
+        let m = ex
+        if (!m && id !== undefined) m = (globalThis as any).__r?.(id)
+        return firstFn(m, name)
     } catch {}
-    if (!emojiFn) return false
-    try {
-        emojiFn({
-            channel,
-            onPressEmoji: (e: any) => {
-                const v = emojiValue(e)
-                if (v) onPick(v)
-            },
-        })
-        return true
-    } catch {
-        return false
+}
+
+function openPicker(channel: any, onPick: (v: string) => void): boolean {
+    emojiFn ??= load(EMOJI, 'openEmojiPickerActionSheet')
+    expressionFn ??= load(EXPRESSION, 'openExpressionPickerActionSheet')
+    const onPressEmoji = (e: any) => {
+        const v = emojiValue(e)
+        if (v) onPick(v)
     }
+    if (emojiFn)
+        try {
+            emojiFn({ channel, onPressEmoji })
+            return true
+        } catch {}
+    // 채팅 입력창의 이모지, GIF, 스티커 창 (이모지 탭만 쓴다)
+    if (expressionFn)
+        try {
+            expressionFn({ channelId: channel.id, onPressEmoji, onPressGIF: () => {}, onPressSticker: () => {}, onDismiss: () => {} })
+            return true
+        } catch {}
+    return false
+}
+
+function toast(text: string) {
+    try {
+        ;(ToastActionCreators as any).open({ key: `bcl-${Date.now()}`, content: text })
+    } catch {}
 }
 
 let redrawList = () => {}
@@ -102,8 +123,13 @@ function addRows(node: any, channel: any, close: () => void, depth = 0): any {
         const changed = !!settings().icons?.[channel.id]
         const pick = () => {
             close()
+            try {
+                ;(ActionSheetActionCreators as any).hideActionSheet(`ChannelLongPress-${channel.id}`)
+            } catch {}
             // 창이 닫힌 뒤에 이모지 창을 연다
-            setTimeout(() => openPicker(channel, v => setIcon(channel.id, v)), 350)
+            setTimeout(() => {
+                if (!openPicker(channel, v => setIcon(channel.id, v))) toast('Could not open the emoji picker. Open the emoji picker in any chat once, then try again')
+            }, 350)
         }
         const group = (
             <ActionSheetRow.Group key="bcl-emoji" hasIcons>
@@ -160,6 +186,7 @@ function wrapInner(type: any, channel: any, close: () => void) {
 export function patchSheet(cleanup: (...f: any[]) => void, redraw: () => void) {
     redrawList = redraw
     bindOne(cleanup, EMOJI, m => (emojiFn = firstFn(m, 'openEmojiPickerActionSheet') ?? emojiFn))
+    bindOne(cleanup, EXPRESSION, m => (expressionFn = firstFn(m, 'openExpressionPickerActionSheet') ?? expressionFn))
     const patched = new WeakSet<any>()
     const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
         const out = orig.apply(self, args)
