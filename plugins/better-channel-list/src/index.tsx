@@ -6,7 +6,7 @@ import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finde
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
-import { cloneElement, Component, useEffect, useState } from 'react'
+import { cloneElement, Component, forwardRef, useEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
 import { activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
@@ -390,10 +390,14 @@ function wrapperFor(type: any) {
     let w = wrappers.get(type)
     if (w) return w
     const MEMO = Symbol.for('react.memo')
-    const render = type?.$$typeof === MEMO ? type.type : type
+    const FORWARD = Symbol.for('react.forward_ref')
+    const inner = type?.$$typeof === MEMO ? type.type : type
+    // forwardRef 컴포넌트는 ref 를 그대로 넘긴다
+    const isForward = inner?.$$typeof === FORWARD
+    const render = isForward ? inner.render : inner
     if (typeof render !== 'function') return
-    w = function BetterChannelRow(props: any) {
-        let out = render(props)
+    const body = function BetterChannelRow(props: any, ref?: any) {
+        let out = isForward ? render(props, ref) : render(props)
         const sub = props?.subtitle
         if (sub?.split)
             try {
@@ -404,12 +408,16 @@ function wrapperFor(type: any) {
                 status.lastError = `Split, ${e?.message ?? e}`
             }
         try {
-            out = redesignTree(out, props?.channel, !!props?.muted)
+            out = redesignTree(out, props?.channel, !!props?.muted, (el: any) => {
+                const iw = wrapperFor(el.type)
+                return iw ? { ...el, type: iw } : el
+            })
         } catch (e: any) {
             status.lastError = `Redesign, ${e?.message ?? e}`
         }
         return out
     }
+    w = isForward ? forwardRef(body as any) : body
     wrappers.set(type, w)
     return w
 }

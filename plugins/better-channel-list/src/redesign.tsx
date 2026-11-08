@@ -208,7 +208,7 @@ function hasName(node: any, name: string, depth = 0): boolean {
  * 채널 이름 글이 들어 있는 칸(이름 칸) 바로 앞이 디스코드 채널 아이콘이라, 그것을 이모지 칸으로 바꾸고
  * 같은 가로 줄 끝에 음성 인원 칸을, 채널 이름 뒤에 제한, 연령 제한 아이콘을 단다.
  */
-export function redesignTree(out: any, channel: any, muted?: boolean): any {
+export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el: any) => any): any {
     const s = settings()
     if (!s.redesign || !channel || !ICON_TYPES.has(channel.type)) return out
     const name = channel.name
@@ -269,8 +269,39 @@ export function redesignTree(out: any, channel: any, muted?: boolean): any {
         if (kids === c || (!Array.isArray(c) && Array.isArray(kids) && kids.length === 1 && kids[0] === c)) return node
         return cloneElement(node, undefined, ...(Array.isArray(kids) ? kids : [kids]))
     }
+    /**
+     * 아이콘과 이름을 못 찾았으면 (음성 채널처럼) 안쪽 컴포넌트가 그리는 것이라,
+     * 같은 채널을 받는 안쪽 컴포넌트를 찾아 그것도 감싸서 거기서 다시 고친다
+     */
+    const deeper = (node: any, depth: number): any => {
+        if (!node || typeof node !== 'object' || depth > 14) return node
+        if (Array.isArray(node)) {
+            let changed = false
+            const list = node.map(n => {
+                const r = deeper(n, depth + 1)
+                if (r !== n) changed = true
+                return r
+            })
+            return changed ? list : node
+        }
+        const props = node.props
+        if (!props) return node
+        if (depth > 0 && typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
+            const w = wrap?.(node)
+            if (w && w !== node) {
+                iconDone = true
+                return w
+            }
+        }
+        const c = props.children
+        if (c == null || typeof c !== 'object') return node
+        const kids = deeper(c, depth + 1)
+        return kids === c ? node : cloneElement(node, undefined, ...(Array.isArray(kids) ? kids : [kids]))
+    }
     try {
-        return walk(out, 0)
+        const r = walk(out, 0)
+        if (iconDone || !wrap) return r
+        return deeper(r, 0)
     } catch {
         return out
     }
