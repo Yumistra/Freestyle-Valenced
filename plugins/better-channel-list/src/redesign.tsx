@@ -375,12 +375,8 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
             }
             if (voice) {
                 status.badges++
-                patch.channelInfo = (
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        {dropLocks(props.channelInfo) ?? null}
-                        <VoiceBadge channel={channel} />
-                    </View>
-                )
+                // 새 View 로 감싸면 디스코드가 이 칸 폭을 넓게 재서 아래 사람 목록이 좁아진다. 원래 칸 안에 나란히 넣는다
+                patch.channelInfo = [dropLocks(props.channelInfo) ?? null, <VoiceBadge key="bcl-voice-badge" channel={channel} />]
             }
             if (isNSFW(channel)) {
                 status.nameIcons++
