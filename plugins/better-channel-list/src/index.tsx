@@ -173,7 +173,10 @@ function mix(a: string, b: string, t: number) {
 }
 
 /** 글자마다 색을 조금씩 바꿔 그라데이션처럼 (진짜 그라데이션을 못 그릴 때) */
-function CharGradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
+function CharGradient({ text: rawText, colors: rawColors, style }: { text: string; colors: string[]; style: any }) {
+    // 이름이나 색이 비어 있어도 그리다가 멈추지 않게
+    const text = String(rawText ?? '')
+    const colors = Array.isArray(rawColors) ? rawColors : []
     const chars = [...text]
     if (colors.length < 2 || chars.length < 2) return <Text style={{ ...style, color: colors[0] }}>{text}</Text>
     const seg = colors.length - 1
@@ -393,7 +396,7 @@ function useLastMessage(channelId: string | undefined) {
         if (!channelId) return ''
         try {
             const list = S().MessageStore?.getMessages?.(channelId)
-            const m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+            const m = list?.last?.() ?? list?._array?.[(list?._array?.length ?? 0) - 1]
             return m ? `${m.id}|${m.editedTimestamp ?? m.edited_timestamp ?? ''}|${m.content?.length ?? 0}` : ''
         } catch {
             return ''
@@ -482,7 +485,7 @@ function preview(channel: any): Preview | undefined {
     let m: any
     try {
         const list = S().MessageStore?.getMessages?.(channel.id)
-        m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+        m = list?.last?.() ?? list?._array?.[(list?._array?.length ?? 0) - 1]
     } catch {}
     if (!m) return
     const authorId = m.author?.id
