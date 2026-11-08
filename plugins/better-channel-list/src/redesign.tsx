@@ -128,7 +128,8 @@ const EMOJI_ALL: RegExp | undefined = (() => {
 // 글자로 취급되는 ㅣ, 丨 도 구분선으로 쓰이니 같이 지운다. 휴대폰 JS 엔진이 \p{...} 를 모르면 정해 둔 목록으로 대신한다
 const EDGE: RegExp = (() => {
     try {
-        const k = '(?:[^\\p{L}\\p{N}\\p{Ps}\\p{Pe}\\p{Pi}\\p{Pf}]|[ㅣ丨])+'
+        // ⓐ, ⒜, 🄰, 🅐 처럼 기호로 분류되는 꾸밈 글꼴 글자(Enclosed Alphanumerics)도 글자로 본다
+        const k = '(?:[^\\p{L}\\p{N}\\p{M}\\p{Ps}\\p{Pe}\\p{Pi}\\p{Pf}\\u2460-\\u24FF\\u{1F100}-\\u{1F1FF}]|[ㅣ丨])+'
         return new RegExp(`^${k}|${k}$`, 'gu')
     } catch {
         return new RegExp('^[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+|[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+$', 'gu')
