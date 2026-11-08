@@ -21,7 +21,7 @@ import { bind, DEFAULTS, settings, update, useSettings } from './store'
 const S = () => Stores as any
 
 /** 설정 화면 Status */
-const status = { split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
+const status = { names: 'Not found yet', split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
 const find = (...props: string[]): any => {
     try {
         return (lookupModule(withProps(...props) as any) as any)?.[0]
@@ -231,8 +231,8 @@ function Gradient({ text, colors, style }: { text: string; colors: string[]; sty
     )
 }
 
-function nameStyle(userId: string, guildId: string | undefined, fallback: any): { fontFamily?: string; color?: string; colors?: string[] } {
-    const out: { fontFamily?: string; color?: string; colors?: string[] } = {}
+function nameStyle(userId: string, guildId: string | undefined, fallback: any): { fontFamily?: string; color?: string; colors?: string[]; styled?: boolean } {
+    const out: { fontFamily?: string; color?: string; colors?: string[]; styled?: boolean } = {}
     try {
         const user = S().UserStore?.getUser?.(userId) ?? fallback
         if (!user) return out
@@ -243,6 +243,7 @@ function nameStyle(userId: string, guildId: string | undefined, fallback: any): 
         const list = (Array.isArray(styles?.colors) ? styles.colors : []).map(hexOf).filter(Boolean) as string[]
         if (list.length) out.color = list[0]
         if (list.length > 1) out.colors = list
+        if (styles && (list.length || styles.effectId != null || styles.effect_id != null || styles.fontId != null || styles.font_id != null)) out.styled = true
     } catch {}
     return out
 }
@@ -252,7 +253,7 @@ interface Preview {
     key: string
     node: any
     /** 이름과 나머지 글을 따로 그릴 때 쓰는 값 (진짜 그라데이션) */
-    split?: { name: string; colors: string[]; style: any; rest: string }
+    split?: { name: string; colors: string[]; style: any; rest: string; userId?: string; guildId?: string; real?: boolean }
 }
 
 /**
@@ -260,7 +261,14 @@ interface Preview {
  * 왼쪽은 그라데이션 이름(View), 오른쪽은 디스코드가 그리는 원래 글 줄(": 메시지").
  * 글자 크기는 디스코드 글 줄의 variant 를 그대로 쓴다.
  */
-function SplitName({ name, colors, style, variant }: { name: string; colors: string[]; style: any; variant?: string }) {
+function SplitName({ name, colors, style, variant, userId, guildId, real }: { name: string; colors: string[]; style: any; variant?: string; userId?: string; guildId?: string; real?: boolean }) {
+    const UWE = usernameWithEffects
+    if (real && UWE)
+        return (
+            <Boundary fallback={<CharGradient text={name} colors={colors} style={style} />}>
+                <UWE userId={userId} guildId={guildId} userName={name} variant={variant ?? 'text-sm/medium'} lineClamp={1} ellipsizeMode="tail" effectDisplayType={1} />
+            </Boundary>
+        )
     const { Text: DText } = Design as any
     const M = find('MaskedView')?.MaskedView
     const G = find('LinearGradient', 'LinearGradientNativeComponent')?.LinearGradient
@@ -286,6 +294,9 @@ function SplitName({ name, colors, style, variant }: { name: string; colors: str
     )
 }
 
+/** 디스코드의 표시 이름 스타일 컴포넌트 (글꼴, 그라데이션, 네온 같은 효과를 진짜와 똑같이) */
+let usernameWithEffects: any
+
 /** 원래 TextChannel 대신 그리는 컴포넌트 (같은 원래 컴포넌트에는 같은 것을 써서 다시 만들어지지 않게) */
 const wrappers = new WeakMap<any, any>()
 
@@ -309,7 +320,7 @@ function splitTree(node: any, sub: any, depth = 0): any {
         status.split = 'Working'
         return (
             <View key={node.key ?? undefined} style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
-                <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} />
+                <SplitName name={sp.name} colors={sp.colors} style={sp.style} variant={props.variant} userId={sp.userId} guildId={sp.guildId} real={sp.real} />
                 {/^\s/.test(sp.rest) ? <Text> </Text> : null}
                 {cloneElement(node, { style: [props.style, { flexShrink: 1 }] }, rest)}
             </View>
@@ -386,8 +397,14 @@ function preview(channel: any): Preview | undefined {
     const rest = system ? ` ${body}` : `: ${body}`
     const base = styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' as const }
     return {
-        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${s.realGradient}`,
-        split: colors && colors.length > 1 ? { name, colors, style: styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }, rest } : undefined,
+        key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${s.realGradient}|${!!usernameWithEffects}`,
+        // 표시 이름 스타일이 있으면 디스코드가 DM 목록에서 쓰는 이름 컴포넌트(UsernameWithEffects)로 똑같이 그린다
+        split:
+            styled.styled && usernameWithEffects
+                ? { name, colors: colors ?? [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true }
+                : colors && colors.length > 1
+                  ? { name, colors, style: styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }, rest }
+                  : undefined,
         node: (
             <>
                 {colors ? <Gradient text={name} colors={colors} style={base} /> : <Text style={{ ...base, ...(color ? { color } : null) }}>{name}</Text>}
@@ -490,7 +507,7 @@ function SettingsPage() {
                 </TableRowGroup>
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
-                    <TableRow label="Split names" subLabel={status.split} />
+                    <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}`} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
@@ -532,6 +549,13 @@ export default plugin({
         onGuild()
 
         patchChannelList(cleanup)
+        cleanup(
+            getModuleWithImportedPath('modules/display_name_styles/native/UsernameWithEffects.tsx', (mod: any) => {
+                usernameWithEffects = mod?.default ?? mod
+                status.names = usernameWithEffects ? 'Found' : 'Not found'
+                redraw()
+            }) as any,
+        )
         cleanup(() => {
             for (const ch of touched)
                 try {
