@@ -9,6 +9,7 @@ import { instead } from '@valenced/patcher'
 import { cloneElement, Component, forwardRef, useEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
 import { activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
+import { patchSheet } from './sheet'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
 /**
@@ -568,76 +569,6 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
     )
 }
 
-/** 채널 이모지 바꾸기 (원래 플러그인의 "Edit Emoji Icon", 나만 보인다) */
-function EmojiIcons() {
-    const { TableRowGroup, TableRow, TextInput, Button, Stack } = Design as any
-    const s = useSettings()
-    const [open, setOpen] = useState<string | null>(null)
-    const [text, setText] = useState('')
-    const guildId = S().SelectedGuildStore?.getGuildId?.()
-    const guild = guildId ? S().GuildStore?.getGuild?.(guildId) : undefined
-    let list: any[] = []
-    try {
-        // 내가 볼 수 있는 채널만 (GuildChannelStore 의 SELECTABLE, VOCAL)
-        const gc = S().GuildChannelStore?.getChannels?.(guildId) ?? {}
-        list = [...(gc.SELECTABLE ?? []), ...(gc.VOCAL ?? [])].map((x: any) => x?.channel ?? x)
-        // 음성 채널이 빠져 있으면 서버 채널에서 보이는 음성 채널을 더한다
-        if (!list.some((c: any) => c?.type === 2 || c?.type === 13)) {
-            const all: any = S().ChannelStore?.getMutableGuildChannelsForGuild?.(guildId) ?? {}
-            const can = (c: any) => {
-                try {
-                    return S().PermissionStore?.can?.(BigInt(1024), c) ?? true
-                } catch {
-                    return true
-                }
-            }
-            for (const c of Object.values(all) as any[]) if ((c?.type === 2 || c?.type === 13) && can(c)) list.push(c)
-        }
-            .filter((c: any) => [0, 2, 5, 13, 15, 16].includes(c?.type))
-            .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
-    } catch {}
-    const save = (id: string, emoji: string | null) => {
-        const icons = { ...(settings().icons ?? {}) }
-        if (emoji) icons[id] = emoji
-        else delete icons[id]
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-        update({ icons })
-        setOpen(null)
-        redraw()
-    }
-    const changed = Object.keys(s.icons ?? {}).length
-    return (
-        <TableRowGroup title={guild ? `Emoji icons, ${guild.name}` : 'Emoji icons'}>
-            <TableRow label="Only you see these" subLabel={guild ? 'Tap a channel to change its emoji' : 'Open a server first, then come back here'} />
-            {list.map((c: any) => (
-                <View key={c.id}>
-                    <TableRow
-                        label={c.name}
-                        subLabel={s.icons?.[c.id] ? 'Changed' : undefined}
-                        icon={<EmojiTile emoji={channelEmoji(c)} size="small" />}
-                        arrow
-                        onPress={() => {
-                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-                            setOpen(open === c.id ? null : c.id)
-                            setText(s.icons?.[c.id] ?? '')
-                        }}
-                    />
-                    {open === c.id ? (
-                        <View style={{ padding: 12 }}>
-                            <Stack spacing={8}>
-                                <TextInput label="Emoji" value={text} placeholder="🌐" onChange={setText} onSubmitEditing={() => save(c.id, text.trim() || null)} />
-                                <Button text="Save" variant="primary" size="md" disabled={!text.trim()} onPress={() => save(c.id, text.trim())} />
-                                {s.icons?.[c.id] ? <Button text="Reset" variant="secondary" size="md" onPress={() => save(c.id, null)} /> : null}
-                            </Stack>
-                        </View>
-                    ) : null}
-                </View>
-            ))}
-            {changed ? <TableRow label="Reset all emoji icons" subLabel={`${changed} changed`} onPress={() => (update({ icons: {} }), redraw())} /> : null}
-        </TableRowGroup>
-    )
-}
-
 function SettingsPage() {
     const { Stack, TableRowGroup, TableSwitchRow, TableRow, TableRadioGroup, TableRadioRow } = Design as any
     const s = useSettings()
@@ -664,14 +595,6 @@ function SettingsPage() {
                         <TableRadioRow key={k} label={k[0].toUpperCase() + k.slice(1)} subLabel={k === 'medium' ? 'Also shows active posts under forums' : undefined} value={k} disabled={!s.redesign} />
                     ))}
                 </TableRadioGroup>
-                <EmojiIcons />
-                <TableRowGroup title="Status">
-                    <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
-                    <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}${status.variant ? `, ${status.variant}` : ''}`} />
-                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons, ${rstatus.fromDiscord.size} channels with a Discord emoji${rstatus.error ? `, ${rstatus.error}` : ''}`} />
-                    <TableRow label="Voice rows" subLabel={rstatus.voice.trim() || 'Not drawn yet'} />
-                    <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
-                </TableRowGroup>
             </Stack>
         </ScrollView>
     )
@@ -711,6 +634,7 @@ export default plugin({
         onGuild()
 
         patchChannelList(cleanup)
+        patchSheet(cleanup, redraw)
         cleanup(
             getModuleWithImportedPath('modules/display_name_styles/native/UsernameWithEffects.tsx', (mod: any) => {
                 usernameWithEffects = mod?.default ?? mod

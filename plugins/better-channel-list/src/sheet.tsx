@@ -1,0 +1,180 @@
+import { Design } from '@valenced/discord/design'
+import { Stores } from '@valenced/discord/flux'
+import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { instead } from '@valenced/patcher'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { EmojiTile } from './redesign'
+import { settings, update } from './store'
+
+/**
+ * 채널을 꾹 누르면 나오는 창(ChannelLongPressActionSheet) 맨 위에 "Emoji" 줄을 넣는다.
+ * 누르면 디스코드 이모지 고르기 창이 열리고, 고른 이모지가 그 채널의 아이콘이 된다 (나만 보인다).
+ * 바꾼 채널이면 "Reset emoji" 줄도 넣는다.
+ */
+
+const SHEET = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
+const EMOJI = 'modules/emoji_picker/native/openEmojiPickerActionSheet.tsx'
+
+let emojiFn: ((props: any) => void) | undefined
+const firstFn = (m: any, name: string) => (typeof m?.[name] === 'function' ? m[name] : typeof m?.default === 'function' ? m.default : undefined)
+
+function bindOne(cleanup: (...f: any[]) => void, path: string, set: (m: any) => void) {
+    cleanup(
+        getModuleWithImportedPath(path, (m: any) => {
+            if (m) set(m)
+            else cleanup(waitForModuleWithImportedPath(path, (x: any) => set(x)) as any)
+        }) as any,
+    )
+}
+
+/** 고른 이모지 → 저장할 글 (유니코드는 그대로, 서버 이모지는 <:이름:ID>) */
+function emojiValue(e: any): string | undefined {
+    if (!e) return
+    if (e.id && /^\d+$/.test(String(e.id))) return `<${e.animated ? 'a' : ''}:${e.name ?? 'emoji'}:${e.id}>`
+    return e.surrogates ?? e.optionallyDiverseSequence ?? undefined
+}
+
+function openPicker(channel: any, onPick: (v: string) => void) {
+    try {
+        emojiFn ??= firstFn((lookupModuleWithImportedPath(EMOJI) as any)?.[0], 'openEmojiPickerActionSheet')
+    } catch {}
+    if (!emojiFn) return false
+    try {
+        emojiFn({
+            channel,
+            onPressEmoji: (e: any) => {
+                const v = emojiValue(e)
+                if (v) onPick(v)
+            },
+        })
+        return true
+    } catch {
+        return false
+    }
+}
+
+let redrawList = () => {}
+
+function setIcon(channelId: string, value: string | null) {
+    const icons = { ...(settings().icons ?? {}) }
+    if (value) icons[channelId] = value
+    else delete icons[channelId]
+    update({ icons })
+    redrawList()
+}
+
+/** 창 닫기 (onClose 가 없을 때) */
+function hideSheet() {
+    try {
+        const m: any = (lookupModuleWithImportedPath('modules/action_sheet/native/ActionSheetActionCreators.tsx' as any) as any)?.[0]
+        ;(m?.hideActionSheet ?? m?.default?.hideActionSheet)?.()
+    } catch {}
+}
+
+/** 창 안의 ActionSheet(showGradient 를 받는 것) 맨 앞에 우리 줄 묶음을 넣는다 */
+function addRows(node: any, channel: any, close: () => void, depth = 0): any {
+    if (!node || typeof node !== 'object' || depth > 10) return node
+    if (Array.isArray(node)) {
+        let changed = false
+        const out = node.map(n => {
+            const r = addRows(n, channel, close, depth + 1)
+            if (r !== n) changed = true
+            return r
+        })
+        return changed ? out : node
+    }
+    const props = node.props
+    if (!props) return node
+    if (props.showGradient !== undefined && 'header' in props) {
+        const { ActionSheetRow } = Design as any
+        if (!ActionSheetRow?.Group) return node
+        const Reaction: any = lookupGeneratedIconComponent('ReactionIcon' as any) ?? lookupGeneratedIconComponent('EmojiSmileIcon' as any)
+        const Trash: any = lookupGeneratedIconComponent('RefreshIcon' as any) ?? lookupGeneratedIconComponent('TrashIcon' as any)
+        const changed = !!settings().icons?.[channel.id]
+        const pick = () => {
+            close()
+            // 창이 닫힌 뒤에 이모지 창을 연다
+            setTimeout(() => openPicker(channel, v => setIcon(channel.id, v)), 350)
+        }
+        const group = (
+            <ActionSheetRow.Group key="bcl-emoji" hasIcons>
+                <ActionSheetRow
+                    label="Emoji"
+                    subLabel="Only you see this"
+                    icon={<EmojiTile channel={channel} size="tiny" />}
+                    trailing={Reaction ? <ActionSheetRow.Icon IconComponent={Reaction} /> : undefined}
+                    onPress={pick}
+                />
+                {changed ? (
+                    <ActionSheetRow
+                        label="Reset emoji"
+                        icon={Trash ? <ActionSheetRow.Icon IconComponent={Trash} /> : undefined}
+                        onPress={() => {
+                            setIcon(channel.id, null)
+                            close()
+                        }}
+                    />
+                ) : null}
+            </ActionSheetRow.Group>
+        )
+        const kids = Array.isArray(props.children) ? props.children : [props.children]
+        return { ...node, props: { ...props, children: [group, ...kids] } }
+    }
+    if (props.children == null || typeof props.children !== 'object') return node
+    const kids = addRows(props.children, channel, close, depth + 1)
+    return kids === props.children ? node : { ...node, props: { ...props, children: kids } }
+}
+
+const wrapped = new WeakMap<any, any>()
+function wrapInner(type: any, channel: any, close: () => void) {
+    const MEMO = Symbol.for('react.memo')
+    const render = type?.$$typeof === MEMO ? type.type : type
+    if (typeof render !== 'function') return
+    let w = wrapped.get(type)
+    if (!w) {
+        w = function BetterChannelSheet(props: any) {
+            const out = render(props)
+            if (!settings().redesign) return out
+            try {
+                const ch = props?.channel ?? channel
+                return addRows(out, ch, typeof props?.onClose === 'function' ? () => props.onClose() : close)
+            } catch {
+                return out
+            }
+        }
+        wrapped.set(type, w)
+    }
+    return w
+}
+
+export function patchSheet(cleanup: (...f: any[]) => void, redraw: () => void) {
+    redrawList = redraw
+    bindOne(cleanup, EMOJI, m => (emojiFn = firstFn(m, 'openEmojiPickerActionSheet') ?? emojiFn))
+    bindOne(cleanup, SHEET, (mod: any) => {
+        if (typeof mod?.default !== 'function') return
+        cleanup(
+            instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                const out = orig.apply(this, args)
+                const p = args[0]
+                const channel = p?.channel
+                if (!channel || !settings().redesign) return out
+                const close = () => {
+                    try {
+                        if (typeof p?.onClose === 'function') p.onClose()
+                        else hideSheet()
+                    } catch {}
+                }
+                try {
+                    // 바깥 컴포넌트는 안쪽 컴포넌트 하나를 돌려준다. 그 안쪽을 감싼다
+                    if (out?.type && typeof out.type !== 'string') {
+                        const w = wrapInner(out.type, channel, close)
+                        if (w) return { ...out, type: w }
+                    }
+                    return addRows(out, channel, close)
+                } catch {
+                    return out
+                }
+            }),
+        )
+    })
+}

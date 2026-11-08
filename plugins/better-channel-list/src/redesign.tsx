@@ -54,7 +54,11 @@ export interface ChannelEmoji {
 
 export function channelEmoji(channel: any): ChannelEmoji {
     const own = settings().icons?.[channel?.id]
-    if (own) return { name: own }
+    if (own) {
+        // 서버 이모지는 <:이름:ID> 로 저장한다
+        const m = /^<a?:([^:]*):(\d+)>$/.exec(own)
+        return m ? { name: m[1], id: m[2] } : { name: own }
+    }
     const e = channel?.iconEmoji ?? channel?.icon_emoji
     if (e?.name || e?.id) {
         status.fromDiscord.add(channel.id)
