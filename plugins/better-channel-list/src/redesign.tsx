@@ -143,7 +143,7 @@ function withAlpha(hex: string, a: number) {
     return hex + Math.round(a * 255).toString(16).padStart(2, '0')
 }
 
-export function EmojiTile({ channel, size, emoji, muted }: { channel?: any; size?: keyof typeof SIZES; emoji?: ChannelEmoji; muted?: boolean }) {
+export function EmojiTile({ channel, size, emoji, muted, locked }: { channel?: any; size?: keyof typeof SIZES; emoji?: ChannelEmoji; muted?: boolean; locked?: boolean }) {
     // 설정(바꾼 이모지, 크기)이 바뀌면 이 칸만 바로 다시 그린다
     useSettings()
     const sz = SIZES[size ?? settings().iconSize] ?? SIZES.medium
@@ -164,6 +164,18 @@ export function EmojiTile({ channel, size, emoji, muted }: { channel?: any; size
                     {e.name}
                 </Text>
             )}
+            {locked ? <LockBadge box={sz.box} /> : null}
+        </View>
+    )
+}
+
+/** 제한된 채널: 이모지 칸 오른쪽 아래의 작은 자물쇠 */
+function LockBadge({ box }: { box: number }) {
+    const Lock = icon('LockIcon')
+    const d = Math.max(14, Math.round(box * 0.42))
+    return (
+        <View style={{ position: 'absolute', right: -2, bottom: -2, width: d, height: d, borderRadius: d / 2, backgroundColor: token(['BACKGROUND_BASE_LOWEST', 'BACKGROUND_TERTIARY', 'BACKGROUND_PRIMARY'], '#111214'), alignItems: 'center', justifyContent: 'center' }}>
+            {Lock ? <Lock size="xxs" color={mutedColor()} /> : null}
         </View>
     )
 }
@@ -215,8 +227,9 @@ function SmallIcon({ name }: { name: string }) {
     )
 }
 
-function NameIcons({ channel, locked }: { channel: any; locked?: boolean }) {
-    const limited = !locked && isLimited(channel)
+function NameIcons({ channel }: { channel: any; locked?: boolean }) {
+    // 자물쇠는 이모지 칸에 붙인다
+    const limited = false
     const nsfw = isNSFW(channel)
     if (!limited && !nsfw) return null
     return (
@@ -246,12 +259,12 @@ function VoiceBadge({ channel }: { channel: any }) {
     const color = textColor()
     const stage = channel?.type === ChannelTypes.STAGE
     const locked = isLimited(channel)
-    const iconName = locked ? 'LockIcon' : stage ? 'StageIcon' : 'VoiceNormalIcon'
+    const iconName = stage ? 'StageIcon' : 'VoiceNormalIcon'
     const Icon = icon(iconName)
     return (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 6, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 100, backgroundColor: badgeColor(), flexShrink: 0 }}>
             {Icon ? <Icon size="xs" color={color} /> : null}
-            {hasLimit && !locked ? <Text style={{ color, fontSize: 12, fontWeight: '500', fontFamily: 'monospace' }}>{`${pad(voiceCount(channel))}/${pad(limit)}`}</Text> : null}
+            {hasLimit ? <Text style={{ color, fontSize: 12, fontWeight: '500', fontFamily: 'monospace' }}>{`${pad(voiceCount(channel))}/${pad(limit)}`}</Text> : null}
         </View>
     )
 }
@@ -273,6 +286,18 @@ const textColor = () => token(['TEXT_DEFAULT', 'TEXT_NORMAL'], '#dbdee1')
 const badgeColor = () => token(['BACKGROUND_SECONDARY_ALT', 'BACKGROUND_MOD_SUBTLE', 'BACKGROUND_TERTIARY'], '#232428')
 
 const NAME_MARK = '__bclName'
+
+/** 디스코드가 음성 채널 오른쪽에 넣는 자물쇠 (자물쇠는 이모지 칸에 붙이므로 뺀다) */
+function dropLocks(node: any, depth = 0): any {
+    if (!node || typeof node !== 'object' || depth > 8) return node
+    if (Array.isArray(node)) return node.map(n => dropLocks(n, depth + 1))
+    const p = node.props
+    if (!p) return node
+    const keys = Object.keys(p)
+    if ('bypassLimit' in p || (keys.length <= 2 && 'locked' in p)) return null
+    if (p.children == null || typeof p.children !== 'object') return node
+    return cloneElement(node, undefined, ...[].concat(dropLocks(p.children, depth + 1)))
+}
 
 /** 이 노드 안에 채널 이름 글이 있는지 */
 function hasName(node: any, name: string, depth = 0): boolean {
@@ -315,7 +340,7 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
                     changed = true
                     status.icons++
                     list = [...list]
-                    list[i - 1] = <EmojiTile key="bcl-icon" channel={channel} muted={muted} />
+                    list[i - 1] = <EmojiTile key="bcl-icon" channel={channel} muted={muted} locked={isLimited(channel)} />
                     if (voice) {
                         status.badges++
                         list.push(<VoiceBadge key="bcl-voice-badge" channel={channel} />)
@@ -330,17 +355,17 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         if (!iconDone && props.icon && typeof props.icon === 'object' && props.name && typeof props.name === 'object') {
             iconDone = true
             status.icons++
-            const patch: any = { icon: <EmojiTile channel={channel} muted={muted} /> }
+            const patch: any = { icon: <EmojiTile channel={channel} muted={muted} locked={isLimited(channel)} /> }
             if (voice) {
                 status.badges++
                 patch.channelInfo = (
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        {props.channelInfo ?? null}
+                        {dropLocks(props.channelInfo) ?? null}
                         <VoiceBadge channel={channel} />
                     </View>
                 )
             }
-            if (isLimited(channel) || isNSFW(channel)) {
+            if (isNSFW(channel)) {
                 status.nameIcons++
                 patch.name = (
                     <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1 }}>
@@ -354,9 +379,8 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         const textName = props.children === name || (Array.isArray(props.children) && props.children.length === 1 && props.children[0] === name)
         if (!nameDone && textName) {
             nameDone = true
-            const limited = isLimited(channel)
             const nsfw = isNSFW(channel)
-            if (!limited && !nsfw) return node
+            if (!nsfw) return node
             status.nameIcons++
             // 이름 글과 디스코드 아이콘을 가로로 놓는다.
             // 원래 이름 글은 flex: 1 이라 그대로 두면 폭이 0 이 되어서, 글 길이만큼만 차지하게 바꾼다
