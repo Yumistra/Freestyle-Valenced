@@ -5,7 +5,7 @@
 	"description": "Hides emojis and stickers you can't use from the pickers.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

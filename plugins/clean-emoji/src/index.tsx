@@ -255,12 +255,6 @@ function SettingsPage({ api }: { api: any }) {
     const { Stack, TableRowGroup, TableRow, TableSwitchRow } = Design as any
     storage ??= api?.jsonStorage
     storage?.use?.()
-    const [, tick] = useState(0)
-    useEffect(() => {
-        const t = setInterval(() => tick(n => n + 1), 1000)
-        return () => clearInterval(t)
-    }, [])
-    const nitro = hasNitro()
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
@@ -268,37 +262,9 @@ function SettingsPage({ api }: { api: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="ReactionIcon" />}
                         label="Only in reactions"
-                        subLabel="Hides them only when adding a reaction. The chat emoji and sticker pickers stay as they are, so fake Nitro plugins still work"
                         value={reactionsOnly()}
                         onValueChange={(v: boolean) => storage?.set({ ...(storage.cache ?? {}), reactionsOnly: v }, true)}
                     />
-                </TableRowGroup>
-                <TableRowGroup title="Status">
-                    <TableRow
-                        icon={<TableRowAssetIcon name="InfoIcon" />}
-                        label="Hooks"
-                        subLabel={status.patched.length ? `Hooked, ${status.patched.join(', ')}` : status.found ? 'Found, but not hooked' : 'Not found yet'}
-                    />
-                    <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Nitro" subLabel={nitro ? 'Yes, nothing is hidden' : 'No'} />
-                    <TableRow
-                        icon={<TableRowAssetIcon name="ReactionIcon" />}
-                        label="Emoji picker"
-                        subLabel={
-                            status.calls
-                                ? `Opened, last time hid ${status.lastSections} servers and ${status.lastEmojis} emojis${status.lastGuild ? '' : ', outside a server'}`
-                                : 'Not opened since Discord started'
-                        }
-                    />
-                    <TableRow
-                        icon={<TableRowAssetIcon name="StickerIcon" />}
-                        label="Sticker picker"
-                        subLabel={
-                            status.stickerCalls
-                                ? `Opened, last time hid ${status.lastPacks} packs and ${status.lastStickers} stickers`
-                                : 'Not opened since Discord started'
-                        }
-                    />
-                    {status.errors.length ? <TableRow icon={<TableRowAssetIcon name="InfoIcon" />} label="Errors" subLabel={status.errors.slice(-3).join('\n')} /> : null}
                 </TableRowGroup>
             </Stack>
         </ScrollView>
