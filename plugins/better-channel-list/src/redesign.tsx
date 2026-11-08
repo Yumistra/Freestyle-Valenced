@@ -6,6 +6,16 @@ import { cloneElement } from 'react'
 import { Image, Text, View } from 'react-native'
 import { EMOJI_COLORS } from './colors'
 import { settings } from './store'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+
+/** 디스코드에 들어 있는 아이콘 (못 찾으면 undefined) */
+const icon = (name: string): any => {
+    try {
+        return (lookupGeneratedIconComponent(name as any) as any) ?? find(name)?.[name]
+    } catch {
+        return find(name)?.[name]
+    }
+}
 
 /**
  * 원래 플러그인의 "Redesign" 부분.
@@ -115,16 +125,14 @@ function mutedColor() {
     return '#80848e'
 }
 
-function SmallIcon({ name, fallback }: { name: string; fallback: string }) {
-    const Icon = find(name)?.[name]
-    const color = mutedColor()
-    if (typeof Icon === 'function' || Icon?.$$typeof)
-        return (
-            <View style={{ marginLeft: 4, flexShrink: 0 }}>
-                <Icon size="xs" color={color} />
-            </View>
-        )
-    return <Text style={{ marginLeft: 4, color, fontSize: 12 }}>{fallback}</Text>
+function SmallIcon({ name }: { name: string }) {
+    const Icon = icon(name)
+    if (!Icon) return null
+    return (
+        <View style={{ marginLeft: 3, flexShrink: 0 }}>
+            <Icon size="xs" color={mutedColor()} />
+        </View>
+    )
 }
 
 function NameIcons({ channel, locked }: { channel: any; locked?: boolean }) {
@@ -133,8 +141,8 @@ function NameIcons({ channel, locked }: { channel: any; locked?: boolean }) {
     if (!limited && !nsfw) return null
     return (
         <>
-            {limited ? <SmallIcon name="LockIcon" fallback="🔒" /> : null}
-            {nsfw ? <SmallIcon name="WarningIcon" fallback="⚠" /> : null}
+            {limited ? <SmallIcon name="LockIcon" /> : null}
+            {nsfw ? <SmallIcon name="WarningIcon" /> : null}
         </>
     )
 }
@@ -159,10 +167,10 @@ function VoiceBadge({ channel }: { channel: any }) {
     const stage = channel?.type === ChannelTypes.STAGE
     const locked = isLimited(channel)
     const iconName = locked ? 'LockIcon' : stage ? 'StageIcon' : 'VoiceNormalIcon'
-    const Icon = find(iconName)?.[iconName]
+    const Icon = icon(iconName)
     return (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 6, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 100, backgroundColor: badgeColor(), flexShrink: 0 }}>
-            {Icon ? <Icon size="xs" color={color} /> : <Text style={{ color, fontSize: 12 }}>{locked ? '🔒' : '🔊'}</Text>}
+            {Icon ? <Icon size="xs" color={color} /> : null}
             {hasLimit && !locked ? <Text style={{ color, fontSize: 12, fontWeight: '500', fontFamily: 'monospace' }}>{`${pad(voiceCount(channel))}/${pad(limit)}`}</Text> : null}
         </View>
     )
@@ -245,9 +253,14 @@ export function redesignTree(out: any, channel: any, muted?: boolean): any {
             const nsfw = isNSFW(channel)
             if (!limited && !nsfw) return node
             status.nameIcons++
-            // 이름 글 안에 작은 글자로 붙인다 (이름 칸을 나누면 이름 폭이 0 이 된다)
-            const color = mutedColor()
-            return cloneElement(node, { [NAME_MARK]: true }, name, limited ? <Text key="l" style={{ color, fontSize: 12 }}>{'  🔒︎'}</Text> : null, nsfw ? <Text key="n" style={{ color, fontSize: 12 }}>{'  ⚠︎'}</Text> : null)
+            // 이름 글과 디스코드 아이콘을 가로로 놓는다.
+            // 원래 이름 글은 flex: 1 이라 그대로 두면 폭이 0 이 되어서, 글 길이만큼만 차지하게 바꾼다
+            return (
+                <View key={node.key ?? 'bcl-name'} {...{ [NAME_MARK]: true }} style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', minWidth: 0 }}>
+                    {cloneElement(node, { experimental_useNativeText: false, style: [props.style, { flex: 0, flexGrow: 0, flexShrink: 1, flexBasis: 'auto' }] })}
+                    <NameIcons channel={channel} />
+                </View>
+            )
         }
         const c = props.children
         if (c == null || typeof c !== 'object') return node
