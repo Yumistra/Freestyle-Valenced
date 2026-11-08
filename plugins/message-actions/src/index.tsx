@@ -228,6 +228,76 @@ function openActions(handlers: any, message: any, channel: any, chatInputRef?: a
 const editableOf = (message: any) =>
     MESSAGE_TYPES_EDITABLE.has(message?.type ?? 0) && message?.state !== 'SEND_FAILED' && message?.state !== 'SENDING'
 
+/** 테마 색 (#rrggbbaa → 안드로이드 #aarrggbb) */
+function themeColor(names: string[], fallback: string) {
+    try {
+        const tokens: any = Tokens
+        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
+        for (const name of names) {
+            const key = tokens.default.colors[name]
+            if (!key) continue
+            const c = tokens.default.internal.resolveSemanticColor(theme, key)
+            if (typeof c !== 'string') continue
+            const hex = c.trim()
+            if (/^#[0-9a-f]{6}$/i.test(hex)) return hex
+            if (/^#[0-9a-f]{8}$/i.test(hex)) return `#${hex.slice(7, 9)}${hex.slice(1, 7)}`
+            const m = hex.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)$/i)
+            if (m) {
+                const h = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0')
+                const a = m[4] === undefined ? 1 : m[4].endsWith('%') ? Number.parseFloat(m[4]) / 100 : Number(m[4])
+                return `#${h(a * 255)}${h(+m[1])}${h(+m[2])}${h(+m[3])}`
+            }
+        }
+    } catch {}
+    return fallback
+}
+
+/** 디스코드 버튼 종류별 색 (Button 의 variant 와 같은 토큰) */
+const VARIANTS: Record<string, string> = {
+    primary: 'CONTROL_PRIMARY',
+    secondary: 'CONTROL_SECONDARY',
+    'critical-primary': 'CONTROL_CRITICAL_PRIMARY',
+    'critical-secondary': 'CONTROL_CRITICAL_SECONDARY',
+}
+const FALLBACK: Record<string, [string, string]> = {
+    primary: ['#5865f2', '#ffffff'],
+    secondary: ['#4e5058', '#ffffff'],
+    'critical-primary': ['#da373c', '#ffffff'],
+    'critical-secondary': ['#4e5058', '#f23f43'],
+}
+function variantColors(variant: string) {
+    const p = VARIANTS[variant] ?? VARIANTS.secondary
+    const [bg, fg] = FALLBACK[variant] ?? FALLBACK.secondary
+    const bgc = themeColor([`${p}_BACKGROUND_DEFAULT`], bg)
+    const border = themeColor([`${p}_BORDER_DEFAULT`], '#00000000')
+    return {
+        bg: bgc,
+        bgActive: themeColor([`${p}_BACKGROUND_ACTIVE`], bgc),
+        border,
+        borderActive: themeColor([`${p}_BORDER_ACTIVE`], border),
+        fg: themeColor([`${p}_TEXT_DEFAULT`], fg),
+    }
+}
+
+/** 디스코드 버튼 글자 (text-sm/semibold: 글꼴을 바꾸는 플러그인도 따라감) */
+function buttonFont() {
+    try {
+        const style = D().TextStyleSheet?.['text-sm/semibold']
+        if (style?.fontFamily) return { family: String(style.fontFamily), size: Number(style.fontSize) || 14 }
+    } catch {}
+    return { family: 'ggsans-Semibold', size: 14 }
+}
+
+function buttonRadius() {
+    try {
+        const t: any = (Tokens as any).default
+        const r = t?.modules?.button?.BORDER_RADIUS ?? t?.radii?.sm
+        if (typeof r === 'number' && r >= 0) return Math.min(r, 999)
+    } catch {}
+    return 8
+}
+
+const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
 
 /** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
 // ── 버튼 줄 (JS 로 그린다) ─────────────────────────────────────
@@ -361,7 +431,7 @@ function patchBar(cleanup: (...f: any[]) => void) {
 }
 
 /** 버튼 줄을 띄우고 누른 버튼 id 를 돌려준다. 닫으면 "", 띄울 수 없으면 null */
-function showButtons(message: any): Promise<string | null> {
+function showJsButtons(message: any): Promise<string | null> {
     if (!barReady) return Promise.resolve(null)
     close('')
     return new Promise(resolve => {
@@ -370,9 +440,32 @@ function showButtons(message: any): Promise<string | null> {
     })
 }
 
+/** 안드로이드가 메시지 밑에 버튼을 끼워 넣는다. 못 하면 null */
+async function showButtons(message: any): Promise<string | null> {
+    const buttons: any[] = []
+    if (isMine(message) && editableOf(message)) buttons.push({ id: 'edit', label: 'Edit', icon: ICON('pencilicon'), colors: variantColors('secondary') })
+    buttons.push({
+        id: 'delete',
+        label: 'Delete',
+        icon: ICON('trashicon'),
+        colors: variantColors('critical-secondary'),
+        confirm: settings().confirmDelete ? { label: 'Delete?', colors: variantColors('critical-primary') } : undefined,
+    })
+    const opts = { buttons, font: buttonFont(), radius: buttonRadius(), inset: 68 }
+    try {
+        const r = await Promise.resolve((callNativeMethod as any)(`${NATIVE_ID}.showActions`, [JSON.stringify(opts)]))
+        if (r === 'norow' || r === 'notouch' || r === 'nochat' || typeof r !== 'string') return null
+        return r
+    } catch {
+        return null
+    }
+}
+
 /** 밑에 버튼으로 고르게 한다. 못 띄우면 가운데 창으로 */
 async function inlineActions(handlers: any, message: any, channel: any, chatInputRef?: any, source?: string, extra?: any[]) {
-    const choice = await showButtons(message)
+    // 안드로이드가 못 띄우면 JS 로 그린 버튼 줄, 그것도 안 되면 가운데 창
+    let choice = await showButtons(message)
+    if (choice === null) choice = await showJsButtons(message)
     if (choice === null) return openActions(handlers, message, channel, chatInputRef, source, extra)
     if (choice === 'edit') edit(handlers, message, channel, chatInputRef, source, extra)
     else if (choice === 'delete') remove(message, channel)

@@ -60,7 +60,7 @@ import kotlin.math.sqrt
 private const val ACCESSORIES_VIEW = "com.discord.chat.presentation.message.MessageAccessoriesView"
 private const val FONT_MANAGER = "com.facebook.react.common.assets.ReactFontManager"
 /** 이보다 오래전에 닿은 줄은 쓰지 않는다 */
-private const val TOUCH_TTL = 4000L
+private const val TOUCH_TTL = 10000L
 /** 메시지를 옆으로 당길 때 보이는 연필 아이콘 (SwipeHelper 가 이 리소스로 editIcon 을 만든다) */
 private const val SWIPE_EDIT_ICON = "ic_swipe_edit"
 private const val SWIPE_REPLY_ICON = "ic_swipe_reply"
@@ -163,11 +163,28 @@ private class Rv(private val r: Recycler) {
 
     /** 항목 id (어댑터가 고정 id 를 쓴다. 없으면 위치로) */
     fun idOf(list: View, child: View): Long? {
-        val pos = r.adapterPosition(list, child) ?: return null
+        val pos = r.adapterPosition(list, child) ?: byName(list, child) ?: return null
         if (pos < 0) return null
-        val id = r.itemId(list, child) ?: -1L
+        val id = r.itemId(list, child) ?: named(list, "getChildItemId", child) as? Long ?: -1L
         return if (id == -1L) -1000L - pos else id
     }
+
+    /** 모양으로 못 찾았을 때: 이름이 남아 있으면 RecyclerView 공개 메서드로 */
+    private val namedCache = HashMap<String, Method?>()
+    private fun named(list: View, name: String, child: View): Any? = try {
+        val m = namedCache.getOrPut(name) {
+            try {
+                r.rv.getMethod(name, View::class.java)
+            } catch (e: Throwable) {
+                null
+            }
+        }
+        m?.invoke(list, child)
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun byName(list: View, child: View): Int? = named(list, "getChildAdapterPosition", child) as? Int
 
     /** 0 = 멈춤 */
     fun scrollState(list: View): Int = r.scrollState(list)
@@ -879,6 +896,27 @@ val messageActionsPlugin = plugin {
                 },
             ),
         )
+        // 채팅 목록이 onInterceptTouchEvent 를 따로 고쳐 쓰는 버전도 있어서, 손가락이 닿는 순간은 dispatchTouchEvent 에서도 기억한다
+        try {
+            hooks.add(
+                XposedHelpers.findAndHookMethod(
+                    ViewGroup::class.java,
+                    "dispatchTouchEvent",
+                    MotionEvent::class.java,
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val list = param.thisObject as? ViewGroup ?: return
+                            val ev = param.args[0] as? MotionEvent ?: return
+                            if (ev.actionMasked != MotionEvent.ACTION_DOWN || !chatListView.isInstance(list)) return
+                            val row = childUnder(list, ev.x, ev.y) ?: return
+                            touched = Touched(WeakReference(list), WeakReference(row), SystemClock.uptimeMillis())
+                        }
+                    },
+                ),
+            )
+        } catch (e: Throwable) {
+            log.w("dispatchTouchEvent not hooked: $e")
+        }
         hooks.add(
             XposedHelpers.findAndHookMethod(
                 rvClass,
