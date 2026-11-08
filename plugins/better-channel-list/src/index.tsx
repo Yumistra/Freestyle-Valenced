@@ -168,26 +168,38 @@ function previewText(channel: any): string | undefined {
     return name ? (system ? `${name} ${body}` : `${name}: ${body}`) : body
 }
 
-function withPreviews(args: any[]): any[] {
+/** 우리가 subtitle 을 넣은 채널 줄 (끄면 다시 뺀다) */
+const touched = new Set<any>()
+
+/**
+ * 채널 줄 정보에 subtitle 을 바로 넣는다.
+ * (guildChannels 를 감싸서 바꾸면 디스코드 TextChannel 이 원래 객체를 다시 찾다가 멈춰서, 객체를 그대로 두고 값만 넣는다)
+ */
+function fillPreviews(args: any[]) {
     const p = args[0]
     const gc = p?.guildChannels
-    if (!gc || typeof gc.getChannelFromSectionRow !== 'function' || !settings().lastMessage) return args
-    const proxy = Object.create(gc)
-    proxy.getChannelFromSectionRow = function (section: any, row: any) {
-        const res = gc.getChannelFromSectionRow(section, row)
-        const ch = res?.channel
-        const rec = ch?.record
-        if (!rec || ch.subtitle != null || !TEXTUAL.has(rec.type)) return res
-        const text = previewText(rec)
-        if (!text) return res
-        status.withMessage++
-        const c2 = Object.create(ch)
-        Object.defineProperty(c2, 'subtitle', { value: text, enumerable: true })
-        const r2 = Object.create(res)
-        Object.defineProperty(r2, 'channel', { value: c2, enumerable: true })
-        return r2
+    if (!gc || typeof gc.getChannelFromSectionRow !== 'function') return
+    const res = gc.getChannelFromSectionRow(p.section, p.row)
+    const ch = res?.channel
+    const rec = ch?.record
+    if (!ch || !rec || !TEXTUAL.has(rec.type)) return
+    const ours = touched.has(ch)
+    // 디스코드가 원래 넣은 subtitle 은 건드리지 않는다
+    if (!ours && ch.subtitle != null) return
+    const text = settings().lastMessage ? previewText(rec) : undefined
+    try {
+        if (text) {
+            if (ch.subtitle !== text) Object.defineProperty(ch, 'subtitle', { value: text, writable: true, configurable: true, enumerable: true })
+            touched.add(ch)
+            status.withMessage++
+        } else if (ours) {
+            delete ch.subtitle
+            if (ch.subtitle !== undefined) ch.subtitle = undefined
+            touched.delete(ch)
+        }
+    } catch (e: any) {
+        status.lastError = String(e?.message ?? e)
     }
-    return [{ ...p, guildChannels: proxy }, ...args.slice(1)]
 }
 
 function patchChannelList(cleanup: (...f: any[]) => void) {
@@ -201,7 +213,7 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
                         instead(mod, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                             if (key === 'renderChannelListItem') status.rows++
                             try {
-                                args = withPreviews(args)
+                                fillPreviews(args)
                             } catch (e: any) {
                                 status.lastError = String(e?.message ?? e)
                             }
@@ -270,6 +282,13 @@ export default plugin({
         onGuild()
 
         patchChannelList(cleanup)
+        cleanup(() => {
+            for (const ch of touched)
+                try {
+                    delete ch.subtitle
+                } catch {}
+            touched.clear()
+        })
     },
     SettingsComponent: SettingsPage,
 } as any)
