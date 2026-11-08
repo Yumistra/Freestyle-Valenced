@@ -151,6 +151,23 @@ const SYSTEM: Record<number, string> = { 6: 'pinned a message', 7: 'joined the s
  */
 const TEXTUAL = new Set([0, 5, 10, 11, 12])
 
+/** 표시 이름 스타일 (폰 디스코드는 글꼴과 색을 쓴다) */
+function nameStyle(userId: string, guildId: string | undefined, fallback: any): { fontFamily?: string; color?: string } {
+    const out: { fontFamily?: string; color?: string } = {}
+    try {
+        const user = S().UserStore?.getUser?.(userId) ?? fallback
+        if (!user) return out
+        const fontId = find('getDisplayNameFontIdForMobileUser')?.getDisplayNameFontIdForMobileUser?.(user, guildId)
+        const family = fontId != null ? find('DISPLAY_NAME_STYLES_FONT_FAMILY_MAP')?.DISPLAY_NAME_STYLES_FONT_FAMILY_MAP?.[fontId] : undefined
+        if (typeof family === 'string') out.fontFamily = family
+        const styles = (guildId ? S().GuildMemberStore?.getMember?.(guildId, userId)?.displayNameStyles : undefined) ?? user.displayNameStyles ?? user.display_name_styles
+        const c = styles?.colors?.[0]
+        if (typeof c === 'number') out.color = `#${(c >>> 0).toString(16).padStart(6, '0').slice(-6)}`
+        else if (typeof c === 'string') out.color = c.startsWith('#') ? c : `#${c}`
+    } catch {}
+    return out
+}
+
 interface Preview {
     /** 바뀌었는지 비교용 */
     key: string
@@ -176,13 +193,14 @@ function preview(channel: any): Preview | undefined {
     const name = s.showAuthor && authorId ? nameOf(authorId, channel.guild_id, m.author) : ''
     if (!name) return { key: body, node: body }
     // 이름은 서버 별명, 역할 색으로 굵게 (메시지의 이름처럼)
-    const color = s.roleColor ? colorOf(authorId, channel.guild_id) : undefined
+    const styled = s.nameStyle ? nameStyle(authorId, channel.guild_id, m.author) : {}
+    const color = styled.color ?? (s.roleColor ? colorOf(authorId, channel.guild_id) : undefined)
     const rest = system ? ` ${body}` : `: ${body}`
     return {
-        key: `${name}|${color}|${rest}`,
+        key: `${name}|${color}|${styled.fontFamily}|${rest}`,
         node: (
             <>
-                <Text style={{ fontWeight: '700', ...(color ? { color } : null) }}>{name}</Text>
+                <Text style={{ ...(styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' }), ...(color ? { color } : null) }}>{name}</Text>
                 {rest}
             </>
         ),
@@ -263,6 +281,7 @@ function SettingsPage() {
                 <TableRowGroup title="Channel list">
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
+                    <TableSwitchRow label="Name style" subLabel="Uses the author's display name font and color" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">
