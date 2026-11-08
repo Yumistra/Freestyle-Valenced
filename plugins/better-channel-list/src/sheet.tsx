@@ -130,8 +130,10 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
                 const c = cells[i]
                 if (c) onPick(c.value)
             }}
-            style={{ flexDirection: 'row', height: size }}
+            style={{ height: size }}
         >
+            {/* 칸들은 터치를 받지 않게 해서, 누른 위치(locationX)가 줄 기준으로 오게 한다 */}
+            <View pointerEvents="none" style={{ flexDirection: 'row', height: size }}>
             {cells.map(c =>
                 c.id ? (
                     <View key={c.key} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
@@ -143,6 +145,7 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
                     </RNText>
                 ),
             )}
+            </View>
         </Pressable>
     )
 })
