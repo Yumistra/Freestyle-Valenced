@@ -4,6 +4,7 @@ import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { toast } from './picker'
+import { status } from './status'
 import { update, useSettings } from './store'
 
 /** 두 번 눌러 지우기 */
@@ -75,6 +76,12 @@ export default function SettingsPage() {
                     {s.typing ? <TableSwitchRow label="Suggestions" subLabel="Shows matching emotes and effects above the chat bar while you type" value={s.suggestions} onValueChange={(suggestions: boolean) => update({ suggestions })} /> : null}
                     <TableSwitchRow label="Send plain emotes as files" subLabel="Off, plain emotes go as small image links. Emotes with effects are always sent as files" value={s.plainAsFile} onValueChange={(plainAsFile: boolean) => update({ plainAsFile })} />
                     <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Emote button" subLabel="Adds a button to the chat bar to search and add emotes" value={s.button} onValueChange={(button: boolean) => update({ button })} />
+                </TableRowGroup>
+
+                <TableRowGroup title="Status">
+                    <TableRow label="Chat bar" subLabel={status.contextBar} />
+                    <TableRow label="Commands" subLabel={`${status.store}, ${status.option}`} />
+                    <TableRow label="Emoji panel" subLabel={status.panel} />
                 </TableRowGroup>
 
                 <TableRowGroup title="Without Nitro">

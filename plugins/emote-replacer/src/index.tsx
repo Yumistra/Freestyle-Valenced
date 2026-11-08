@@ -9,7 +9,8 @@ import { EmoteButton } from './picker'
 import { quickPlan, rewrite, stickerNeedsWork } from './send'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, settings } from './store'
-import { EmojiOptionWatcher } from './emojiOption'
+import { inputRefs, watchEmojiOption } from './emojiOption'
+import { status } from './status'
 import { StylesBar } from './stylesBar'
 import { Suggestions } from './suggest'
 
@@ -33,11 +34,13 @@ function insertButton(tree: any) {
 
 /** 입력창 위 "답장 중" 줄 자리에 자동 완성 줄을 같이 그린다 */
 function withSuggestions(props: any, original: any) {
+    const id = props?.channel?.id
+    if (id && props?.chatInputRef) inputRefs.set(String(id), props.chatInputRef)
+    status.contextBar = 'Drawn'
     return (
         <>
             <Suggestions channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             <StylesBar channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
-            <EmojiOptionWatcher channelId={props?.channel?.id} inputRef={props?.chatInputRef} />
             {original}
         </>
     )
@@ -48,6 +51,7 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
         loadEmotes()
+        cleanup(watchEmojiOption())
         cleanup(
             getModules(withProps('getBuiltInCommands') as any, (mod: any) => {
                 cleanup(
@@ -95,7 +99,11 @@ export default plugin({
                 if (!bar) return
                 const key = typeof bar === 'function' ? 'default' : typeof bar?.type === 'function' ? 'type' : undefined
                 const target = key === 'default' ? mod : bar
-                if (!key) return
+                if (!key) {
+                    status.contextBar = 'Found, but could not hook'
+                    return
+                }
+                status.contextBar = 'Hooked, not drawn yet'
                 cleanup(
                     instead(target, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                         const out = orig.apply(this, args)
