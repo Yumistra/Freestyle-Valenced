@@ -387,6 +387,30 @@ function splitTree(node: any, sub: any, depth = 0): any {
     return kids === props.children ? node : cloneElement(node, undefined, ...(Array.isArray(kids) ? kids : [kids]))
 }
 
+/** 채널의 마지막 메시지 (ID, 수정 시각). 바뀔 때만 다시 그린다 */
+function useLastMessage(channelId: string | undefined) {
+    const read = () => {
+        if (!channelId) return ''
+        try {
+            const list = S().MessageStore?.getMessages?.(channelId)
+            const m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+            return m ? `${m.id}|${m.editedTimestamp ?? m.edited_timestamp ?? ''}|${m.content?.length ?? 0}` : ''
+        } catch {
+            return ''
+        }
+    }
+    const [v, setV] = useState(read)
+    useEffect(() => {
+        if (!channelId) return
+        const store = S().MessageStore
+        const f = () => setV(read())
+        store?.addChangeListener?.(f)
+        f()
+        return () => store?.removeChangeListener?.(f)
+    }, [channelId])
+    return v
+}
+
 function wrapperFor(type: any) {
     let w = wrappers.get(type)
     if (w) return w
@@ -398,6 +422,16 @@ function wrapperFor(type: any) {
     const render = isForward ? inner.render : inner
     if (typeof render !== 'function') return
     const body = function BetterChannelRow(props: any, ref?: any) {
+        // 마지막 메시지가 바뀌면 이 줄만 바로 다시 그린다 (디스코드 목록이 다시 그려지길 기다리지 않는다)
+        const ch = props?.channel
+        const textual = !!ch && TEXTUAL.has(ch.type)
+        useLastMessage(textual ? ch.id : undefined)
+        useSettings()
+        if (textual && (props.subtitle == null || props.subtitle?.bcl)) {
+            const pv = settings().lastMessage ? preview(ch) : undefined
+            if (pv) props = { ...props, subtitle: { type: 'voice', text: pv.node, key: pv.key, split: pv.split, bcl: true } }
+            else if (props.subtitle?.bcl) props = { ...props, subtitle: undefined }
+        }
         let out = isForward ? render(props, ref) : render(props)
         const sub = props?.subtitle
         if (sub?.split)
@@ -429,7 +463,7 @@ function wrapRow(el: any, depth = 0): any {
     if (Array.isArray(el)) return el.map(e => wrapRow(e, depth + 1))
     const props = el.props
     if (!props) return el
-    if ((props.subtitle?.split || (settings().redesign && props.channel)) && el.type && typeof el.type !== 'string') {
+    if ((props.subtitle?.split || props.channel) && el.type && typeof el.type !== 'string') {
         const w = wrapperFor(el.type)
         if (props.channel?.type === 2 || props.channel?.type === 13) rstatus.voice = (rstatus.voice + ` row${w ? '' : ' (cannot wrap)'}`).slice(-160)
         if (w) {
@@ -515,7 +549,7 @@ function fillPreviews(args: any[]) {
     try {
         if (pv) {
             // subtitle 은 글이 아니라 { type, text } 꼴이다 (getChannelSubtitleData). 'voice' 꼴이 text 를 한 줄로 그대로 보여 준다
-            if (ch.subtitle?.key !== pv.key) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text: pv.node, key: pv.key, split: pv.split }, writable: true, configurable: true, enumerable: true })
+            if (ch.subtitle?.key !== pv.key) Object.defineProperty(ch, 'subtitle', { value: { type: 'voice', text: pv.node, key: pv.key, split: pv.split, bcl: true }, writable: true, configurable: true, enumerable: true })
             touched.add(ch)
             status.withMessage++
         } else if (ours) {
