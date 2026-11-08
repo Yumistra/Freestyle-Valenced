@@ -118,6 +118,19 @@ const KEYWORDS: Array<[RegExp, string]> = [
     [/nsfw/, '🔞'],
 ]
 
+/** 채널 이름에서 이모지를 뺀 것 (이모지 칸에 이미 보이니까). 남는 것이 없으면 원래 이름 */
+const EMOJI_ALL: RegExp | undefined = (() => {
+    try {
+        return new RegExp(EMOJI_RE.source, 'gu')
+    } catch {}
+})()
+const EDGE = /^[\s\-_|｜┃︱・•·:;,.]+|[\s\-_|｜┃︱・•·:;,.]+$/g
+export function cleanName(name: string): string {
+    if (!EMOJI_ALL || !name) return name
+    const out = name.replace(EMOJI_ALL, '').replace(/[\uFE0F\u200D\u20E3]/g, '').replace(EDGE, '').replace(/\s{2,}/g, ' ')
+    return out.trim() ? out : name
+}
+
 export function guessEmoji(channel: any): string | undefined {
     const name = String(channel?.name ?? '')
     const m = EMOJI_RE.exec(name)
@@ -356,6 +369,11 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
             iconDone = true
             status.icons++
             const patch: any = { icon: <EmojiTile channel={channel} muted={muted} locked={isLimited(channel)} /> }
+            // 음성 채널 이름은 name 에 든 BaseChannelName({ name }) 이 그린다
+            if (s.stripNameEmoji && typeof props.name?.props?.name === 'string') {
+                const clean = cleanName(props.name.props.name)
+                if (clean !== props.name.props.name) patch.name = cloneElement(props.name, { name: clean })
+            }
             if (voice) {
                 status.badges++
                 patch.channelInfo = (
@@ -380,6 +398,11 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         if (!nameDone && textName) {
             nameDone = true
             const nsfw = isNSFW(channel)
+            // 설정: 채널 이름 속 이모지 빼기
+            if (s.stripNameEmoji) {
+                const clean = cleanName(name)
+                if (clean !== name) node = cloneElement(node, { [NAME_MARK]: true }, clean)
+            }
             if (!nsfw) return node
             status.nameIcons++
             // 이름 글과 디스코드 아이콘을 가로로 놓는다.

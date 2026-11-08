@@ -5,7 +5,7 @@
 	"description": "Shows the most recent message under each channel.",
 	"author": "Yumistra",
 	"icon": "ChatIcon",
-	"version": "1.0.43",
+	"version": "1.0.44",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

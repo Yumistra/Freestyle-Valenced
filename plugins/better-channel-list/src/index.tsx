@@ -623,6 +623,7 @@ function SettingsPage() {
                 <TableRowGroup title="Emoji">
                     <TableSwitchRow label="Emoji icons" subLabel="Shows each channel's emoji in a colored square instead of the channel icon" value={s.redesign} onValueChange={(redesign: boolean) => update({ redesign })} />
                     <TableSwitchRow label="Guess emojis" subLabel="Channels without a Discord emoji get one from their name, like 💬 for general or 🤖 for bots" value={s.autoEmoji} disabled={!s.redesign} onValueChange={(autoEmoji: boolean) => (update({ autoEmoji }), redraw())} />
+                    <TableSwitchRow label="Remove emojis from names" subLabel="The emoji only shows in the square" value={!!s.stripNameEmoji} disabled={!s.redesign} onValueChange={(stripNameEmoji: boolean) => update({ stripNameEmoji })} />
                 </TableRowGroup>
                 <TableRadioGroup title="Icon size" value={s.iconSize} onChange={(iconSize: any) => update({ iconSize })}>
                     {(['medium', 'small', 'tiny'] as const).map(k => (
