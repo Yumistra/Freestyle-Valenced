@@ -5,7 +5,8 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { cloneElement } from 'react'
 import { Image, Text, View } from 'react-native'
 import { EMOJI_COLORS } from './colors'
-import { settings, useSettings } from './store'
+import { emojiColor } from './png'
+import { settings, update, useSettings } from './store'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 
 /** 디스코드에 들어 있는 아이콘 (못 찾으면 undefined) */
@@ -147,7 +148,13 @@ export function EmojiTile({ channel, size, emoji, muted }: { channel?: any; size
     useSettings()
     const sz = SIZES[size ?? settings().iconSize] ?? SIZES.medium
     const e = emoji ?? channelEmoji(channel)
-    const bg = withAlpha(EMOJI_COLORS[e.name] ?? '#607D8B', isDark() ? 0.2 : 0.16)
+    // 서버 이모지는 그림에서 색을 골라 한 번 저장해 둔다
+    let base = EMOJI_COLORS[e.name]
+    if (e.id) {
+        base = settings().colors?.[e.id]
+        if (!base) emojiColor(e.id, color => update({ colors: { ...(settings().colors ?? {}), [e.id!]: color } }))
+    }
+    const bg = withAlpha(base ?? '#607D8B', isDark() ? 0.2 : 0.16)
     return (
         <View style={{ width: sz.box, height: sz.box, borderRadius: sz.radius, backgroundColor: bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginRight: 10, opacity: muted ? 0.3 : 1 }}>
             {e.id ? (

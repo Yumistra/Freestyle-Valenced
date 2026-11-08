@@ -21,6 +21,8 @@ export interface Settings {
     iconSize: 'medium' | 'small' | 'tiny'
     /** 직접 바꾼 채널 이모지 (채널 ID → 이모지) */
     icons: Record<string, string>
+    /** 서버 이모지 바탕색 (이모지 ID → 색) */
+    colors?: Record<string, string>
     /** 어느 채널에 미리보기를 보일지 */
     mode: 'all' | 'unreads' | 'default'
 }
