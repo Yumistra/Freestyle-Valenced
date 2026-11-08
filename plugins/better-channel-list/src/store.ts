@@ -5,8 +5,10 @@ export interface Settings {
     roleColor: boolean
     /** 보낸 사람 이름 보이기 */
     showAuthor: boolean
+    /** 어느 채널에 미리보기를 보일지 */
+    mode: 'all' | 'unreads' | 'default'
 }
-export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, showAuthor: true }
+export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, showAuthor: true, mode: 'all' }
 
 let storage: any
 export const bind = (s: any) => (storage = s)

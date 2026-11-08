@@ -180,7 +180,38 @@ function LastMessage({ channel }: { channel: any }) {
     )
 }
 
-// ── 채널 줄 ───────────────────────────────────────────────────────────────
+// ── 디스코드의 채널 목록 메시지 미리보기 켜기 ────────────────────────────────
+/**
+ * 폰 디스코드에는 채널 목록 메시지 미리보기가 이미 있다 (새 채널 목록 디자인).
+ * 서버마다의 설정(mobileRedesignChannelListSettings.messagePreviews)이 없으면
+ * MessagePreviewSetting.getSetting() 값을 쓰는데, 이 값을 'all' 또는 'unreads' 로 돌려준다.
+ */
+function patchPreviewSetting(cleanup: (...f: any[]) => void) {
+    const mod = find('MessagePreviewSetting')
+    const setting = mod?.MessagePreviewSetting
+    if (!setting) {
+        status.hook = 'MessagePreviewSetting not found'
+        return
+    }
+    const want = () => {
+        const m = settings().mode
+        return settings().lastMessage && m !== 'default' ? m : undefined
+    }
+    let n = 0
+    for (const key of ['getSetting', 'useSetting'])
+        if (typeof setting[key] === 'function') {
+            cleanup(
+                instead(setting, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    status.rows++
+                    return want() ?? orig.apply(this, args)
+                }),
+            )
+            n++
+        }
+    status.hook = n ? `Hooked (${n})` : 'No getSetting'
+}
+
+// ── 채널 줄 (예전 방식, 지금은 안 씀) ──────────────────────────────────────
 /** 글을 쓰는 채널 (텍스트, 공지, 스레드) */
 const TEXTUAL = new Set([0, 5, 10, 11, 12])
 
@@ -193,7 +224,7 @@ function withLastMessage(props: any) {
 }
 
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableSwitchRow, TableRow } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRow, TableRadioGroup, TableRadioRow } = Design as any
     const s = useSettings()
     const [, tick] = useState(0)
     useEffect(() => {
@@ -204,12 +235,16 @@ function SettingsPage() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
                 <TableRowGroup title="Channel list">
-                    <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
-                    <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
-                    <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
+                    <TableSwitchRow label="Last message" subLabel="Turns on Discord's own message previews in the channel list" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                 </TableRowGroup>
+                {s.lastMessage ? (
+                    <TableRadioGroup title="Show previews for" defaultValue={s.mode} onChange={(mode: any) => update({ mode })}>
+                        <TableRadioRow label="All channels" value="all" />
+                        <TableRadioRow label="Unread channels" value="unreads" />
+                    </TableRadioGroup>
+                ) : null}
                 <TableRowGroup title="Status">
-                    <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
+                    <TableRow label="Message previews" subLabel={`${status.hook}, read ${status.rows} times`} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
@@ -245,23 +280,7 @@ export default plugin({
         cleanup(() => guildStore?.removeChangeListener?.(onGuild))
         onGuild()
 
-        cleanup(
-            getModuleWithImportedPath('modules/guild_sidebar/native/ChannelItem.tsx', (mod: any) => {
-                const item = mod?.default
-                if (!item) return void (status.hook = 'Module has no default')
-                const key = typeof item === 'function' ? 'default' : typeof item?.type === 'function' ? 'type' : undefined
-                if (!key) return void (status.hook = `Unknown shape, ${typeof item}`)
-                status.hook = `Hooked (${key})`
-                cleanup(
-                    instead(key === 'default' ? mod : item, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                        try {
-                            args = [withLastMessage(args[0]), ...args.slice(1)]
-                        } catch {}
-                        return orig.apply(this, args)
-                    }),
-                )
-            }) as any,
-        )
+        patchPreviewSetting(cleanup)
     },
     SettingsComponent: SettingsPage,
 } as any)
