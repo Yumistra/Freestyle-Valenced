@@ -2,7 +2,7 @@ import { Dispatcher } from '@valenced/discord/common/flux'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { lookupModule } from '@valenced/modules/finders'
+import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
@@ -187,28 +187,41 @@ function LastMessage({ channel }: { channel: any }) {
  * MessagePreviewSetting.getSetting() 값을 쓰는데, 이 값을 'all' 또는 'unreads' 로 돌려준다.
  */
 function patchPreviewSetting(cleanup: (...f: any[]) => void) {
-    const mod = find('MessagePreviewSetting')
-    const setting = mod?.MessagePreviewSetting
-    if (!setting) {
-        status.hook = 'MessagePreviewSetting not found'
-        return
-    }
     const want = () => {
         const m = settings().mode
         return settings().lastMessage && m !== 'default' ? m : undefined
     }
-    let n = 0
-    for (const key of ['getSetting', 'useSetting'])
-        if (typeof setting[key] === 'function') {
-            cleanup(
-                instead(setting, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                    status.rows++
-                    return want() ?? orig.apply(this, args)
-                }),
-            )
-            n++
-        }
-    status.hook = n ? `Hooked (${n})` : 'No getSetting'
+    const done = new WeakSet<object>()
+    const apply = (mod: any) => {
+        if (!mod || typeof mod !== 'object') return
+        // 이름이 버전마다 조금 다를 수 있어서 MessagePreview 가 든 설정을 찾는다
+        const key = 'MessagePreviewSetting' in mod ? 'MessagePreviewSetting' : Object.keys(mod).find(k => /^MessagePreview/i.test(k) && typeof mod[k]?.getSetting === 'function')
+        const setting = key ? mod[key] : undefined
+        if (!setting || done.has(setting)) return
+        done.add(setting)
+        let n = 0
+        for (const fn of ['getSetting', 'useSetting'])
+            if (typeof setting[fn] === 'function') {
+                cleanup(
+                    instead(setting, fn, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        status.rows++
+                        return want() ?? orig.apply(this, args)
+                    }),
+                )
+                n++
+            }
+        status.hook = n ? `Hooked ${key} (${n})` : `${key} has no getSetting`
+    }
+    status.hook = 'Looking for MessagePreviewSetting'
+    try {
+        cleanup(getModules(withProps('MessagePreviewSetting') as any, apply) as any)
+    } catch (e: any) {
+        status.lastError = String(e?.message ?? e)
+    }
+    // 사용자 설정 모듈 (UseLegacyChatInput 이 같이 있다)
+    try {
+        cleanup(getModules(withProps('UseLegacyChatInput') as any, apply) as any)
+    } catch {}
 }
 
 // ── 채널 줄 (예전 방식, 지금은 안 씀) ──────────────────────────────────────
