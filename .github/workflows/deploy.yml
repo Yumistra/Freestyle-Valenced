@@ -31,10 +31,16 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           for p in "platforms;android-36" "platforms;android-37" "build-tools;36.0.0"; do "$SDKM" --install "$p" > /dev/null || echo "skip $p"; done
-      # 네이티브(Kotlin) 플러그인. 실패해도 JS 플러그인 배포는 계속한다
+      # 네이티브(Kotlin) 플러그인. Gradle 내려받기가 가끔 시간 초과라 3번까지 다시 한다.
+      # 끝내 실패하면 배포하지 않는다 (plugin.jar 없이 나가면 받은 사람은 안드로이드 부분이 안 켜진다)
       - name: Build native plugins
-        continue-on-error: true
-        run: bash scripts/build-native.sh
+        run: |
+          for i in 1 2 3; do
+            bash scripts/build-native.sh && exit 0
+            echo "native build failed (try $i), retrying"
+            sleep 20
+          done
+          exit 1
       - id: pages
         uses: actions/configure-pages@v5
       - run: npm install --no-audit --no-fund
