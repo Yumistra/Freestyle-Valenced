@@ -42,7 +42,10 @@ export const SIZES = {
     tiny: { box: 20, emoji: 14, radius: 10 },
 } as const
 
-export const status = { icons: 0, badges: 0, nameIcons: 0 }
+export const status = { icons: 0, badges: 0, nameIcons: 0, voice: '', error: '' }
+
+const typeName = (t: any): string => (typeof t === 'string' ? t : t?.displayName ?? t?.name ?? t?.type?.displayName ?? t?.type?.name ?? t?.render?.name ?? (t?.$$typeof ? String(t.$$typeof.description ?? '?') : '?'))
+const rootName = (n: any): string => (Array.isArray(n) ? `[${n.length}]` : n && typeof n === 'object' ? typeName(n.type) : String(n))
 
 export interface ChannelEmoji {
     name: string
@@ -313,6 +316,7 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         if (!props) return node
         if (depth > 0 && typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
             const w = wrap?.(node)
+            trace(`inner ${typeName(node.type)}${w && w !== node ? '' : ' (cannot wrap)'}`)
             if (w && w !== node) {
                 iconDone = true
                 return w
@@ -323,11 +327,21 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         const kids = deeper(c, depth + 1)
         return kids === c ? node : cloneElement(node, undefined, ...(Array.isArray(kids) ? kids : [kids]))
     }
+    const trace = voice ? (msg: string) => (status.voice = (status.voice + ' ' + msg).slice(-160)) : () => {}
     try {
+        trace(`root ${rootName(out)}`)
         const r = walk(out, 0)
-        if (iconDone || !wrap) return r
-        return deeper(r, 0)
-    } catch {
+        if (iconDone) {
+            trace('icon ok')
+            return r
+        }
+        if (!wrap) return r
+        const d = deeper(r, 0)
+        trace(iconDone ? 'wrapped inner' : 'no inner')
+        return d
+    } catch (e: any) {
+        status.error = String(e?.message ?? e)
+        trace(`error ${status.error}`)
         return out
     }
 }

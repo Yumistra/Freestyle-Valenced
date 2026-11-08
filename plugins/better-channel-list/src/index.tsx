@@ -430,6 +430,7 @@ function wrapRow(el: any, depth = 0): any {
     if (!props) return el
     if ((props.subtitle?.split || (settings().redesign && props.channel)) && el.type && typeof el.type !== 'string') {
         const w = wrapperFor(el.type)
+        if (props.channel?.type === 2 || props.channel?.type === 13) rstatus.voice = (rstatus.voice + ` row${w ? '' : ' (cannot wrap)'}`).slice(-160)
         if (w) {
             if (props.subtitle?.split && status.split === 'Not found yet') status.split = 'Hooked'
             return { ...el, type: w }
@@ -666,7 +667,8 @@ function SettingsPage() {
                 <TableRowGroup title="Status">
                     <TableRow label="Channel rows" subLabel={`${status.hook}, drawn ${status.rows} times, ${status.withMessage} with messages`} />
                     <TableRow label="Split names" subLabel={`${status.split}, name styles ${status.names.toLowerCase()}${status.variant ? `, ${status.variant}` : ''}`} />
-                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons`} />
+                    <TableRow label="Redesign" subLabel={`${rstatus.icons} icons, ${rstatus.badges} voice badges, ${rstatus.nameIcons} name icons${rstatus.error ? `, ${rstatus.error}` : ''}`} />
+                    <TableRow label="Voice rows" subLabel={rstatus.voice.trim() || 'Not drawn yet'} />
                     <TableRow label="Last messages" subLabel={`Asked ${status.asked} times, received ${status.received}${status.lastError ? `, ${status.lastError}` : ''}`} />
                 </TableRowGroup>
             </Stack>
