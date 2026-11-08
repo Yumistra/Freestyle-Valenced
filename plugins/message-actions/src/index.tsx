@@ -8,8 +8,8 @@ import { getModules, lookupModule, lookupModules } from '@valenced/modules/finde
 import { withDependencies, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
-import { useState } from 'react'
-import { Image, LayoutAnimation, ScrollView, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Animated, Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 
 /**
  * 내 메시지를 두 번 누르면 (기본: 반응 달기) 대신 가운데 작은 창으로 수정·삭제를 고르게 한다.
@@ -228,116 +228,146 @@ function openActions(handlers: any, message: any, channel: any, chatInputRef?: a
 const editableOf = (message: any) =>
     MESSAGE_TYPES_EDITABLE.has(message?.type ?? 0) && message?.state !== 'SEND_FAILED' && message?.state !== 'SENDING'
 
-/** 테마 색 (#rrggbbaa → 안드로이드 #aarrggbb) */
-function themeColor(names: string[], fallback: string) {
+
+/** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
+// ── 버튼 줄 (JS 로 그린다) ─────────────────────────────────────
+// 화면 밑에 떠오르는 버튼 줄. 바깥을 누르면 닫힌다. 앱 전체 위에 늘 있는 토스트 자리 옆에 같이 그린다.
+
+interface ButtonsRequest {
+    message: any
+    editable: boolean
+    resolve: (choice: string | null) => void
+}
+let current: ButtonsRequest | undefined
+const listeners = new Set<() => void>()
+const emit = () => listeners.forEach(f => f())
+let barReady = false
+
+/** 테마 색 (CSS 그대로) */
+function cssColor(names: string[], fallback: string) {
     try {
-        const tokens: any = Tokens
+        const t: any = (Tokens as any).default
         const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
         for (const name of names) {
-            const key = tokens.default.colors[name]
+            const key = t.colors[name]
             if (!key) continue
-            const c = tokens.default.internal.resolveSemanticColor(theme, key)
-            if (typeof c !== 'string') continue
-            const hex = c.trim()
-            if (/^#[0-9a-f]{6}$/i.test(hex)) return hex
-            if (/^#[0-9a-f]{8}$/i.test(hex)) return `#${hex.slice(7, 9)}${hex.slice(1, 7)}`
-            const m = hex.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)$/i)
-            if (m) {
-                const h = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0')
-                const a = m[4] === undefined ? 1 : m[4].endsWith('%') ? Number.parseFloat(m[4]) / 100 : Number(m[4])
-                return `#${h(a * 255)}${h(+m[1])}${h(+m[2])}${h(+m[3])}`
-            }
+            const c = t.internal.resolveSemanticColor(theme, key)
+            if (typeof c === 'string') return c
         }
     } catch {}
     return fallback
 }
 
-/** 디스코드 버튼 종류별 색 (Button 의 variant 와 같은 토큰) */
-const VARIANTS: Record<string, string> = {
-    primary: 'CONTROL_PRIMARY',
-    secondary: 'CONTROL_SECONDARY',
-    'critical-primary': 'CONTROL_CRITICAL_PRIMARY',
-    'critical-secondary': 'CONTROL_CRITICAL_SECONDARY',
-}
-const FALLBACK: Record<string, [string, string]> = {
-    primary: ['#5865f2', '#ffffff'],
-    secondary: ['#4e5058', '#ffffff'],
-    'critical-primary': ['#da373c', '#ffffff'],
-    'critical-secondary': ['#4e5058', '#f23f43'],
-}
-function variantColors(variant: string) {
-    const p = VARIANTS[variant] ?? VARIANTS.secondary
-    const [bg, fg] = FALLBACK[variant] ?? FALLBACK.secondary
-    const bgc = themeColor([`${p}_BACKGROUND_DEFAULT`], bg)
-    const border = themeColor([`${p}_BORDER_DEFAULT`], '#00000000')
-    return {
-        bg: bgc,
-        bgActive: themeColor([`${p}_BACKGROUND_ACTIVE`], bgc),
-        border,
-        borderActive: themeColor([`${p}_BORDER_ACTIVE`], border),
-        fg: themeColor([`${p}_TEXT_DEFAULT`], fg),
-    }
+function close(choice: string) {
+    const r = current
+    if (!r) return
+    current = undefined
+    emit()
+    r.resolve(choice)
 }
 
-/** 디스코드 버튼 글자 (text-sm/semibold: 글꼴을 바꾸는 플러그인도 따라감) */
-function buttonFont() {
-    try {
-        const style = D().TextStyleSheet?.['text-sm/semibold']
-        if (style?.fontFamily) return { family: String(style.fontFamily), size: Number(style.fontSize) || 14 }
-    } catch {}
-    return { family: 'ggsans-Semibold', size: 14 }
-}
-
-function buttonRadius() {
-    try {
-        const t: any = (Tokens as any).default
-        const r = t?.modules?.button?.BORDER_RADIUS ?? t?.radii?.sm
-        if (typeof r === 'number' && r >= 0) return Math.min(r, 999)
-    } catch {}
-    return 8
-}
-
-const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
-
-/** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
-/** 버튼을 못 띄워 창으로 보여 줄 때, 이유를 한 번만 알려 준다 */
-const told = new Set<string>()
-function whyNoButtons(reason: string) {
-    if (told.has(reason)) return
-    told.add(reason)
-    const text =
-        reason === 'native'
-            ? 'Message Actions: buttons need the Android part of the plugin, which is not loaded. Showing a dialog instead'
-            : reason === 'nochat'
-              ? 'Message Actions: this Discord version is not supported for buttons yet. Showing a dialog instead'
-              : 'Message Actions: could not find the message on screen. Showing a dialog instead'
-    try {
-        ToastActionCreators.open(`message-actions-why-${seq++}`, { text })
-    } catch {}
-}
-
-async function showButtons(message: any): Promise<string | null> {
-    const buttons: any[] = []
-    if (isMine(message) && editableOf(message)) buttons.push({ id: 'edit', label: 'Edit', icon: ICON('pencilicon'), colors: variantColors('secondary') })
-    buttons.push({
-        id: 'delete',
-        label: 'Delete',
-        icon: ICON('trashicon'),
-        colors: variantColors('critical-secondary'),
-        confirm: settings().confirmDelete ? { label: 'Delete?', colors: variantColors('critical-primary') } : undefined,
-    })
-    const opts = { buttons, font: buttonFont(), radius: buttonRadius(), inset: 68 }
-    try {
-        const r = await Promise.resolve((callNativeMethod as any)(`${NATIVE_ID}.showActions`, [JSON.stringify(opts)]))
-        if (r === 'norow' || r === 'notouch' || r === 'nochat' || typeof r !== 'string') {
-            whyNoButtons(typeof r === 'string' ? r : 'native')
-            return null
+function ActionBar() {
+    const [, tick] = useState(0)
+    const [confirming, setConfirming] = useState(false)
+    const anim = useRef(new Animated.Value(0)).current
+    useEffect(() => {
+        const f = () => tick(n => n + 1)
+        listeners.add(f)
+        return () => void listeners.delete(f)
+    }, [])
+    const req = current
+    useEffect(() => {
+        setConfirming(false)
+        if (req) {
+            anim.setValue(0)
+            Animated.spring(anim, { toValue: 1, useNativeDriver: true, damping: 20, stiffness: 260, mass: 1 }).start()
         }
-        return r
-    } catch {
-        whyNoButtons('native')
-        return null
+    }, [req])
+    if (!req) return null
+    const { Button, Text } = D()
+    const content = String(req.message?.content ?? '').replace(/\s+/g, ' ').trim()
+    const onDelete = () => {
+        if (settings().confirmDelete && !confirming) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+            return setConfirming(true)
+        }
+        close('delete')
     }
+    return (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, elevation: 9999 }}>
+            <Pressable style={{ flex: 1 }} onPress={() => close('')} accessibilityLabel="Close" />
+            <Animated.View
+                style={{
+                    position: 'absolute',
+                    left: 12,
+                    right: 12,
+                    bottom: 96,
+                    padding: 12,
+                    gap: 10,
+                    borderRadius: 16,
+                    backgroundColor: cssColor(['BACKGROUND_SURFACE_HIGHEST', 'BACKGROUND_FLOATING', 'BACKGROUND_TERTIARY'], '#2b2d31'),
+                    borderWidth: 1,
+                    borderColor: cssColor(['BORDER_SUBTLE', 'BACKGROUND_MODIFIER_ACCENT'], 'rgba(128,128,128,0.25)'),
+                    shadowColor: '#000',
+                    shadowOpacity: 0.3,
+                    shadowRadius: 12,
+                    elevation: 12,
+                    opacity: anim,
+                    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }, { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
+                }}
+            >
+                {content ? (
+                    <Text variant="text-sm/medium" color="text-muted" numberOfLines={1}>
+                        {content}
+                    </Text>
+                ) : null}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {req.editable ? (
+                        <View style={{ flex: 1 }}>
+                            <Button text="Edit" variant="secondary" size="md" grow onPress={() => close('edit')} />
+                        </View>
+                    ) : null}
+                    <View style={{ flex: 1 }}>
+                        <Button text={confirming ? 'Delete?' : 'Delete'} variant={confirming ? 'destructive' : 'secondary'} size="md" grow onPress={onDelete} />
+                    </View>
+                </View>
+            </Animated.View>
+        </View>
+    )
+}
+
+function patchBar(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModuleWithImportedPath('modules/toast/native/AppToastContainer.tsx', (mod: any) => {
+            if (typeof mod?.default !== 'function') return
+            barReady = true
+            cleanup(
+                instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    const out = orig.apply(this, args)
+                    return (
+                        <>
+                            {out}
+                            <ActionBar />
+                        </>
+                    )
+                }),
+                () => {
+                    barReady = false
+                },
+            )
+        }) as any,
+    )
+    cleanup(() => close(''))
+}
+
+/** 버튼 줄을 띄우고 누른 버튼 id 를 돌려준다. 닫으면 "", 띄울 수 없으면 null */
+function showButtons(message: any): Promise<string | null> {
+    if (!barReady) return Promise.resolve(null)
+    close('')
+    return new Promise(resolve => {
+        current = { message, editable: isMine(message) && editableOf(message), resolve }
+        emit()
+    })
 }
 
 /** 밑에 버튼으로 고르게 한다. 못 띄우면 가운데 창으로 */
@@ -497,6 +527,7 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
+        patchBar(cleanup)
         // 저장된 설정을 다 불러온 뒤 네이티브에 알린다
         Promise.resolve(jsonStorage?.get?.()).then(syncNative, syncNative)
         cleanup(() => {
