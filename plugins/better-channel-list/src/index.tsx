@@ -286,21 +286,21 @@ function FitName({ lineHeight, children }: { lineHeight: number; children: any }
     const w = m ? m.w * k : 0
     return (
         <View style={{ width: w, height: lineHeight, overflow: 'hidden', flexShrink: 0 }}>
-            <View
-                onLayout={(e: any) => {
-                    const { width, height } = e.nativeEvent.layout
-                    if (!m || Math.abs(m.w - width) > 0.5 || Math.abs(m.h - height) > 0.5) setM({ w: width, h: height })
-                }}
-                style={{
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    opacity: m ? 1 : 0,
-                    // 가운데 기준으로 줄어드니 왼쪽 위로 다시 옮긴다
-                    transform: m ? [{ translateX: -(m.w * (1 - k)) / 2 }, { translateY: -(m.h * (1 - k)) / 2 + (lineHeight - m.h * k) / 2 }, { scale: k }] : [],
-                }}
-            >
-                {children}
+            {/* 넓은 칸 안에 두어 이름이 줄바꿈 없이 원래 크기로 그려지게 한다 */}
+            <View style={{ position: 'absolute', left: 0, top: 0, width: 2000, flexDirection: 'row', alignItems: 'flex-start' }}>
+                <View
+                    onLayout={(e: any) => {
+                        const { width, height } = e.nativeEvent.layout
+                        if (!m || Math.abs(m.w - width) > 0.5 || Math.abs(m.h - height) > 0.5) setM({ w: width, h: height })
+                    }}
+                    style={{
+                        opacity: m ? 1 : 0,
+                        // 가운데 기준으로 줄어드니 왼쪽 위로 다시 옮긴다
+                        transform: m ? [{ translateX: -(m.w * (1 - k)) / 2 }, { translateY: -(m.h * (1 - k)) / 2 + (lineHeight - m.h * k) / 2 }, { scale: k }] : [],
+                    }}
+                >
+                    {children}
+                </View>
             </View>
         </View>
     )
