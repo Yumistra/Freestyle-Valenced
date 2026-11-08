@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.better-channel-list",
+	"name": "Better Channel List",
+	"description": "Shows the last message under each channel and gives channels emoji icons.",
+	"author": "Yumistra",
+	"icon": "ChatIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}

@@ -15,6 +15,7 @@ Plugins for Valenced.
 | Custom Welcome | `yumistra.custom-welcome` |
 | Multi RPC | `yumistra.multi-rpc` |
 | Clean Emoji | `yumistra.clean-emoji` |
+| Better Channel List | `yumistra.better-channel-list` |
 
 ## Install
 
