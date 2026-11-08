@@ -5,7 +5,7 @@ import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleW
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
-import { Dimensions, FlatList, Image, Pressable, ScrollView, Text as RNText, TouchableOpacity, View } from 'react-native'
+import { Dimensions, FlatList, Image, Pressable, ScrollView, Text as RNText, View } from 'react-native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { EMOJI_COLORS } from './colors'
@@ -55,6 +55,7 @@ type Row = { key: string; header?: string; cells?: Cell[] }
 type Tab = { key: string; label: string; icon?: string; emoji?: string; row: number }
 
 const SHEET_KEY = 'bcl-emoji-sheet'
+const VIEWABILITY = { itemVisiblePercentThreshold: 50, minimumViewTime: 80 }
 const COLS = 8
 const HEADER_H = 34
 
@@ -107,21 +108,10 @@ function chunk(cells: Cell[], prefix: string): Row[] {
     return rows
 }
 
-/** 이모지 한 칸 (다시 그릴 필요가 없어서 memo) */
-const EmojiCell = memo(function EmojiCell({ cell, size, onPick }: { cell: Cell; size: number; onPick: (v: string) => void }) {
-    return (
-        <TouchableOpacity accessibilityLabel={cell.text ?? cell.value} activeOpacity={0.5} onPress={() => onPick(cell.value)} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-            {cell.id ? (
-                <Image source={{ uri: `https://cdn.discordapp.com/emojis/${cell.id}.png?size=48` }} style={{ width: size * 0.66, height: size * 0.66 }} resizeMode="contain" fadeDuration={0} />
-            ) : (
-                <RNText allowFontScaling={false} style={{ fontSize: size * 0.56 }}>
-                    {cell.value}
-                </RNText>
-            )}
-        </TouchableOpacity>
-    )
-})
-
+/**
+ * 이모지 한 줄. 칸마다 누르는 부품을 두면 무거워서, 줄 전체를 한 번에 받고 누른 x 위치로 칸을 고른다.
+ * 기본 이모지는 글자 하나씩, 서버 이모지는 그림 하나씩만 그린다.
+ */
 const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size: number; onPick: (v: string) => void }) {
     const { Text } = Design as any
     if (row.header)
@@ -132,12 +122,53 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
                 </Text>
             </View>
         )
+    const cells = row.cells!
+    const img = Math.round(size * 0.66)
     return (
-        <View style={{ flexDirection: 'row', height: size }}>
-            {row.cells!.map(c => (
-                <EmojiCell key={c.key} cell={c} size={size} onPick={onPick} />
+        <Pressable
+            onPress={(e: any) => {
+                const i = Math.floor((e?.nativeEvent?.locationX ?? 0) / size)
+                const c = cells[i]
+                if (c) onPick(c.value)
+            }}
+            style={{ flexDirection: 'row', height: size }}
+        >
+            {cells.map(c =>
+                c.id ? (
+                    <View key={c.key} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+                        <Image source={{ uri: `https://cdn.discordapp.com/emojis/${c.id}.png?size=48` }} style={{ width: img, height: img }} resizeMode="contain" fadeDuration={0} />
+                    </View>
+                ) : (
+                    <RNText key={c.key} allowFontScaling={false} style={{ width: size, height: size, fontSize: size * 0.56, lineHeight: size, textAlign: 'center' }}>
+                        {c.value}
+                    </RNText>
+                ),
+            )}
+        </Pressable>
+    )
+})
+
+/** 아래 바. 스크롤할 때 이것만 다시 그린다 */
+const TabBar = memo(function TabBar({ tabs, onJump, setRef }: { tabs: Tab[]; onJump: (i: number) => void; setRef: (f: (i: number) => void) => void }) {
+    const { Text } = Design as any
+    const [active, setActive] = useState(0)
+    setRef(i => setActive(a => (a === i ? a : i)))
+    return (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
+            {tabs.map((t, i) => (
+                <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => (setActive(i), onJump(i))} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
+                    {t.icon ? (
+                        <Image source={{ uri: t.icon }} style={{ width: 28, height: 28, borderRadius: 14 }} fadeDuration={0} />
+                    ) : t.emoji ? (
+                        <RNText allowFontScaling={false} style={{ fontSize: 22 }}>
+                            {t.emoji}
+                        </RNText>
+                    ) : (
+                        <Text variant="text-xs/bold">{t.label.slice(0, 2)}</Text>
+                    )}
+                </Pressable>
             ))}
-        </View>
+        </ScrollView>
     )
 })
 
@@ -149,7 +180,7 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
 function EmojiSheet({ channel }: { channel: any }) {
     const { ActionSheet, TextInput, Button, Text } = Design as any
     const [text, setText] = useState('')
-    const [active, setActive] = useState(0)
+    const setActiveRef = useRef<(i: number) => void>(() => {})
     const listRef = useRef<any>(null)
     const width = Dimensions.get('window').width
     const size = Math.floor((width - 24) / COLS)
@@ -201,23 +232,33 @@ function EmojiSheet({ channel }: { channel: any }) {
         },
         [searchRows, rows, offsets, size],
     )
-    const onScroll = useCallback(
-        (e: any) => {
-            if (searchRows) return
-            const y = e.nativeEvent.contentOffset.y + 1
-            let t = 0
-            for (let i = 0; i < tabs.length; i++) if (offsets[tabs[i].row] <= y) t = i
-            setActive(a => (a === t ? a : t))
+    // 스크롤 위치마다 계산하지 않고, 보이는 줄이 바뀔 때만 아래 바를 고친다
+    const tabOfRow = useMemo(() => {
+        const out: number[] = []
+        let t = 0
+        for (let r = 0; r < rows.length; r++) {
+            while (t + 1 < tabs.length && tabs[t + 1].row <= r) t++
+            out.push(t)
+        }
+        return out
+    }, [rows, tabs])
+    const onViewable = useRef((info: any) => {
+        const first = info?.viewableItems?.[0]?.index
+        if (typeof first === 'number') setActiveRef.current(tabOfRowRef.current[first] ?? 0)
+    }).current
+    const tabOfRowRef = useRef(tabOfRow)
+    tabOfRowRef.current = tabOfRow
+    const jump = useCallback(
+        (i: number) => {
+            setText('')
+            try {
+                listRef.current?.scrollToOffset?.({ offset: offsets[tabs[i].row], animated: false })
+            } catch {}
         },
-        [searchRows, tabs, offsets],
+        [offsets, tabs],
     )
-    const jump = (i: number) => {
-        setText('')
-        setActive(i)
-        try {
-            listRef.current?.scrollToOffset?.({ offset: offsets[tabs[i].row], animated: false })
-        } catch {}
-    }
+    const renderItem = useCallback(({ item }: { item: Row }) => <EmojiRow row={item} size={size} onPick={pick} />, [size, pick])
+    const keyOf = useCallback((r: Row) => r.key, [])
 
     const BottomSheet = (Design as any).BottomSheet ?? findProp('BottomSheet', 'BottomSheetTitleHeader')
     const List = findProp('BottomSheetFlatList') ?? FlatList
@@ -229,40 +270,24 @@ function EmojiSheet({ channel }: { channel: any }) {
             {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
         </View>
     )
-    const bar = searchRows ? null : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
-            {tabs.map((t, i) => (
-                <TouchableOpacity key={t.key} accessibilityLabel={t.label} activeOpacity={0.6} onPress={() => jump(i)} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
-                    {t.icon ? (
-                        <Image source={{ uri: t.icon }} style={{ width: 28, height: 28, borderRadius: 14 }} fadeDuration={0} />
-                    ) : t.emoji ? (
-                        <RNText allowFontScaling={false} style={{ fontSize: 22 }}>
-                            {t.emoji}
-                        </RNText>
-                    ) : (
-                        <Text variant="text-xs/bold">{t.label.slice(0, 2)}</Text>
-                    )}
-                </TouchableOpacity>
-            ))}
-        </ScrollView>
-    )
+    const bar = searchRows ? null : <TabBar tabs={tabs} onJump={jump} setRef={f => (setActiveRef.current = f)} />
     const list = (
         <List
             ref={listRef}
             data={data}
-            keyExtractor={(r: Row) => r.key}
+            keyExtractor={keyOf}
             getItemLayout={layout}
-            renderItem={({ item }: { item: Row }) => <EmojiRow row={item} size={size} onPick={pick} />}
+            renderItem={renderItem}
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
             keyboardShouldPersistTaps="handled"
-            initialNumToRender={14}
-            maxToRenderPerBatch={8}
-            updateCellsBatchingPeriod={30}
-            windowSize={5}
+            initialNumToRender={12}
+            maxToRenderPerBatch={6}
+            updateCellsBatchingPeriod={40}
+            windowSize={3}
             removeClippedSubviews
-            onScroll={onScroll}
-            scrollEventThrottle={64}
+            onViewableItemsChanged={searchRows ? undefined : onViewable}
+            viewabilityConfig={VIEWABILITY}
             ListEmptyComponent={
                 <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
                     No server emojis found
