@@ -164,7 +164,7 @@ export function patchSheet(cleanup: (...f: any[]) => void, redraw: () => void) {
     const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
         const out = orig.apply(self, args)
         const p = args[0]
-        const channel = p?.channel
+        const channel = p?.channel ?? (p?.channelId ? (Stores as any).ChannelStore?.getChannel?.(p.channelId) : undefined)
         if (!channel || !settings().redesign) return out
         const close = () => {
             try {
