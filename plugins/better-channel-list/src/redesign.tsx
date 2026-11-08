@@ -124,11 +124,9 @@ const EMOJI_ALL: RegExp | undefined = (() => {
         return new RegExp(EMOJI_RE.source, 'gu')
     } catch {}
 })()
-// 이름 앞뒤에 남는 구분 기호 (세로선, 점, 화살표, 별, 선 그리기 문자 같은 것)
-const EDGE = new RegExp('^[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+|[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+$', 'gu')
 export function cleanName(name: string): string {
     if (!EMOJI_ALL || !name) return name
-    const out = name.replace(EMOJI_ALL, '').replace(/[\uFE0F\u200D\u20E3]/g, '').replace(EDGE, '').replace(/\s{2,}/g, ' ')
+    const out = name.replace(EMOJI_ALL, '').replace(/[\uFE0F\u200D\u20E3]/g, '').replace(/\s{2,}/g, ' ').trim()
     return out.trim() ? out : name
 }
 
