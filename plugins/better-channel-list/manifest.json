@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.better-channel-list",
+	"name": "Better Channel List",
+	"description": "Shows the most recent message under each channel.",
+	"author": "Yumistra",
+	"icon": "ChatIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
