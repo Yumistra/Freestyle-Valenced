@@ -17,6 +17,8 @@ export interface Settings {
     redesign: boolean
     /** 디스코드가 정한 이모지가 없으면 채널 이름으로 고르기 */
     autoEmoji: boolean
+    /** 채널 이름 속 이모지 빼기 (이모지 칸에 보이니까) */
+    stripNameEmoji?: boolean
     /** 이모지 칸 크기 */
     iconSize: 'medium' | 'small' | 'tiny'
     /** 직접 바꾼 채널 이모지 (채널 ID → 이모지) */

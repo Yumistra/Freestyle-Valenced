@@ -5,7 +5,7 @@
 	"description": "Shows the last message under each channel and gives channels emoji icons.",
 	"author": "Yumistra",
 	"icon": "ChatIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

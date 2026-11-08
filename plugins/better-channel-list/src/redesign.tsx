@@ -8,6 +8,8 @@ import { EMOJI_COLORS } from './colors'
 import { emojiColor } from './png'
 import { settings, update, useSettings } from './store'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { instead } from '@valenced/patcher'
 
 /** 디스코드에 들어 있는 아이콘 (못 찾으면 undefined) */
 const icon = (name: string): any => {
@@ -117,6 +119,18 @@ const KEYWORDS: Array<[RegExp, string]> = [
     [/vent|serious/, '🫂'],
     [/nsfw/, '🔞'],
 ]
+
+/** 채널 이름에서 이모지를 뺀 것 (이모지 칸에 이미 보이니까). 남는 것이 없으면 원래 이름 */
+const EMOJI_ALL: RegExp | undefined = (() => {
+    try {
+        return new RegExp(EMOJI_RE.source, 'gu')
+    } catch {}
+})()
+export function cleanName(name: string): string {
+    if (!EMOJI_ALL || !name) return name
+    const out = name.replace(EMOJI_ALL, '').replace(/[\uFE0F\u200D\u20E3]/g, '').replace(/\s{2,}/g, ' ').trim()
+    return out.trim() ? out : name
+}
 
 export function guessEmoji(channel: any): string | undefined {
     const name = String(channel?.name ?? '')
@@ -356,14 +370,15 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
             iconDone = true
             status.icons++
             const patch: any = { icon: <EmojiTile channel={channel} muted={muted} locked={isLimited(channel)} /> }
+            // 음성 채널 이름은 name 에 든 BaseChannelName({ name }) 이 그린다
+            if (s.stripNameEmoji && typeof props.name?.props?.name === 'string') {
+                const clean = cleanName(props.name.props.name)
+                if (clean !== props.name.props.name) patch.name = cloneElement(props.name, { name: clean })
+            }
             if (voice) {
                 status.badges++
-                patch.channelInfo = (
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        {dropLocks(props.channelInfo) ?? null}
-                        <VoiceBadge channel={channel} />
-                    </View>
-                )
+                // 새 View 로 감싸면 디스코드가 이 칸 폭을 넓게 재서 아래 사람 목록이 좁아진다. 원래 칸 안에 나란히 넣는다
+                patch.channelInfo = [dropLocks(props.channelInfo) ?? null, <VoiceBadge key="bcl-voice-badge" channel={channel} />]
             }
             if (isNSFW(channel)) {
                 status.nameIcons++
@@ -380,6 +395,11 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         if (!nameDone && textName) {
             nameDone = true
             const nsfw = isNSFW(channel)
+            // 설정: 채널 이름 속 이모지 빼기
+            if (s.stripNameEmoji) {
+                const clean = cleanName(name)
+                if (clean !== name) node = cloneElement(node, { [NAME_MARK]: true }, clean)
+            }
             if (!nsfw) return node
             status.nameIcons++
             // 이름 글과 디스코드 아이콘을 가로로 놓는다.
@@ -415,7 +435,7 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
         }
         const props = node.props
         if (!props) return node
-        if (typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
+        if (!iconDone && typeof node.type !== 'string' && node.type && props.channel?.id === channel.id) {
             const w = wrap?.(node)
             trace(`inner ${typeName(node.type)}${w && w !== node ? '' : ' (cannot wrap)'}`)
             if (w && w !== node) {
@@ -463,4 +483,42 @@ export function activePosts(channel: any): number {
     } catch {
         return 0
     }
+}
+
+/**
+ * 음성 채널 줄은 BaseChannelItem 이 icon, name, channelInfo 를 받아 그린다.
+ * 줄 컴포넌트들을 감싸면 안에 든 사람 목록 폭이 좁아져서, BaseChannelItem 자체에서 받는 값만 바꾼다.
+ * 채널은 icon(ChannelIcon) 이 받는 channel 로 안다.
+ */
+export function patchBaseChannelItem(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModuleWithImportedPath('modules/guild_sidebar/native/BaseChannelItem.tsx', (mod: any) => {
+            if (typeof mod?.default !== 'function') return
+            cleanup(
+                instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    const p = args[0]
+                    const channel = p?.icon?.props?.channel
+                    const s = settings()
+                    if (!s.redesign || !channel || !(channel.type === ChannelTypes.VOICE || channel.type === ChannelTypes.STAGE)) return orig.apply(this, args)
+                    try {
+                        const next: any = { ...p, icon: <EmojiTile channel={channel} muted={p.mode === 'muted' || p.icon?.props?.muted} locked={isLimited(channel)} /> }
+                        status.icons++
+                        status.badges++
+                        next.channelInfo = [dropLocks(p.channelInfo) ?? null, <VoiceBadge key="bcl-voice-badge" channel={channel} />]
+                        // 들어온 사람 목록은 왼쪽으로 들여써져 있어서(36), 줄 왼쪽 끝부터 쓰게 당긴다
+                        const kids = p.children
+                        const hasKids = Array.isArray(kids) ? kids.some((k: any) => k != null && k !== false) : kids != null && kids !== false
+                        if (hasKids) next.children = <View style={{ marginLeft: -36 }}>{kids}</View>
+                        if (s.stripNameEmoji && typeof p.name?.props?.name === 'string') {
+                            const clean = cleanName(p.name.props.name)
+                            if (clean !== p.name.props.name) next.name = cloneElement(p.name, { name: clean })
+                        }
+                        return orig.apply(this, [next, ...args.slice(1)])
+                    } catch {
+                        return orig.apply(this, args)
+                    }
+                }),
+            )
+        }) as any,
+    )
 }

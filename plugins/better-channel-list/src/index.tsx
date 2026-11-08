@@ -8,7 +8,7 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { cloneElement, Component, forwardRef, useEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
-import { activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
+import { patchBaseChannelItem, activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
 import { patchSheet } from './sheet'
 import { bind, DEFAULTS, settings, update, useSettings } from './store'
 
@@ -173,7 +173,10 @@ function mix(a: string, b: string, t: number) {
 }
 
 /** 글자마다 색을 조금씩 바꿔 그라데이션처럼 (진짜 그라데이션을 못 그릴 때) */
-function CharGradient({ text, colors, style }: { text: string; colors: string[]; style: any }) {
+function CharGradient({ text: rawText, colors: rawColors, style }: { text: string; colors: string[]; style: any }) {
+    // 이름이나 색이 비어 있어도 그리다가 멈추지 않게
+    const text = String(rawText ?? '')
+    const colors = Array.isArray(rawColors) ? rawColors : []
     const chars = [...text]
     if (colors.length < 2 || chars.length < 2) return <Text style={{ ...style, color: colors[0] }}>{text}</Text>
     const seg = colors.length - 1
@@ -393,7 +396,7 @@ function useLastMessage(channelId: string | undefined) {
         if (!channelId) return ''
         try {
             const list = S().MessageStore?.getMessages?.(channelId)
-            const m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+            const m = list?.last?.() ?? list?._array?.[(list?._array?.length ?? 0) - 1]
             return m ? `${m.id}|${m.editedTimestamp ?? m.edited_timestamp ?? ''}|${m.content?.length ?? 0}` : ''
         } catch {
             return ''
@@ -443,10 +446,8 @@ function wrapperFor(type: any) {
                 status.lastError = `Split, ${e?.message ?? e}`
             }
         try {
-            out = redesignTree(out, props?.channel, !!props?.muted, (el: any) => {
-                const iw = wrapperFor(el.type)
-                return iw ? { ...el, type: iw } : el
-            })
+            // 음성 채널은 patchBaseChannelItem 이 맡는다 (안쪽 컴포넌트를 감싸지 않는다)
+            out = redesignTree(out, props?.channel, !!props?.muted)
         } catch (e: any) {
             status.lastError = `Redesign, ${e?.message ?? e}`
         }
@@ -463,7 +464,7 @@ function wrapRow(el: any, depth = 0): any {
     if (Array.isArray(el)) return el.map(e => wrapRow(e, depth + 1))
     const props = el.props
     if (!props) return el
-    if ((props.subtitle?.split || props.channel) && el.type && typeof el.type !== 'string') {
+    if ((props.subtitle?.split || (props.channel && props.channel.type !== 2 && props.channel.type !== 13)) && el.type && typeof el.type !== 'string') {
         const w = wrapperFor(el.type)
         if (props.channel?.type === 2 || props.channel?.type === 13) rstatus.voice = (rstatus.voice + ` row${w ? '' : ' (cannot wrap)'}`).slice(-160)
         if (w) {
@@ -482,7 +483,7 @@ function preview(channel: any): Preview | undefined {
     let m: any
     try {
         const list = S().MessageStore?.getMessages?.(channel.id)
-        m = list?.last?.() ?? list?._array?.[list._array.length - 1]
+        m = list?.last?.() ?? list?._array?.[(list?._array?.length ?? 0) - 1]
     } catch {}
     if (!m) return
     const authorId = m.author?.id
@@ -623,6 +624,7 @@ function SettingsPage() {
                 <TableRowGroup title="Emoji">
                     <TableSwitchRow label="Emoji icons" subLabel="Shows each channel's emoji in a colored square instead of the channel icon" value={s.redesign} onValueChange={(redesign: boolean) => update({ redesign })} />
                     <TableSwitchRow label="Guess emojis" subLabel="Channels without a Discord emoji get one from their name, like 💬 for general or 🤖 for bots" value={s.autoEmoji} disabled={!s.redesign} onValueChange={(autoEmoji: boolean) => (update({ autoEmoji }), redraw())} />
+                    <TableSwitchRow label="Remove emojis from names" subLabel="The emoji only shows in the square" value={!!s.stripNameEmoji} disabled={!s.redesign} onValueChange={(stripNameEmoji: boolean) => update({ stripNameEmoji })} />
                 </TableRowGroup>
                 <TableRadioGroup title="Icon size" value={s.iconSize} onChange={(iconSize: any) => update({ iconSize })}>
                     {(['medium', 'small', 'tiny'] as const).map(k => (
@@ -668,6 +670,7 @@ export default plugin({
 
         patchChannelList(cleanup)
         patchSheet(cleanup, redraw)
+        patchBaseChannelItem(cleanup)
         cleanup(
             getModuleWithImportedPath('modules/display_name_styles/native/UsernameWithEffects.tsx', (mod: any) => {
                 usernameWithEffects = mod?.default ?? mod
