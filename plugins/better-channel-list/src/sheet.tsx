@@ -55,7 +55,6 @@ type Row = { key: string; header?: string; cells?: Cell[] }
 type Tab = { key: string; label: string; icon?: string; emoji?: string; row: number }
 
 const SHEET_KEY = 'bcl-emoji-sheet'
-const VIEWABILITY = { itemVisiblePercentThreshold: 50, minimumViewTime: 80 }
 const COLS = 8
 const HEADER_H = 34
 
@@ -148,15 +147,13 @@ const EmojiRow = memo(function EmojiRow({ row, size, onPick }: { row: Row; size:
     )
 })
 
-/** 아래 바. 스크롤할 때 이것만 다시 그린다 */
-const TabBar = memo(function TabBar({ tabs, onJump, setRef }: { tabs: Tab[]; onJump: (i: number) => void; setRef: (f: (i: number) => void) => void }) {
+/** 아래 바 (디스코드 이모지 창처럼 서버 목록). 누르면 그 서버 이모지만 보여 준다 */
+const TabBar = memo(function TabBar({ tabs, active, onJump }: { tabs: Tab[]; active: number; onJump: (i: number) => void }) {
     const { Text } = Design as any
-    const [active, setActive] = useState(0)
-    setRef(i => setActive(a => (a === i ? a : i)))
     return (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.25)' }} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
             {tabs.map((t, i) => (
-                <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => (setActive(i), onJump(i))} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
+                <Pressable key={t.key} accessibilityLabel={t.label} onPress={() => onJump(i)} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: i === active ? 'rgba(128,128,128,0.3)' : 'transparent' }}>
                     {t.icon ? (
                         <Image source={{ uri: t.icon }} style={{ width: 28, height: 28, borderRadius: 14 }} fadeDuration={0} />
                     ) : t.emoji ? (
@@ -180,33 +177,29 @@ const TabBar = memo(function TabBar({ tabs, onJump, setRef }: { tabs: Tab[]; onJ
 function EmojiSheet({ channel }: { channel: any }) {
     const { ActionSheet, TextInput, Button, Text } = Design as any
     const [text, setText] = useState('')
-    const setActiveRef = useRef<(i: number) => void>(() => {})
     const listRef = useRef<any>(null)
     const width = Dimensions.get('window').width
     const size = Math.floor((width - 24) / COLS)
 
     const guilds = useMemo(() => guildSections(channel?.guild_id), [])
     // 줄 목록과 아래 바 버튼, 각 줄의 위치 (줄 높이가 정해져 있어 바로 그 자리로 갈 수 있다)
-    const { rows, tabs, offsets } = useMemo(() => {
-        const rows: Row[] = []
+    // 아래 바 버튼 하나에 그 서버(또는 기본 이모지 종류)의 줄들. 고른 것 하나만 목록에 그린다
+    const { tabs, pages } = useMemo(() => {
         const tabs: Tab[] = []
+        const pages: Row[][] = []
         for (const g of guilds) {
-            tabs.push({ key: g.id, label: g.name, icon: g.icon, row: rows.length })
-            rows.push({ key: `h-${g.id}`, header: g.name }, ...chunk(g.cells, g.id))
+            tabs.push({ key: g.id, label: g.name, icon: g.icon, row: 0 })
+            pages.push([{ key: `h-${g.id}`, header: g.name }, ...chunk(g.cells, g.id)])
         }
-        for (const [name, cells] of unicode().map(u => [u[0], u[2]] as const)) {
-            const icon = unicode().find(u => u[0] === name)![1]
-            tabs.push({ key: `u-${name}`, label: name, emoji: icon, row: rows.length })
-            rows.push({ key: `h-${name}`, header: name }, ...chunk(cells, name))
+        for (const [name, icon, cells] of unicode()) {
+            tabs.push({ key: `u-${name}`, label: name, emoji: icon, row: 0 })
+            pages.push([{ key: `h-${name}`, header: name }, ...chunk(cells, name)])
         }
-        const offsets: number[] = []
-        let y = 0
-        for (const r of rows) {
-            offsets.push(y)
-            y += r.header ? HEADER_H : size
-        }
-        return { rows, tabs, offsets }
+        return { tabs, pages }
     }, [guilds, size])
+    // 처음에는 이 채널 서버 (서버 이모지가 없으면 첫 칸)
+    const [tab, setTab] = useState(0)
+    const rows = pages[tab] ?? []
 
     const q = text.trim().toLowerCase()
     const typed = !!q && !/^[a-z0-9_ ]+$/i.test(q)
@@ -228,35 +221,18 @@ function EmojiSheet({ channel }: { channel: any }) {
     const layout = useCallback(
         (_: any, index: number) => {
             if (searchRows) return { length: size, offset: size * index, index }
-            return { length: rows[index]?.header ? HEADER_H : size, offset: offsets[index] ?? 0, index }
+            // 맨 위 한 줄만 제목
+            return index === 0 ? { length: HEADER_H, offset: 0, index } : { length: size, offset: HEADER_H + size * (index - 1), index }
         },
-        [searchRows, rows, offsets, size],
+        [searchRows, size],
     )
-    // 스크롤 위치마다 계산하지 않고, 보이는 줄이 바뀔 때만 아래 바를 고친다
-    const tabOfRow = useMemo(() => {
-        const out: number[] = []
-        let t = 0
-        for (let r = 0; r < rows.length; r++) {
-            while (t + 1 < tabs.length && tabs[t + 1].row <= r) t++
-            out.push(t)
-        }
-        return out
-    }, [rows, tabs])
-    const onViewable = useRef((info: any) => {
-        const first = info?.viewableItems?.[0]?.index
-        if (typeof first === 'number') setActiveRef.current(tabOfRowRef.current[first] ?? 0)
-    }).current
-    const tabOfRowRef = useRef(tabOfRow)
-    tabOfRowRef.current = tabOfRow
-    const jump = useCallback(
-        (i: number) => {
-            setText('')
-            try {
-                listRef.current?.scrollToOffset?.({ offset: offsets[tabs[i].row], animated: false })
-            } catch {}
-        },
-        [offsets, tabs],
-    )
+    const jump = useCallback((i: number) => {
+        setText('')
+        setTab(i)
+        try {
+            listRef.current?.scrollToOffset?.({ offset: 0, animated: false })
+        } catch {}
+    }, [])
     const renderItem = useCallback(({ item }: { item: Row }) => <EmojiRow row={item} size={size} onPick={pick} />, [size, pick])
     const keyOf = useCallback((r: Row) => r.key, [])
 
@@ -270,7 +246,7 @@ function EmojiSheet({ channel }: { channel: any }) {
             {settings().icons?.[channel?.id] ? <Button text="Reset to default" variant="secondary" size="md" onPress={() => (setIcon(channel.id, null), (ActionSheetActionCreators as any).hideActionSheet(SHEET_KEY))} /> : null}
         </View>
     )
-    const bar = searchRows ? null : <TabBar tabs={tabs} onJump={jump} setRef={f => (setActiveRef.current = f)} />
+    const bar = searchRows ? null : <TabBar tabs={tabs} active={tab} onJump={jump} />
     const list = (
         <List
             ref={listRef}
@@ -286,8 +262,6 @@ function EmojiSheet({ channel }: { channel: any }) {
             updateCellsBatchingPeriod={40}
             windowSize={3}
             removeClippedSubviews
-            onViewableItemsChanged={searchRows ? undefined : onViewable}
-            viewabilityConfig={VIEWABILITY}
             ListEmptyComponent={
                 <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16, textAlign: 'center' }}>
                     No server emojis found
