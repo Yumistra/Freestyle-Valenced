@@ -362,7 +362,7 @@ function SettingsPage() {
                     <TableSwitchRow label="Last message" subLabel="Shows the most recent message under each channel" value={s.lastMessage} onValueChange={(lastMessage: boolean) => update({ lastMessage })} />
                     <TableSwitchRow label="Show author" subLabel="Shows who sent it before the message" value={s.showAuthor} onValueChange={(showAuthor: boolean) => update({ showAuthor })} />
                     <TableSwitchRow label="Name style" subLabel="Uses the author's display name font and color" value={s.nameStyle} onValueChange={(nameStyle: boolean) => update({ nameStyle })} />
-                    <TableSwitchRow label="Real gradient" subLabel="Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
+                    <TableSwitchRow label="Real gradient (experimental)" subLabel="Can overlap or hide names. Off, gradient names are colored letter by letter" value={s.realGradient} onValueChange={(realGradient: boolean) => update({ realGradient })} />
                     <TableSwitchRow label="Role color" subLabel="Paints the author's name in their role color" value={s.roleColor} onValueChange={(roleColor: boolean) => update({ roleColor })} />
                 </TableRowGroup>
                 <TableRowGroup title="Status">
@@ -378,6 +378,8 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
+        // 1.0.10 에서 기본으로 켜졌던 진짜 그라데이션은 이름이 겹치거나 안 보여서 한 번 끈다
+        if (!settings().gradientReset) update({ realGradient: false, gradientReset: true })
         const subs: Array<[string, (e: any) => void]> = [
             ['MESSAGE_PREVIEWS_LOADED', onPreviews],
             ['MESSAGE_CREATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
