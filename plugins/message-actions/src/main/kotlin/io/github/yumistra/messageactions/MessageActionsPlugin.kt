@@ -749,16 +749,19 @@ val messageActionsPlugin = plugin {
         val added = WeakHashMap<View, IntArray>()
 
         val cl = classLoader
-        // 디스코드 버전마다 안쪽 이름이 바뀔 수 있다. 못 찾으면 JS 가 다른 방식(창)으로 보여 주게 "norow" 만 돌려준다
+        // 디스코드 버전마다 안쪽 이름이 바뀔 수 있다. 못 찾으면 JS 가 오류 로그를 복사하게 이유를 "err:…" 로 돌려준다
+        var recyclerError = ""
         val recycler = try {
             Recycler(cl)
         } catch (e: Throwable) {
+            recyclerError = e.toString()
             null
         }
         val chatListView = findChatListClass(cl)
         if (recycler == null || chatListView == null) {
             log.w("Chat list not found (recycler=${recycler != null}, chat=${chatListView != null}); inline buttons disabled")
-            registerNativeAsyncMethod("${manifest.id}.showActions") { "nochat" }
+            val why = "err:Chat list not found. recycler=${recycler?.describe() ?: "missing ($recyclerError)"}, chatList=${chatListView?.name ?: "missing"}"
+            registerNativeAsyncMethod("${manifest.id}.showActions") { why }
             registerNativeMethod("${manifest.id}.setSwipeButtons") { true }
             registerNativeMethod("${manifest.id}.ping") { "pong" }
             return@start
@@ -967,7 +970,7 @@ val messageActionsPlugin = plugin {
 
         /**
          * args[0]: JSON {buttons:[{id,label,icon,colors:{bg,bgActive,border,borderActive,fg},confirm?:{label,colors}}], font:{family,size}, radius, inset}
-         * 돌려주는 값: 누른 버튼 id, 닫으면 "", 띄울 줄이 없으면 "norow"
+         * 돌려주는 값: 누른 버튼 id, 닫으면 "", 못 띄우면 "err:<이유>"
          */
         registerNativeAsyncMethod("${manifest.id}.showActions") { args ->
             val opts = try {
@@ -976,15 +979,15 @@ val messageActionsPlugin = plugin {
                 JSONObject()
             }
             withContext(Dispatchers.Main) {
-                val t = touched ?: return@withContext "notouch"
+                val t = touched ?: return@withContext "err:No touch on the chat list was recorded. ${recycler.describe()} chat=${chatListView.name}"
                 val list = t.list.get()
                 val row = t.row.get()
-                if (list == null || row == null || !row.isAttachedToWindow || row.parent !== list ||
-                    SystemClock.uptimeMillis() - t.at > TOUCH_TTL
-                ) {
-                    return@withContext "norow"
+                val age = SystemClock.uptimeMillis() - t.at
+                if (list == null || row == null || !row.isAttachedToWindow || row.parent !== list || age > TOUCH_TTL) {
+                    return@withContext "err:Touched row is gone. list=${list != null}, row=${row != null}, attached=${row?.isAttachedToWindow}, sameParent=${row?.parent === list}, age=${age}ms"
                 }
-                val id = rv.idOf(list, row) ?: return@withContext "norow"
+                val id = rv.idOf(list, row)
+                    ?: return@withContext "err:Could not read the row id. ${recycler.describe()} row=${row.javaClass.name}"
                 active?.finishNow()
                 suspendCancellableCoroutine { cont ->
                     val font = opts.optJSONObject("font")
@@ -999,7 +1002,7 @@ val messageActionsPlugin = plugin {
                         cont.invokeOnCancellation { list.post { bar.close("") } }
                     } catch (e: Throwable) {
                         log.e("showActions: $e")
-                        if (cont.isActive) cont.resume("norow")
+                        if (cont.isActive) cont.resume("err:Could not draw the buttons. ${android.util.Log.getStackTraceString(e).take(1500)}")
                     }
                 }
             }

@@ -6,10 +6,11 @@ import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { getModules, lookupModule, lookupModules } from '@valenced/modules/finders'
 import { withDependencies, withProps } from '@valenced/modules/finders/filters'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
-import { useEffect, useRef, useState } from 'react'
-import { Animated, Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { useState } from 'react'
+import { Image, LayoutAnimation, ScrollView, View } from 'react-native'
 
 /**
  * 내 메시지를 두 번 누르면 (기본: 반응 달기) 대신 가운데 작은 창으로 수정·삭제를 고르게 한다.
@@ -300,147 +301,24 @@ function buttonRadius() {
 const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
 
 /** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
-// ── 버튼 줄 (JS 로 그린다) ─────────────────────────────────────
-// 화면 밑에 떠오르는 버튼 줄. 바깥을 누르면 닫힌다. 앱 전체 위에 늘 있는 토스트 자리 옆에 같이 그린다.
+const VERSION = '1.0.9'
 
-interface ButtonsRequest {
-    message: any
-    editable: boolean
-    resolve: (choice: string | null) => void
-}
-let current: ButtonsRequest | undefined
-const listeners = new Set<() => void>()
-const emit = () => listeners.forEach(f => f())
-let barReady = false
-
-/** 테마 색 (CSS 그대로) */
-function cssColor(names: string[], fallback: string) {
+/** 버튼을 못 띄우면 오류 로그를 복사해 두고 알려 준다 */
+function reportFailure(reason: string) {
+    const log = [
+        'Message Actions error log',
+        `Plugin ${VERSION}`,
+        `Reason: ${reason}`,
+    ].join('\n')
     try {
-        const t: any = (Tokens as any).default
-        const theme = (Stores as any).ThemeStore?.theme ?? 'dark'
-        for (const name of names) {
-            const key = t.colors[name]
-            if (!key) continue
-            const c = t.internal.resolveSemanticColor(theme, key)
-            if (typeof c === 'string') return c
-        }
-    } catch {}
-    return fallback
-}
-
-function close(choice: string) {
-    const r = current
-    if (!r) return
-    current = undefined
-    emit()
-    r.resolve(choice)
-}
-
-function ActionBar() {
-    const [, tick] = useState(0)
-    const [confirming, setConfirming] = useState(false)
-    const anim = useRef(new Animated.Value(0)).current
-    useEffect(() => {
-        const f = () => tick(n => n + 1)
-        listeners.add(f)
-        return () => void listeners.delete(f)
-    }, [])
-    const req = current
-    useEffect(() => {
-        setConfirming(false)
-        if (req) {
-            anim.setValue(0)
-            Animated.spring(anim, { toValue: 1, useNativeDriver: true, damping: 20, stiffness: 260, mass: 1 }).start()
-        }
-    }, [req])
-    if (!req) return null
-    const { Button, Text } = D()
-    const content = String(req.message?.content ?? '').replace(/\s+/g, ' ').trim()
-    const onDelete = () => {
-        if (settings().confirmDelete && !confirming) {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-            return setConfirming(true)
-        }
-        close('delete')
+        Clipboard.setString(log)
+        toast('Message Actions: buttons failed, error log copied')
+    } catch {
+        toast(`Message Actions: buttons failed. ${reason}`)
     }
-    return (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, elevation: 9999 }}>
-            <Pressable style={{ flex: 1 }} onPress={() => close('')} accessibilityLabel="Close" />
-            <Animated.View
-                style={{
-                    position: 'absolute',
-                    left: 12,
-                    right: 12,
-                    bottom: 96,
-                    padding: 12,
-                    gap: 10,
-                    borderRadius: 16,
-                    backgroundColor: cssColor(['BACKGROUND_SURFACE_HIGHEST', 'BACKGROUND_FLOATING', 'BACKGROUND_TERTIARY'], '#2b2d31'),
-                    borderWidth: 1,
-                    borderColor: cssColor(['BORDER_SUBTLE', 'BACKGROUND_MODIFIER_ACCENT'], 'rgba(128,128,128,0.25)'),
-                    shadowColor: '#000',
-                    shadowOpacity: 0.3,
-                    shadowRadius: 12,
-                    elevation: 12,
-                    opacity: anim,
-                    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }, { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
-                }}
-            >
-                {content ? (
-                    <Text variant="text-sm/medium" color="text-muted" numberOfLines={1}>
-                        {content}
-                    </Text>
-                ) : null}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {req.editable ? (
-                        <View style={{ flex: 1 }}>
-                            <Button text="Edit" variant="secondary" size="md" grow onPress={() => close('edit')} />
-                        </View>
-                    ) : null}
-                    <View style={{ flex: 1 }}>
-                        <Button text={confirming ? 'Delete?' : 'Delete'} variant={confirming ? 'destructive' : 'secondary'} size="md" grow onPress={onDelete} />
-                    </View>
-                </View>
-            </Animated.View>
-        </View>
-    )
 }
 
-function patchBar(cleanup: (...f: any[]) => void) {
-    cleanup(
-        getModuleWithImportedPath('modules/toast/native/AppToastContainer.tsx', (mod: any) => {
-            if (typeof mod?.default !== 'function') return
-            barReady = true
-            cleanup(
-                instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
-                    const out = orig.apply(this, args)
-                    return (
-                        <>
-                            {out}
-                            <ActionBar />
-                        </>
-                    )
-                }),
-                () => {
-                    barReady = false
-                },
-            )
-        }) as any,
-    )
-    cleanup(() => close(''))
-}
-
-/** 버튼 줄을 띄우고 누른 버튼 id 를 돌려준다. 닫으면 "", 띄울 수 없으면 null */
-function showJsButtons(message: any): Promise<string | null> {
-    if (!barReady) return Promise.resolve(null)
-    close('')
-    return new Promise(resolve => {
-        current = { message, editable: isMine(message) && editableOf(message), resolve }
-        emit()
-    })
-}
-
-/** 안드로이드가 메시지 밑에 버튼을 끼워 넣는다. 못 하면 null */
+/** 안드로이드가 메시지 밑에 버튼을 끼워 넣는다. 누른 버튼 id, 닫으면 "", 못 하면 null (오류 로그 복사) */
 async function showButtons(message: any): Promise<string | null> {
     const buttons: any[] = []
     if (isMine(message) && editableOf(message)) buttons.push({ id: 'edit', label: 'Edit', icon: ICON('pencilicon'), colors: variantColors('secondary') })
@@ -454,19 +332,30 @@ async function showButtons(message: any): Promise<string | null> {
     const opts = { buttons, font: buttonFont(), radius: buttonRadius(), inset: 68 }
     try {
         const r = await Promise.resolve((callNativeMethod as any)(`${NATIVE_ID}.showActions`, [JSON.stringify(opts)]))
-        if (r === 'norow' || r === 'notouch' || r === 'nochat' || typeof r !== 'string') return null
+        if (typeof r !== 'string') {
+            reportFailure(`Unexpected reply from Android: ${JSON.stringify(r)}`)
+            return null
+        }
+        // 예전 안드로이드 부분은 이유 없이 이것만 돌려준다
+        if (r === 'norow' || r === 'notouch' || r === 'nochat') {
+            reportFailure(`${r} (older Android part, no details)`)
+            return null
+        }
+        if (r.startsWith('err:')) {
+            reportFailure(r.slice(4))
+            return null
+        }
         return r
-    } catch {
+    } catch (e: any) {
+        reportFailure(`Android part not reachable: ${String(e?.stack ?? e?.message ?? e)}`)
         return null
     }
 }
 
 /** 밑에 버튼으로 고르게 한다. 못 띄우면 가운데 창으로 */
 async function inlineActions(handlers: any, message: any, channel: any, chatInputRef?: any, source?: string, extra?: any[]) {
-    // 안드로이드가 못 띄우면 JS 로 그린 버튼 줄, 그것도 안 되면 가운데 창
-    let choice = await showButtons(message)
-    if (choice === null) choice = await showJsButtons(message)
-    if (choice === null) return openActions(handlers, message, channel, chatInputRef, source, extra)
+    const choice = await showButtons(message)
+    if (choice === null) return
     if (choice === 'edit') edit(handlers, message, channel, chatInputRef, source, extra)
     else if (choice === 'delete') remove(message, channel)
 }
@@ -620,7 +509,6 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
-        patchBar(cleanup)
         // 저장된 설정을 다 불러온 뒤 네이티브에 알린다
         Promise.resolve(jsonStorage?.get?.()).then(syncNative, syncNative)
         cleanup(() => {
