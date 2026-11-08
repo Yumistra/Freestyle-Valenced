@@ -124,8 +124,16 @@ const EMOJI_ALL: RegExp | undefined = (() => {
         return new RegExp(EMOJI_RE.source, 'gu')
     } catch {}
 })()
-// 이름 앞뒤에 남는 구분 기호 (|, ｜, ┃, │, ⌇, ・, ·, ㅣ, 丨 같은 것과 선 그리기 문자)
-const EDGE = new RegExp('^[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+|[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+$', 'gu')
+// 이름 앞뒤에 남는 구분 기호. 글자, 숫자, 괄호가 아닌 것은 모두 지운다 (세로선, 점, 화살표, 별, 선 그리기 문자 등).
+// 글자로 취급되는 ㅣ, 丨 도 구분선으로 쓰이니 같이 지운다. 휴대폰 JS 엔진이 \p{...} 를 모르면 정해 둔 목록으로 대신한다
+const EDGE: RegExp = (() => {
+    try {
+        const k = '(?:[^\\p{L}\\p{N}\\p{Ps}\\p{Pe}\\p{Pi}\\p{Pf}]|[ㅣ丨])+'
+        return new RegExp(`^${k}|${k}$`, 'gu')
+    } catch {
+        return new RegExp('^[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+|[\\s\\-_|:;,.·•‧∙・･︱︲｜¦ǀ∣❘❙❚⎸⎹⌇⁞⋮⦙⦚ㅣ丨\\u2500-\\u259F\\u2E3D»«>❯❮〉〈⟩⟨⇢⇠→←⤷⤶⋆✦✧★☆]+$', 'gu')
+    }
+})()
 export function cleanName(name: string): string {
     if (!EMOJI_ALL || !name) return name
     const out = name.replace(EMOJI_ALL, '').replace(/[\uFE0F\u200D\u20E3]/g, '').replace(EDGE, '').replace(/\s{2,}/g, ' ')
