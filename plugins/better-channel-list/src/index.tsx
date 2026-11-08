@@ -404,7 +404,7 @@ function wrapperFor(type: any) {
                 status.lastError = `Split, ${e?.message ?? e}`
             }
         try {
-            out = redesignTree(out, props?.channel)
+            out = redesignTree(out, props?.channel, !!props?.muted)
         } catch (e: any) {
             status.lastError = `Redesign, ${e?.message ?? e}`
         }
