@@ -1,9 +1,12 @@
-import { ActionSheetActionCreators, ToastActionCreators } from '@valenced/discord/actions'
+import { ActionSheetActionCreators, AlertActionCreators, ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { useMemo, useState } from 'react'
+import { Image, Pressable, ScrollView, Text as RNText, View } from 'react-native'
+import { EMOJI_COLORS } from './colors'
 import { EmojiTile } from './redesign'
 import { settings, update } from './store'
 
@@ -69,10 +72,79 @@ function openPicker(channel: any, onPick: (v: string) => void): boolean {
     return false
 }
 
+let seq = 0
 function toast(text: string) {
     try {
-        ;(ToastActionCreators as any).open({ key: `bcl-${Date.now()}`, content: text })
+        ;(ToastActionCreators as any).open(`bcl-${Date.now()}-${seq++}`, { text })
     } catch {}
+}
+
+const UNICODE = Object.keys(EMOJI_COLORS)
+
+/**
+ * 디스코드 이모지 창을 못 열 때 쓰는 창.
+ * 위에 글칸(폰 이모지 자판으로 넣거나 붙여 넣기), 아래에 내 서버 이모지와 기본 이모지 목록.
+ */
+function Picker({ onPick }: { onPick: (v: string) => void }) {
+    const { TextInput, Button, Text } = Design as any
+    const [text, setText] = useState('')
+    const servers = useMemo(() => {
+        const out: any[] = []
+        try {
+            const S: any = Stores
+            const guilds = Object.keys(S.GuildStore?.getGuilds?.() ?? {})
+            for (const g of guilds) for (const e of S.EmojiStore?.getGuildEmoji?.(g) ?? []) if (e?.id && e.available !== false) out.push(e)
+        } catch {}
+        return out
+    }, [])
+    const q = text.trim().toLowerCase()
+    const isEmoji = !!q && !/^[a-z0-9_]+$/i.test(q)
+    const custom = (q && !isEmoji ? servers.filter(e => String(e.name).toLowerCase().includes(q)) : servers).slice(0, 120)
+    const cell = { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8 } as const
+    return (
+        <View style={{ alignSelf: 'stretch', gap: 8 }}>
+            <TextInput value={text} placeholder="Type an emoji or search server emojis" onChange={setText} isClearable />
+            {isEmoji ? <Button text={`Use ${text.trim()}`} variant="primary" size="md" onPress={() => onPick(text.trim())} /> : null}
+            <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 4 }}>
+                {custom.map(e => (
+                    <Pressable key={e.id} accessibilityLabel={e.name} onPress={() => onPick(`<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`)} style={({ pressed }: any) => ({ ...cell, opacity: pressed ? 0.5 : 1 })}>
+                        <Image source={{ uri: `https://cdn.discordapp.com/emojis/${e.id}.png?size=48` }} style={{ width: 32, height: 32 }} resizeMode="contain" />
+                    </Pressable>
+                ))}
+                {!q
+                    ? UNICODE.map(u => (
+                          <Pressable key={u} accessibilityLabel={u} onPress={() => onPick(u)} style={({ pressed }: any) => ({ ...cell, opacity: pressed ? 0.5 : 1 })}>
+                              <RNText allowFontScaling={false} style={{ fontSize: 26 }}>
+                                  {u}
+                              </RNText>
+                          </Pressable>
+                      ))
+                    : null}
+                {q && !isEmoji && !custom.length ? (
+                    <Text variant="text-sm/medium" color="text-muted" style={{ padding: 16 }}>
+                        No server emojis found
+                    </Text>
+                ) : null}
+            </ScrollView>
+        </View>
+    )
+}
+
+function openOwnPicker(channel: any) {
+    const { AlertModal, AlertActionButton } = Design as any
+    const key = `bcl-emoji-${seq++}`
+    const done = (v: string) => {
+        setIcon(channel.id, v)
+        try {
+            ;(AlertActionCreators as any).dismissAlert(key)
+        } catch {}
+    }
+    try {
+        ;(AlertActionCreators as any).openAlert(key, <AlertModal title={`Emoji for #${channel.name}`} extraContent={<Picker onPick={done} />} actions={<AlertActionButton text="Cancel" variant="secondary" />} />)
+        return true
+    } catch {
+        return false
+    }
 }
 
 let redrawList = () => {}
@@ -128,7 +200,7 @@ function addRows(node: any, channel: any, close: () => void, depth = 0): any {
             } catch {}
             // 창이 닫힌 뒤에 이모지 창을 연다
             setTimeout(() => {
-                if (!openPicker(channel, v => setIcon(channel.id, v))) toast('Could not open the emoji picker. Open the emoji picker in any chat once, then try again')
+                if (!openPicker(channel, v => setIcon(channel.id, v)) && !openOwnPicker(channel)) toast('Could not open the emoji picker')
             }, 350)
         }
         const group = (
