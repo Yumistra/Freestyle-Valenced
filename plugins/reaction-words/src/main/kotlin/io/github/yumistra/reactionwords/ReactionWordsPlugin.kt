@@ -498,12 +498,9 @@ val reactionWordsPlugin = plugin {
             if (loose && v.height > 0 && v.width > 0 && ((ourW && v.width > cl0!!.width * 1.6f) || (ourH && v.height > cl0!!.height * 1.6f))) {
                 val n = (stretchCount[v] ?: 0) + 1
                 stretchCount[v] = n
-                if (n >= 3) {
-                    skipped[v] = true
-                    note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} set=${cl0!!.width}x${cl0.height} in ${parents(v)}")
-                    restore(v)
-                    return
-                }
+                // 원래대로 돌리면 디스코드도 똑같이 크게 늘려 버린다. 자리 잡는 단계에서 크기를 고정하니 기록만
+                if (n == 3) note("still stretched outside the chat row: w=${v.width} h=${v.height} set=${cl0!!.width}x${cl0.height} in ${parents(v)}")
+                v.requestLayout()
             } else {
                 stretchCount.remove(v)
             }
@@ -810,6 +807,37 @@ val reactionWordsPlugin = plugin {
                 )
             } catch (e: Throwable) {
                 lastError = "measure hook: $e"
+            }
+            // 포럼 글 머리 줄은 잰 크기도 무시하고 자리를 크게 준다: 받은 자리 안에서 정한 크기로 (세로는 가운데)
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        View::class.java,
+                        "layout",
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                val t = targetSize[v] ?: return
+                                val l = param.args[0] as Int
+                                val top = param.args[1] as Int
+                                val r = param.args[2] as Int
+                                val b = param.args[3] as Int
+                                if (r - l == t.first && b - top == t.second) return
+                                val nt = top + ((b - top) - t.second) / 2
+                                param.args[1] = nt
+                                param.args[2] = l + t.first
+                                param.args[3] = nt + t.second
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "frame hook: $e"
             }
             try {
                 hooks.add(
