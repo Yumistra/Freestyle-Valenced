@@ -385,6 +385,41 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
     )
 }
 
+// ── 설정 화면 (상태) ────────────────────────────────────────────
+
+function SettingsPage() {
+    const { Stack, TableRowGroup, TableRow } = D()
+    const [st, setSt] = useState<any>(undefined)
+    const refresh = () =>
+        callNativeMethod(`${NATIVE}.status`)
+            .then((r: any) => setSt(r ?? {}))
+            .catch((e: any) => setSt({ error: `Android part not loaded: ${String(e?.message ?? e).slice(0, 300)}` }))
+    useState(() => void refresh())
+    const yes = (b: any) => (b ? 'yes' : 'no')
+    return (
+        <View style={{ padding: 16 }}>
+            <Stack spacing={24}>
+                <TableRowGroup title="How to use">
+                    <TableRow label="React with a word" subLabel="Long press a message, then React with a word." />
+                    <TableRow label="React with every emoji" subLabel="Long press the add reaction button at the end of the reactions." />
+                </TableRowGroup>
+                <TableRowGroup title="Status">
+                    {st === undefined ? (
+                        <TableRow label="Checking…" />
+                    ) : (
+                        <>
+                            <TableRow label="Android part" subLabel={st.rowHook === undefined ? 'Not loaded' : `Reactions row ${yes(st.rowHook)}, button touch ${yes(st.touchHook)}`} />
+                            {st.rowHook !== undefined ? <TableRow label="Seen" subLabel={`${st.rows} reaction rows, ${st.touches} button touches, ${st.fires} long presses`} /> : null}
+                            {st.error ? <TableRow label="Last error" subLabel={String(st.error)} /> : null}
+                        </>
+                    )}
+                    <TableRow label="Refresh" onPress={refresh} arrow />
+                </TableRowGroup>
+            </Stack>
+        </View>
+    )
+}
+
 export default plugin({
     start({ cleanup }: any) {
         callNativeMethod(`${NATIVE}.ping`)
@@ -393,4 +428,5 @@ export default plugin({
         patchHandlers(cleanup)
         patchSheet(cleanup)
     },
+    SettingsComponent: SettingsPage,
 } as any)
