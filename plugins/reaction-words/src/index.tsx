@@ -25,7 +25,6 @@ const VS = '️'
 let seq = 0
 /** 알림(토스트)은 띄우지 않는다 */
 const toast = (_text: string) => {}
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // ── 반응 달기 ───────────────────────────────────────────────────
 
@@ -66,18 +65,20 @@ async function run(label: string, jobs: Array<() => Promise<void>>) {
     let ok = 0
     let fail = 0
     try {
-        for (const job of jobs) {
-            // 간격은 "반응 하나가 시작되고 다음 반응이 시작될 때까지". 요청이 그보다 오래 걸리면 기다리지 않는다
-            // (글자 순서를 지키려고 앞 반응이 끝나야 다음을 보낸다. 그래서 요청 시간보다 빨라질 수는 없다)
-            const started = Date.now()
-            try {
-                await job()
-                ok++
-            } catch {
-                fail++
+        if (allAtOnce()) {
+            // 한 번에: 전부 동시에 보낸다 (순서는 섞일 수 있다)
+            const res = await Promise.allSettled(jobs.map(j => j()))
+            for (const r of res) r.status === 'fulfilled' ? ok++ : fail++
+        } else {
+            // 순서대로: 앞 반응이 끝나면 바로 다음 (디스코드가 답하는 속도)
+            for (const job of jobs) {
+                try {
+                    await job()
+                    ok++
+                } catch {
+                    fail++
+                }
             }
-            const left = stepMs() - (Date.now() - started)
-            if (left > 0) await sleep(left)
         }
     } finally {
         busy = false
@@ -333,12 +334,8 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 let eventUtils: any
 let storage: any
 const DEFAULT_IGNORE = 1000
-const DEFAULT_STEP = 350
-/** 반응 하나 달고 다음까지 기다리는 시간 (너무 짧으면 디스코드가 막는다) */
-const stepMs = (): number => {
-    const v = Number(storage?.cache?.stepMs)
-    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_STEP
-}
+/** 한 번에 다 보낼지 (아니면 순서대로) */
+const allAtOnce = (): boolean => storage?.cache?.allAtOnce === true
 const ignoreMs = (): number => {
     const v = Number(storage?.cache?.ignoreMs)
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
@@ -443,19 +440,6 @@ function SettingsPage() {
     storage?.use?.()
     const ms = ignoreMs()
     const [draft, setDraft] = useState(String(ms))
-    const step = stepMs()
-    const [stepDraft, setStepDraft] = useState(String(step))
-    const applyStep = (v: number) => {
-        const n = Math.min(3000, Math.max(0, Math.round(v)))
-        storage?.set?.({ ...(storage?.cache ?? {}), stepMs: n }, true)
-        if (storage?.cache) storage.cache.stepMs = n
-        setStepDraft(String(n))
-    }
-    const saveStep = () => {
-        const n = Number(stepDraft)
-        if (stepDraft !== '' && Number.isFinite(n)) applyStep(n)
-        else setStepDraft(String(step))
-    }
     const apply = (v: number) => {
         const n = Math.min(5000, Math.max(100, Math.round(v)))
         storage?.set?.({ ...(storage?.cache ?? {}), ignoreMs: n }, true)
@@ -506,24 +490,15 @@ function SettingsPage() {
                     />
                 </TableRowGroup>
                 <TableRowGroup title="Reaction speed">
-                    <View style={{ padding: 12, gap: 8 }}>
-                        <Text variant="text-md/semibold">{`Wait ${step} ms between reactions`}</Text>
-                        <Text variant="text-sm/normal" color="text-muted">Time from one reaction to the next, when reacting with a word or with every emoji. It can not go faster than Discord answers (each reaction waits for the one before, to keep the letters in order).</Text>
-                        <TextInput
-                            value={stepDraft}
-                            placeholder={String(DEFAULT_STEP)}
-                            keyboardType="number-pad"
-                            onChange={(v: string) => setStepDraft(v.replace(/[^0-9]/g, ''))}
-                            onSubmitEditing={saveStep}
-                            returnKeyType="done"
-                        />
-                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                            {[150, 250, 350, 500, 800].map(v => (
-                                <Button key={v} text={`${v}`} size="sm" variant={step === v ? 'primary' : 'secondary'} onPress={() => applyStep(v)} />
-                            ))}
-                            <Button text="Save" size="sm" variant="primary" onPress={saveStep} />
-                        </View>
-                    </View>
+                    <TableSwitchRow
+                        label="All at once"
+                        subLabel={allAtOnce() ? 'Sends every reaction at the same time. Letters can end up out of order.' : 'Off: one after another, as fast as Discord answers. Letters stay in order.'}
+                        value={allAtOnce()}
+                        onValueChange={(v: boolean) => {
+                            storage?.set?.({ ...(storage?.cache ?? {}), allAtOnce: v }, true)
+                            if (storage?.cache) storage.cache.allAtOnce = v
+                        }}
+                    />
                 </TableRowGroup>
                 <TableRowGroup title="Delay">
                     <View style={{ padding: 12, gap: 8 }}>
@@ -563,7 +538,7 @@ function SettingsPage() {
 }
 
 export default plugin({
-    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, stepMs: DEFAULT_STEP, fitSize: true, wordButton: true } },
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, allAtOnce: false, fitSize: true, wordButton: true } },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
