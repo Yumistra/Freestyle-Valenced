@@ -300,6 +300,12 @@ val reactionWordsPlugin = plugin {
             return tv
         }
 
+        // 앞에서 잰 값 (새 버튼이 생기자마자, 재기 전에 바로 적용해서 한발 늦게 바뀌지 않게)
+        var knownSize = 0
+        var knownGap = 0
+        var knownIconW = 0
+        var knownT = Float.NaN
+
         fun ensure(v: View) {
             if (!v.isAttachedToWindow || v !is android.widget.LinearLayout) return
             val sib = firstSibling(v)
@@ -314,10 +320,12 @@ val reactionWordsPlugin = plugin {
             }
             val size = if (sib != null && sib.height > 0) {
                 if (fitSize) (sib.height * SIZE_RATIO).toInt() else sib.height
+            } else if (knownSize > 0) {
+                knownSize
             } else {
                 v.height.takeIf { it > 0 } ?: return
             }
-            var gap = (6 * v.resources.displayMetrics.density).toInt()
+            var gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
             if (sib != null) {
                 val sp = sib.parent as? android.view.ViewGroup
                 val i = sp?.indexOfChild(sib) ?: -1
@@ -347,6 +355,12 @@ val reactionWordsPlugin = plugin {
                 val m = c.layoutParams as? android.view.ViewGroup.MarginLayoutParams
                 iconW += c.measuredWidth + (m?.leftMargin ?: 0) + (m?.rightMargin ?: 0)
             }
+            if (iconW <= 0 && knownIconW > 0) iconW = knownIconW
+            if (sib != null && sib.height > 0) {
+                knownSize = size
+                knownGap = gap
+            }
+            if (iconW > 0) knownIconW = iconW
             val padL = ((size - iconW) / 2).coerceAtLeast(0)
             if (v.gravity != (Gravity.START or Gravity.CENTER_VERTICAL)) v.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             if (v.paddingLeft != padL || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(padL, 0, 0, 0)
@@ -403,6 +417,7 @@ val reactionWordsPlugin = plugin {
             // 세로 가운데: 같은 줄의 반응(바로 앞 반응)에 맞춘다. 반응이 두 줄이 되면 첫 반응은 윗줄이라
             // 거기에 맞추면 버튼이 윗줄로 올라가 가려졌다. 옮기기 전 위치로 재고, 한 줄 넘게 차이 나면 옮기지 않는다
             val ref = lastReaction ?: sib
+            if ((ref == null || ref.height <= 0 || v.height <= 0) && !knownT.isNaN()) v.translationY = knownT
             if (ref != null && ref.height > 0 && v.height > 0) {
                 val p = IntArray(2)
                 ref.getLocationOnScreen(p)
@@ -412,6 +427,7 @@ val reactionWordsPlugin = plugin {
                 val want = refCenter - vCenterNoShift
                 val t = if (abs(want) < ref.height) want else 0f
                 if (abs(v.translationY - t) > 1f) v.translationY = t
+                if (t != 0f) knownT = t
             }
         }
 
@@ -541,6 +557,28 @@ val reactionWordsPlugin = plugin {
         }
         // 3. 반응 추가 버튼이 자리를 잡을 때마다 크기를 맞추고 옆에 단어 버튼을 둔다
         if (addViewClass != null) {
+            // 화면에 붙자마자(처음 그리기 전) 앞에서 잰 값으로 바로 바꾼다
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        View::class.java,
+                        "onAttachedToWindow",
+                        object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                try {
+                                    ensure(v)
+                                } catch (e: Throwable) {
+                                    lastError = "attach: $e"
+                                }
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "attach hook: $e"
+            }
             try {
                 hooks.add(
                     XposedHelpers.findAndHookMethod(
@@ -554,7 +592,15 @@ val reactionWordsPlugin = plugin {
                         object : XC_MethodHook() {
                             override fun afterHookedMethod(param: MethodHookParam) {
                                 val v = param.thisObject as View
-                                if (addViewClass.isInstance(v)) schedule(v)
+                                if (!addViewClass.isInstance(v)) return
+                                // 바로 고친다 (레이아웃 중에 다시 재기를 부르면 안드로이드가 같은 프레임에서 한 번 더 잰다)
+                                try {
+                                    ensure(v)
+                                } catch (e: Throwable) {
+                                    lastError = "layout: $e"
+                                }
+                                // 다 그려진 뒤 위치를 한 번 더 맞춘다
+                                schedule(v)
                             }
                         },
                     ),
