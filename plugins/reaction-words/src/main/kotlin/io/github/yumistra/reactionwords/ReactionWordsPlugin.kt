@@ -333,6 +333,8 @@ val reactionWordsPlugin = plugin {
         /** 크기가 맞지 않고 늘어나 버리는 곳(포럼 글 머리 등)의 버튼. 이런 곳은 원래대로 둔다 */
         val skipped = WeakHashMap<View, Boolean>()
         val stretchCount = WeakHashMap<View, Int>()
+        /** 버튼이 잴 때 써야 하는 크기 (폭, 높이) */
+        val targetSize = WeakHashMap<View, Pair<Int, Int>>()
         val flexboxClass: Class<*>? = try {
             cl.loadClass(FLEXBOX)
         } catch (e: Throwable) {
@@ -420,6 +422,7 @@ val reactionWordsPlugin = plugin {
         }
 
         fun restore(v: android.widget.LinearLayout) {
+            if (targetSize.remove(v) != null) v.requestLayout()
             (wordButtons[v] as? View)?.let { v.removeView(it) }
             (v.background as? Twin)?.let { v.background = it.orig }
             origLook[v]?.let { o ->
@@ -461,6 +464,7 @@ val reactionWordsPlugin = plugin {
             val cur = v.background
             val orig = if (cur is Twin) cur.orig else cur
             if (!fitSize && !wantWord) {
+                if (targetSize.remove(v) != null) v.requestLayout()
                 aa?.let { v.removeView(it) }
                 if (cur is Twin) v.background = cur.orig
                 return
@@ -516,6 +520,11 @@ val reactionWordsPlugin = plugin {
                     plp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
                     (v.parent as View).layoutParams = plp
                 }
+            }
+            val tgt = Pair(width, size)
+            if (targetSize[v] != tgt) {
+                targetSize[v] = tgt
+                v.requestLayout()
             }
             v.layoutParams?.let { lp ->
                 if (lp.width != width || lp.height != size) {
@@ -779,6 +788,28 @@ val reactionWordsPlugin = plugin {
                 )
             } catch (e: Throwable) {
                 lastError = "attach hook: $e"
+            }
+            // 줄(포럼 글 머리 등)이 크기 지정을 무시하고 남는 폭만큼 늘리므로, 잴 때 아예 정한 크기로 재게 한다
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        android.widget.LinearLayout::class.java,
+                        "onMeasure",
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                val t = targetSize[v] ?: return
+                                param.args[0] = View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY)
+                                param.args[1] = View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY)
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "measure hook: $e"
             }
             try {
                 hooks.add(
