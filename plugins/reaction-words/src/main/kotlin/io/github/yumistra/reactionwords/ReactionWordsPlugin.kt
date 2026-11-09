@@ -37,6 +37,8 @@ private const val ADD_VIEW = "com.discord.reactions.AddReactionView"
 private const val REACTION_VIEW = "com.discord.reactions.ReactionView"
 /** 반응 추가 버튼과 Aa 버튼 크기 (반응 칸 높이에 대한 비율, 정사각형) */
 private const val SIZE_RATIO = 0.86f
+/** setTag 키 (리소스 id 처럼 보이는 아무 값) */
+private const val TAG_BG = 0x7f0f2a01
 /**
  * 표시가 살아 있는 시간 (진동부터, ms). 흉내 낸 꾹 누르기(꾹 누르기 시간 + 150ms 뒤 취소)에서 오는 신호를 잡을 만큼.
  * 그 뒤에 사용자가 누르는 반응은 평소대로 된다. 설정에서 바꾼다 (setIgnoreMs)
@@ -252,74 +254,54 @@ val reactionWordsPlugin = plugin {
             return (t and 0x00FFFFFF) or (0xB3 shl 24)
         }
 
-        val lastBg = WeakHashMap<View, Any?>()
-        fun theme(btn: TextView, add: View, sample: View?) {
-            val state = add.background?.constantState
-            if (lastBg[btn] !== state) {
-                lastBg[btn] = state
-                btn.background = state?.newDrawable()?.mutate()
-            }
-            val c = iconColor(add, sample)
-            if (btn.currentTextColor != c) btn.setTextColor(c)
-        }
+        /**
+         * 반응 추가 버튼(LinearLayout) "안"에 Aa 를 넣는다. 반응들이 있는 줄에 직접 끼우면 디스코드가 반응 칸을
+         * 순서대로 다시 쓰면서 Aa 가 반응 사이로 들어가거나 앱이 멈췄다.
+         * 버튼 배경은 버튼에서 떼어 아이콘과 Aa 에 각각 입혀서, 두 개의 정사각형 버튼처럼 보이게 한다.
+         */
+        val origBg = WeakHashMap<View, android.graphics.drawable.Drawable>()
 
-        fun makeButton(add: View, sample: View?): View {
-            val ctx = add.context
-            val tv = TextView(ctx)
+        fun makeButton(add: View): TextView {
+            val tv = TextView(add.context)
             tv.text = "Aa"
             tv.gravity = Gravity.CENTER
             tv.typeface = Typeface.DEFAULT_BOLD
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             tv.includeFontPadding = false
-            theme(tv, add, sample)
             tv.contentDescription = "React with a word"
             tv.isClickable = true
-            tv.setOnClickListener { b -> fire(b, "word") }
+            // 어느 메시지인지는 반응 추가 버튼 옆의 반응으로 알아낸다
+            tv.setOnClickListener { fire(add, "word") }
             buttonsMade++
             return tv
         }
 
+        fun copyOf(d: android.graphics.drawable.Drawable?) = d?.constantState?.newDrawable()?.mutate()
+
         fun ensure(v: View) {
-            if (!v.isAttachedToWindow) return
+            if (!v.isAttachedToWindow || v !is android.widget.LinearLayout) return
             val sib = firstSibling(v)
-            // 1) 정사각형, 반응 칸보다 조금 작게, 반응 칸 가운데 높이에 맞춰서
-            var off = 0
-            if (fitSize && sib != null && sib.height > 0) {
-                val size = (sib.height * SIZE_RATIO).toInt()
-                off = (sib.height - size) / 2
-                val lp = v.layoutParams
-                if (lp != null) {
-                    var changed = false
-                    if (lp.height != size || lp.width != size) {
-                        lp.height = size
-                        lp.width = size
-                        changed = true
-                    }
-                    if (lp is android.view.ViewGroup.MarginLayoutParams && (lp.topMargin != off || lp.bottomMargin != off)) {
-                        lp.topMargin = off
-                        lp.bottomMargin = off
-                        changed = true
-                    }
-                    if (changed) v.layoutParams = lp
-                }
-                // 정사각형으로 줄이면 아이콘이 왼쪽으로 쏠린다: 좌우 안쪽 여백을 없애고 가운데로
-                if (v is android.widget.LinearLayout) {
-                    if (v.gravity != Gravity.CENTER) v.gravity = Gravity.CENTER
-                    if (v.paddingLeft != 0 || v.paddingRight != 0) v.setPadding(0, v.paddingTop, 0, v.paddingBottom)
-                    for (i in 0 until v.childCount) {
-                        val c = v.getChildAt(i)
-                        val clp = c.layoutParams as? android.view.ViewGroup.MarginLayoutParams ?: continue
-                        if (c.visibility == View.VISIBLE && (clp.leftMargin != 0 || clp.rightMargin != 0 || clp.marginStart != 0 || clp.marginEnd != 0)) {
-                            clp.leftMargin = 0
-                            clp.rightMargin = 0
-                            clp.marginStart = 0
-                            clp.marginEnd = 0
-                            c.layoutParams = clp
-                        }
-                    }
+            val custom = fitSize || showWord
+            var aa = wordButtons[v] as? TextView
+            // 디스코드가 배경을 다시 넣으면(테마 바뀜 등) 그걸 새 원본으로 삼는다
+            v.background?.let { bg ->
+                if (custom) {
+                    origBg[v] = bg
+                    v.background = null
                 }
             }
-            // 반응 칸 사이 간격 (Aa 버튼도 같은 간격으로 띄운다)
+            if (!custom) {
+                aa?.let { v.removeView(it) }
+                origBg.remove(v)?.let { v.background = it }
+                return
+            }
+            val bg = origBg[v]
+            val icon = (0 until v.childCount).map { v.getChildAt(it) }.firstOrNull { it !== aa } ?: return
+            val size = if (sib != null && sib.height > 0) {
+                if (fitSize) (sib.height * SIZE_RATIO).toInt() else sib.height
+            } else {
+                icon.height.takeIf { it > 0 } ?: return
+            }
             var gap = (6 * v.resources.displayMetrics.density).toInt()
             if (sib != null) {
                 val sp = sib.parent as? android.view.ViewGroup
@@ -327,89 +309,81 @@ val reactionWordsPlugin = plugin {
                 val next = if (sp != null && i >= 0 && i + 1 < sp.childCount) sp.getChildAt(i + 1) else null
                 if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
             }
-            val vEnd = (v.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.marginEnd ?: 0
-            val btn0 = wordButtons[v]
-            if (!showWord) {
-                (btn0?.parent as? android.view.ViewGroup)?.removeView(btn0)
-                return
-            }
-            // 2) 단어 버튼: 버튼을 감싼 줄(LinearLayout)이면 그 안, 아니면 반응들이 있는 곳에 버튼 바로 뒤로
-            val parent = v.parent as? android.view.ViewGroup ?: return
-            val inner = parent is android.widget.LinearLayout && (sib == null || sib.parent !== parent)
-            val container: android.view.ViewGroup
-            val anchor: View
-            if (inner || (sib != null && sib.parent === parent)) {
-                container = parent
-                anchor = v
-            } else {
-                container = parent.parent as? android.view.ViewGroup ?: return
-                anchor = parent
-            }
-            val btn = btn0 ?: makeButton(v, sib).also { wordButtons[v] = it }
-            val want = container.indexOfChild(anchor) + 1
-            if (btn.parent !== container || container.indexOfChild(btn) != want) {
-                (btn.parent as? android.view.ViewGroup)?.removeView(btn)
-                val lp = copyLp(if (anchor === v) v.layoutParams else anchor.layoutParams) ?: android.view.ViewGroup.LayoutParams(-2, -2)
-                if (lp is android.view.ViewGroup.MarginLayoutParams && anchor === v) lp.marginStart = (6 * v.resources.displayMetrics.density).toInt()
-                container.addView(btn, container.indexOfChild(anchor) + 1, lp)
-            }
-            // 크기는 반응 추가 버튼과 같게
-            val blp = btn.layoutParams
-            val side = v.layoutParams?.height?.takeIf { it > 0 } ?: if (v.height > 0) v.height else v.width
-            if (blp != null && side > 0) {
-                var changed = false
-                if (blp.width != side || blp.height != side) {
-                    blp.width = side
-                    blp.height = side
-                    changed = true
+            // 버튼 전체: 가로는 내용만큼, 안쪽 여백 없음, 가운데 정렬
+            if (v.gravity != Gravity.CENTER) v.gravity = Gravity.CENTER
+            if (v.paddingLeft != 0 || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(0, 0, 0, 0)
+            v.layoutParams?.let { lp ->
+                if (lp.width != android.view.ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != size) {
+                    lp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    lp.height = size
+                    v.layoutParams = lp
                 }
-                if (blp is android.view.ViewGroup.MarginLayoutParams) {
-                    // 실제 화면에서 잰 간격으로 맞춘다 (반응 추가 버튼 오른쪽 → Aa)
-                    var start = blp.marginStart
-                    if (btn.width > 0 && v.width > 0 && btn.visibility == View.VISIBLE) {
-                        val g = screenX(btn) - (screenX(v) + v.width)
-                        if (abs(g - gap) > 1) start = (blp.marginStart + gap - g).coerceAtLeast(0)
-                    } else if (start == 0) {
-                        start = (gap - vEnd).coerceAtLeast(0)
-                    }
-                    if (blp.topMargin != off || blp.bottomMargin != off || blp.marginStart != start || blp.marginEnd != 0) {
-                        blp.topMargin = off
-                        blp.bottomMargin = off
-                        blp.marginStart = start
-                        blp.marginEnd = 0
-                        changed = true
+            }
+            // 아이콘 칸: 정사각형 + 원래 배경
+            (icon.layoutParams as? android.widget.LinearLayout.LayoutParams)?.let { lp ->
+                if (lp.width != size || lp.height != size || lp.leftMargin != 0 || lp.rightMargin != 0 || lp.marginStart != 0 || lp.marginEnd != 0) {
+                    lp.width = size
+                    lp.height = size
+                    lp.leftMargin = 0
+                    lp.rightMargin = 0
+                    lp.marginStart = 0
+                    lp.marginEnd = 0
+                    icon.layoutParams = lp
+                }
+            }
+            if (icon is android.widget.ImageView && icon.scaleType != android.widget.ImageView.ScaleType.CENTER_INSIDE) icon.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+            if (icon.getTag(TAG_BG) !== bg) {
+                icon.setTag(TAG_BG, bg)
+                icon.background = copyOf(bg)
+            }
+            // Aa 칸
+            if (showWord) {
+                if (aa == null) {
+                    aa = makeButton(v)
+                    wordButtons[v] = aa
+                }
+                if (aa.parent !== v) {
+                    (aa.parent as? android.view.ViewGroup)?.removeView(aa)
+                    v.addView(aa, android.widget.LinearLayout.LayoutParams(size, size))
+                }
+                (aa.layoutParams as? android.widget.LinearLayout.LayoutParams)?.let { lp ->
+                    if (lp.width != size || lp.height != size || lp.marginStart != gap) {
+                        lp.width = size
+                        lp.height = size
+                        lp.marginStart = gap
+                        lp.leftMargin = gap
+                        aa.layoutParams = lp
                     }
                 }
-                if (changed) btn.layoutParams = blp
+                if (aa.getTag(TAG_BG) !== bg) {
+                    aa.setTag(TAG_BG, bg)
+                    aa.background = copyOf(bg)
+                }
+                val c = iconColor(v, sib)
+                if (aa.currentTextColor != c) aa.setTextColor(c)
+            } else if (aa != null) {
+                v.removeView(aa)
             }
-            // 반응 추가 버튼 왼쪽 간격도 반응 사이 간격과 같게 (마지막 반응 → 반응 추가)
+            // 왼쪽 간격을 반응 사이 간격과 같게 (화면에서 잰다)
             val lastReaction = lastReactionBefore(v)
             val vlp = v.layoutParams as? android.view.ViewGroup.MarginLayoutParams
-            if (fitSize && lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
+            if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
                 val g = screenX(v) - (screenX(lastReaction) + lastReaction.width)
                 if (abs(g - gap) > 1) {
                     vlp.marginStart = (vlp.marginStart + gap - g).coerceAtLeast(0)
                     v.layoutParams = vlp
                 }
             }
-            // 세로 가운데: 여백이 안 먹는 경우가 있어서, 화면에서 재고 모자란 만큼 옮긴다
-            if (fitSize && sib != null && sib.height > 0 && v.height > 0) {
+            // 세로 가운데 (화면에서 재고 모자란 만큼 옮긴다)
+            if (sib != null && sib.height > 0 && v.height > 0) {
                 fun centerY(x: View): Float {
-                    val a = IntArray(2)
-                    x.getLocationOnScreen(a)
-                    return a[1] + x.height / 2f
+                    val p = IntArray(2)
+                    x.getLocationOnScreen(p)
+                    return p[1] + x.height / 2f
                 }
                 val diff = centerY(sib) - centerY(v)
                 if (abs(diff) > 1f) v.translationY = v.translationY + diff
-                if (btn.height > 0 && btn.visibility == View.VISIBLE) {
-                    val d2 = centerY(sib) - centerY(btn)
-                    if (abs(d2) > 1f) btn.translationY = btn.translationY + d2
-                }
             }
-            // 테마가 바뀌면 반응 추가 버튼 모양을 다시 따라간다
-            if (btn is TextView) theme(btn, v, sib)
-            val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-            if (btn.visibility != vis) btn.visibility = vis
         }
 
         fun schedule(v: View) {
@@ -480,6 +454,12 @@ val reactionWordsPlugin = plugin {
                                 when (ev.actionMasked) {
                                     MotionEvent.ACTION_DOWN -> {
                                         cur?.let { it.view.removeCallbacks(it.run) }
+                                        // Aa 칸을 누른 거면 꾹 누르기를 보지 않는다 (Aa 가 알아서 받는다)
+                                        val aa = wordButtons[v]
+                                        if (aa != null && aa.parent === v && ev.x >= aa.left && ev.x <= aa.right) {
+                                            press = null
+                                            return
+                                        }
                                         touches++
                                         lateinit var p: Press
                                         val run = Runnable {
