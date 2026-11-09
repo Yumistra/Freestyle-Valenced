@@ -315,14 +315,41 @@ let eventUtils: any
 let nativeOk = false
 const NATIVE = 'yumistra.reaction-words'
 
-/** 방금 반응 추가 버튼을 꾹 눌렀는지 안드로이드에 묻는다 */
-async function tookAddLongPress(): Promise<boolean> {
-    if (!nativeOk) return false
+/** 방금 반응 추가 버튼을 꾹 눌렀으면 그 번호 (안드로이드는 3초 동안 같은 번호를 준다), 아니면 0 */
+async function addPending(): Promise<number> {
+    if (!nativeOk) return 0
     try {
-        return (await (callNativeMethod as any)(`${NATIVE}.takeAddLongPress`, [])) === true
+        const r = await (callNativeMethod as any)(`${NATIVE}.addPending`, [])
+        return typeof r === 'number' ? r : 0
     } catch {
-        return false
+        return 0
     }
+}
+/** 이미 전부 반응한 꾹 누르기 번호 */
+let handledSeq = 0
+
+/**
+ * 반응 꾹 누르기/누르기가 오면 안드로이드에 확인한다. 방금 반응 추가 버튼을 꾹 누른 거면
+ * 원래 동작(목록 열기, 켜고 끄기)은 버리고, 처음 한 번만 전부 반응한다.
+ */
+function viaPending(inst: any, event: any, orig: (e: any) => void) {
+    let d: any
+    let copy: any = event
+    try {
+        eventUtils ??= find('getNativeSyntheticEventData')
+        d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+        // 기다리는 동안 이벤트가 재사용되면 원래 동작이 안 먹으니, 내용을 복사해서 넘긴다
+        if (event?.nativeEvent) copy = { ...event, nativeEvent: JSON.parse(JSON.stringify(event.nativeEvent)) }
+    } catch {}
+    addPending().then(seq => {
+        if (!seq) return orig(copy)
+        if (seq === handledSeq || !d?.messageId) return
+        handledSeq = seq
+        try {
+            const result = inst.getMessageData?.(d.messageId)
+            if (result?.message && result.messageChannel) reactWithAll(result.message, result.messageChannel)
+        } catch {}
+    })
 }
 
 /**
@@ -330,63 +357,14 @@ async function tookAddLongPress(): Promise<boolean> {
  * 그래서 반응 꾹 누르기(혹시 순서가 바뀌면 누르기)가 올 때 안드로이드에 확인하고,
  * 맞으면 원래 동작(반응 목록 열기, 반응 켜고 끄기) 대신 전부 반응한다.
  */
-/** 꾹 누르기 바로 뒤에 같은 메시지로 오는 누르기는 버린다 (버튼 꾹 누르기를 흉내 낼 때 누르기도 같이 와서 반응이 꺼졌다) */
-let quietTap: { messageId: string; until: number } | undefined
-
 function wrapInstance(inst: any) {
-    // 누르기: 버튼 꾹 누르기를 흉내 낼 때 꾹 누르기 대신 누르기가 올 수도 있어서(손을 일찍 떼면) 안드로이드에 확인한다.
-    // 기다리는 동안 이벤트가 재사용되면 누르기가 안 먹으니, 이벤트 내용을 복사해서 넘긴다
-    const tap = inst?.handleTapReaction
-    if (typeof tap === 'function' && !tap.__reactionWords) {
-        const w = function (this: unknown, event: any) {
-            if (!nativeOk) return tap.apply(this, arguments as any)
-            const self = this
-            let copy: any = event
-            let d: any
-            try {
-                eventUtils ??= find('getNativeSyntheticEventData')
-                d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
-                if (event?.nativeEvent) copy = { ...event, nativeEvent: JSON.parse(JSON.stringify(event.nativeEvent)) }
-                if (quietTap && Date.now() < quietTap.until && d?.messageId === quietTap.messageId) return
-            } catch {}
-            tookAddLongPress().then(took => {
-                if (took && d?.messageId) {
-                    try {
-                        const result = inst.getMessageData?.(d.messageId)
-                        if (result?.message && result.messageChannel) return reactWithAll(result.message, result.messageChannel)
-                    } catch {}
-                }
-                tap.call(self, copy)
-            })
-        }
-        ;(w as any).__reactionWords = true
-        inst.handleTapReaction = w
-    }
-    for (const name of ['handleLongPressReaction']) {
+    for (const name of ['handleTapReaction', 'handleLongPressReaction']) {
         const orig = inst?.[name]
         if (typeof orig !== 'function' || orig.__reactionWords) continue
         const wrapped = function (this: unknown, event: any) {
             if (!nativeOk) return orig.apply(this, arguments as any)
             const self = this
-            const args = arguments
-            let data: any
-            try {
-                // 기다리는 동안 디스코드가 이벤트를 재사용하지 않게 붙잡아 둔다
-                event?.persist?.()
-                eventUtils ??= find('getNativeSyntheticEventData')
-                // 이벤트는 바로 읽어 둔다 (기다리는 동안 재사용될 수 있다)
-                data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
-                if (data?.messageId) quietTap = { messageId: data.messageId, until: Date.now() + 1500 }
-            } catch {}
-            tookAddLongPress().then(took => {
-                if (took && data?.messageId) {
-                    try {
-                        const result = inst.getMessageData?.(data.messageId)
-                        if (result?.message && result.messageChannel) return reactWithAll(result.message, result.messageChannel)
-                    } catch {}
-                }
-                orig.apply(self, args as any)
-            })
+            viaPending(inst, event, e => orig.call(self, e))
         }
         ;(wrapped as any).__reactionWords = true
         inst[name] = wrapped

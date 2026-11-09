@@ -53,6 +53,8 @@ val reactionWordsPlugin = plugin {
         val cl = classLoader
         val rows = WeakHashMap<View, Row>()
         var pendingAt = 0L
+        /** 꾹 누를 때마다 1씩 오르는 번호 (JS 가 같은 꾹 누르기를 두 번 처리하지 않게) */
+        var pendingSeq = 0
         var press: Press? = null
         // 상태 (설정 화면에 보여 준다)
         var rowHook = false
@@ -147,6 +149,7 @@ val reactionWordsPlugin = plugin {
         fun fire(v: View) {
             try {
                 pendingAt = SystemClock.uptimeMillis()
+                pendingSeq++
                 fires++
                 v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 // 1) 반응 줄을 기억해 뒀으면 그 꾹 누르기 함수로
@@ -287,6 +290,10 @@ val reactionWordsPlugin = plugin {
             val ok = pendingAt != 0L && SystemClock.uptimeMillis() - pendingAt < PENDING_TTL
             pendingAt = 0L
             ok
+        }
+        /** 방금(3초 안) 반응 추가 버튼을 꾹 눌렀으면 그 번호, 아니면 0 (지우지 않는다) */
+        registerNativeMethod("${manifest.id}.addPending") {
+            if (pendingAt != 0L && SystemClock.uptimeMillis() - pendingAt < PENDING_TTL) pendingSeq else 0
         }
         registerNativeMethod("${manifest.id}.ping") { "pong" }
         registerNativeMethod("${manifest.id}.status") {
