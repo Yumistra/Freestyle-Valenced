@@ -319,7 +319,7 @@ const NATIVE = 'yumistra.reaction-words'
 async function tookAddLongPress(): Promise<boolean> {
     if (!nativeOk) return false
     try {
-        return (await callNativeMethod(`${NATIVE}.takeAddLongPress`)) === true
+        return (await (callNativeMethod as any)(`${NATIVE}.takeAddLongPress`, [])) === true
     } catch {
         return false
     }
@@ -391,7 +391,7 @@ function SettingsPage() {
     const { Stack, TableRowGroup, TableRow } = D()
     const [st, setSt] = useState<any>(undefined)
     const refresh = () =>
-        callNativeMethod(`${NATIVE}.status`)
+        (callNativeMethod as any)(`${NATIVE}.status`, [])
             .then((r: any) => setSt(r ?? {}))
             .catch((e: any) => setSt({ error: `Android part not loaded: ${String(e?.message ?? e).slice(0, 300)}` }))
     useState(() => void refresh())
@@ -422,7 +422,7 @@ function SettingsPage() {
 
 export default plugin({
     start({ cleanup }: any) {
-        callNativeMethod(`${NATIVE}.ping`)
+        (callNativeMethod as any)(`${NATIVE}.ping`, [])
             .then((r: any) => (nativeOk = r === 'pong'))
             .catch(() => (nativeOk = false))
         patchHandlers(cleanup)
