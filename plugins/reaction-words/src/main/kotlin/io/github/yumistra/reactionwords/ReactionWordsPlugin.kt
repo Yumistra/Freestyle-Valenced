@@ -237,16 +237,36 @@ val reactionWordsPlugin = plugin {
         fun ensure(v: View) {
             if (!v.isAttachedToWindow) return
             val sib = firstSibling(v)
-            // 1) 정사각형, 반응 칸보다 조금 작게
+            // 1) 정사각형, 반응 칸보다 조금 작게, 반응 칸 가운데 높이에 맞춰서
+            var off = 0
             if (fitSize && sib != null && sib.height > 0) {
                 val size = (sib.height * SIZE_RATIO).toInt()
+                off = (sib.height - size) / 2
                 val lp = v.layoutParams
-                if (lp != null && (lp.height != size || lp.width != size)) {
-                    lp.height = size
-                    lp.width = size
-                    v.layoutParams = lp
+                if (lp != null) {
+                    var changed = false
+                    if (lp.height != size || lp.width != size) {
+                        lp.height = size
+                        lp.width = size
+                        changed = true
+                    }
+                    if (lp is android.view.ViewGroup.MarginLayoutParams && (lp.topMargin != off || lp.bottomMargin != off)) {
+                        lp.topMargin = off
+                        lp.bottomMargin = off
+                        changed = true
+                    }
+                    if (changed) v.layoutParams = lp
                 }
             }
+            // 반응 칸 사이 간격 (Aa 버튼도 같은 간격으로 띄운다)
+            var gap = (6 * v.resources.displayMetrics.density).toInt()
+            if (sib != null) {
+                val sp = sib.parent as? android.view.ViewGroup
+                val i = sp?.indexOfChild(sib) ?: -1
+                val next = if (sp != null && i >= 0 && i + 1 < sp.childCount) sp.getChildAt(i + 1) else null
+                if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
+            }
+            val vEnd = (v.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.marginEnd ?: 0
             val btn0 = wordButtons[v]
             if (!showWord) {
                 (btn0?.parent as? android.view.ViewGroup)?.removeView(btn0)
@@ -274,11 +294,25 @@ val reactionWordsPlugin = plugin {
             }
             // 크기는 반응 추가 버튼과 같게
             val blp = btn.layoutParams
-            val side = if (v.height > 0) v.height else v.width
-            if (blp != null && side > 0 && (blp.width != side || blp.height != side)) {
-                blp.width = side
-                blp.height = side
-                btn.layoutParams = blp
+            val side = v.layoutParams?.height?.takeIf { it > 0 } ?: if (v.height > 0) v.height else v.width
+            if (blp != null && side > 0) {
+                var changed = false
+                if (blp.width != side || blp.height != side) {
+                    blp.width = side
+                    blp.height = side
+                    changed = true
+                }
+                if (blp is android.view.ViewGroup.MarginLayoutParams) {
+                    val start = (gap - vEnd).coerceAtLeast(0)
+                    if (blp.topMargin != off || blp.bottomMargin != off || blp.marginStart != start || blp.marginEnd != 0) {
+                        blp.topMargin = off
+                        blp.bottomMargin = off
+                        blp.marginStart = start
+                        blp.marginEnd = 0
+                        changed = true
+                    }
+                }
+                if (changed) btn.layoutParams = blp
             }
             val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE
             if (btn.visibility != vis) btn.visibility = vis
