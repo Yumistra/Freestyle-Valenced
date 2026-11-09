@@ -1,4 +1,6 @@
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { Constants } from '@valenced/discord/common/constants'
+import { Dispatcher } from '@valenced/discord/common/flux'
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
@@ -79,6 +81,18 @@ function servers(): Item[] {
     }
 }
 
+/** 내가 볼 수 있는 채널인지 (다른 플러그인이 숨은 채널을 보여 줘도 빼게) */
+function canView(c: any): boolean {
+    try {
+        if (!c || /^_+hidden_+$/i.test(String(c.name ?? ''))) return false
+        const P: any = (Constants as any)?.Permissions
+        const view = P?.VIEW_CHANNEL ?? 1024n
+        const ps = S().PermissionStore
+        if (typeof ps?.can === 'function') return !!ps.can(view, c)
+    } catch {}
+    return true
+}
+
 function channels(gid: string): Item[] {
     try {
         const all = S().ChannelStore?.getMutableGuildChannelsForGuild?.(gid) ?? {}
@@ -87,7 +101,7 @@ function channels(gid: string): Item[] {
         for (const c of list) if (c?.type === 4) cats[c.id] = c
         const pos = (c: any) => [c.parent_id ? (cats[c.parent_id]?.position ?? 0) : -1, c.type === 2 || c.type === 13 ? 1 : 0, c.position ?? 0]
         return list
-            .filter(c => c && c.type !== 4)
+            .filter(c => c && c.type !== 4 && canView(c))
             .sort((a, b) => {
                 const x = pos(a)
                 const y = pos(b)
@@ -108,7 +122,17 @@ function userItem(id: string, sub?: string): Item | undefined {
 /** 이 서버에서 앱이 알고 있는 멤버 (디스코드가 받아 둔 만큼) */
 function members(gid: string): Item[] {
     try {
-        const ids: string[] = S().GuildMemberStore?.getMemberIds?.(gid) ?? []
+        const set = new Set<string>((S().GuildMemberStore?.getMemberIds?.(gid) ?? []).map(String))
+        // 멤버 목록으로 받은 사람들 (멤버 목록 저장소에만 들어가는 경우도 있어서)
+        try {
+            const cid = listChannel(gid)
+            const rows: any[] = (cid && S().ChannelMemberStore?.getProps?.(gid, cid)?.rows) || []
+            for (const r of rows) {
+                const id = r?.userId ?? r?.user?.id ?? r?.member?.userId
+                if (id) set.add(String(id))
+            }
+        } catch {}
+        const ids = [...set]
         return ids
             .map(id => {
                 const m = S().GuildMemberStore?.getMember?.(gid, id)
@@ -198,7 +222,7 @@ function listChannel(gid: string): string | undefined {
     try {
         const g = S().GuildStore?.getGuild?.(gid)
         const all = Object.values(S().ChannelStore?.getMutableGuildChannelsForGuild?.(gid) ?? {}) as any[]
-        const text = all.filter(c => c?.type === 0).sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        const text = all.filter(c => c?.type === 0 && canView(c)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         const ok = (id?: string) => (id && text.some(c => c.id === id) ? id : undefined)
         return ok(g?.systemChannelId) ?? ok(g?.rulesChannelId) ?? text[0]?.id
     } catch {}
@@ -219,7 +243,7 @@ function loadAllMembers(gid: string, onStep: (done: number, total: number) => vo
     subscriptions ??= find('subscribeChannel', 'subscribeMembers') ?? find('subscribeChannel')
     const cid = listChannel(gid)
     const total = memberCount(gid)
-    if (!cid || typeof subscriptions?.subscribeChannel !== 'function') {
+    if (!cid) {
         onStep(total, total)
         return () => {}
     }
@@ -229,9 +253,14 @@ function loadAllMembers(gid: string, onStep: (done: number, total: number) => vo
         // 디스코드는 한 번에 구간 3개까지: 처음 100명 + 다음 두 구간
         const ranges: number[][] = [[0, 99]]
         for (const k of [i, i + 1]) if (k * 100 < total) ranges.push([k * 100, k * 100 + 99])
+        // 오른쪽 멤버 목록과 같은 요청 (디스코드가 받아서 서버에 구독을 보낸다)
         try {
-            subscriptions.subscribeChannel(gid, cid, ranges)
-        } catch {}
+            ;(Dispatcher as any).dispatch({ type: 'GUILD_SUBSCRIPTIONS_CHANNEL', guildId: gid, channelId: cid, ranges })
+        } catch {
+            try {
+                subscriptions?.subscribeChannel?.(gid, cid, ranges)
+            } catch {}
+        }
         onStep(Math.min(total, (i + 2) * 100), total)
         i += 2
         if (i * 100 < total) setTimeout(step, 450)
@@ -294,7 +323,7 @@ function PickerScreen({ navigation, route }: any) {
                 setVer(v => v + 1)
             }, 250)
         }
-        const stores = [S().GuildMemberStore, S().RelationshipStore, S().ChannelStore].filter(Boolean)
+        const stores = [S().GuildMemberStore, S().ChannelMemberStore, S().RelationshipStore, S().ChannelStore].filter(Boolean)
         for (const st of stores) st.addChangeListener?.(bump)
         return () => {
             clearTimeout(t)
