@@ -216,6 +216,53 @@ val reactionWordsPlugin = plugin {
             }
         }
 
+        fun screenX(v: View): Int {
+            val a = IntArray(2)
+            v.getLocationOnScreen(a)
+            return a[0]
+        }
+
+        /** 반응 추가 버튼(을 감싼 칸) 바로 앞의 보이는 반응 */
+        fun lastReactionBefore(v: View): View? {
+            var self: View = v
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is android.view.ViewGroup && depth < 3) {
+                val i = p.indexOfChild(self)
+                for (k in i - 1 downTo 0) {
+                    val c = p.getChildAt(k)
+                    if (c.visibility == View.VISIBLE && c.width > 0) return c
+                }
+                self = p
+                p = p.parent
+                depth++
+            }
+            return null
+        }
+
+        /** 반응 추가 버튼 아이콘 색 (없으면 반응 숫자 색을 흐리게) */
+        fun iconColor(add: View, sample: View?): Int {
+            fun find(v: View?): android.widget.ImageView? {
+                if (v is android.widget.ImageView) return v
+                if (v is android.view.ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
+                return null
+            }
+            find(add)?.imageTintList?.defaultColor?.let { return it }
+            val t = firstTextView(sample)?.currentTextColor ?: return 0xFFB5BAC1.toInt()
+            return (t and 0x00FFFFFF) or (0xB3 shl 24)
+        }
+
+        val lastBg = WeakHashMap<View, Any?>()
+        fun theme(btn: TextView, add: View, sample: View?) {
+            val state = add.background?.constantState
+            if (lastBg[btn] !== state) {
+                lastBg[btn] = state
+                btn.background = state?.newDrawable()?.mutate()
+            }
+            val c = iconColor(add, sample)
+            if (btn.currentTextColor != c) btn.setTextColor(c)
+        }
+
         fun makeButton(add: View, sample: View?): View {
             val ctx = add.context
             val tv = TextView(ctx)
@@ -224,9 +271,7 @@ val reactionWordsPlugin = plugin {
             tv.typeface = Typeface.DEFAULT_BOLD
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             tv.includeFontPadding = false
-            val sampleText = firstTextView(sample)
-            tv.setTextColor(sampleText?.currentTextColor ?: 0xFFB5BAC1.toInt())
-            add.background?.constantState?.newDrawable()?.mutate()?.let { tv.background = it }
+            theme(tv, add, sample)
             tv.contentDescription = "React with a word"
             tv.isClickable = true
             tv.setOnClickListener { b -> fire(b, "word") }
@@ -303,7 +348,14 @@ val reactionWordsPlugin = plugin {
                     changed = true
                 }
                 if (blp is android.view.ViewGroup.MarginLayoutParams) {
-                    val start = (gap - vEnd).coerceAtLeast(0)
+                    // 실제 화면에서 잰 간격으로 맞춘다 (반응 추가 버튼 오른쪽 → Aa)
+                    var start = blp.marginStart
+                    if (btn.width > 0 && v.width > 0 && btn.visibility == View.VISIBLE) {
+                        val g = screenX(btn) - (screenX(v) + v.width)
+                        if (abs(g - gap) > 1) start = (blp.marginStart + gap - g).coerceAtLeast(0)
+                    } else if (start == 0) {
+                        start = (gap - vEnd).coerceAtLeast(0)
+                    }
                     if (blp.topMargin != off || blp.bottomMargin != off || blp.marginStart != start || blp.marginEnd != 0) {
                         blp.topMargin = off
                         blp.bottomMargin = off
@@ -314,6 +366,18 @@ val reactionWordsPlugin = plugin {
                 }
                 if (changed) btn.layoutParams = blp
             }
+            // 반응 추가 버튼 왼쪽 간격도 반응 사이 간격과 같게 (마지막 반응 → 반응 추가)
+            val lastReaction = lastReactionBefore(v)
+            val vlp = v.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+            if (fitSize && lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
+                val g = screenX(v) - (screenX(lastReaction) + lastReaction.width)
+                if (abs(g - gap) > 1) {
+                    vlp.marginStart = (vlp.marginStart + gap - g).coerceAtLeast(0)
+                    v.layoutParams = vlp
+                }
+            }
+            // 테마가 바뀌면 반응 추가 버튼 모양을 다시 따라간다
+            if (btn is TextView) theme(btn, v, sib)
             val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE
             if (btn.visibility != vis) btn.visibility = vis
         }
