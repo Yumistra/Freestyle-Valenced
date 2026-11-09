@@ -4,6 +4,8 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { refreshSettings, registerSettingsItem } from '@valenced/discord/modules/settings'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Image, LayoutAnimation, ScrollView, View } from 'react-native'
@@ -173,11 +175,12 @@ function Check({ on }: { on: boolean }) {
 }
 
 /** 검색 + 고르는 목록 */
-function ItemList({ items, list, empty }: { items: Item[]; list: List; empty?: string; key?: string }) {
+function ItemList({ items, list, empty, onQuery }: { items: Item[]; list: List; empty?: string; key?: string; onQuery?: (q: string) => void }) {
     const { TableRowGroup, TableRow, TextInput, Text } = Design as any
     const [q, setQ] = useState('')
     const { has, toggle } = useToggle(list)
     const query = q.trim().toLowerCase()
+    useEffect(() => onQuery?.(query), [query])
     const filtered = query ? items.filter(i => i.name.toLowerCase().includes(query) || (i.sub ?? '').toLowerCase().includes(query) || i.id === query) : items
     // 전부 보여 주되, 한꺼번에 그리면 느려서 조금씩 이어 그린다
     const [count, setCount] = useState(LIMIT)
@@ -206,8 +209,44 @@ function ItemList({ items, list, empty }: { items: Item[]; list: List; empty?: s
     )
 }
 
+/**
+ * 서버 멤버: 디스코드는 처음에 일부(봇, 나, 멤버 목록에서 본 사람)만 받아 둔다.
+ * 그래서 탭을 열거나 검색할 때 디스코드에 멤버를 더 달라고 요청하고, 받는 대로 목록을 다시 그린다.
+ */
+let memberActions: any
+function requestMembers(gid: string, query: string) {
+    try {
+        memberActions ??= (lookupModule(withProps('requestMembers', 'requestMembersById') as any) as any)?.[0]
+        memberActions?.requestMembers?.([gid], query, 100)
+    } catch {}
+}
+
+function MembersTab({ gid, list }: { gid: string; list: List }) {
+    const [ver, setVer] = useState(0)
+    useEffect(() => {
+        const store = S().GuildMemberStore
+        const f = () => setVer(v => v + 1)
+        store?.addChangeListener?.(f)
+        requestMembers(gid, '')
+        return () => store?.removeChangeListener?.(f)
+    }, [gid])
+    const items = useMemo(() => members(gid), [gid, ver])
+    const timer = useState<{ t?: any }>({})[0]
+    return (
+        <ItemList
+            items={items}
+            list={list}
+            empty="Loading members…"
+            onQuery={q => {
+                clearTimeout(timer.t)
+                if (q) timer.t = setTimeout(() => requestMembers(gid, q), 350)
+            }}
+        />
+    )
+}
+
 /** 이미지의 Tabs (Design.Tabs + useSegmentedControlState) 로 나눈 화면 */
-function TabbedLists({ tabs, list }: { tabs: Array<{ id: string; label: string; items: () => Item[]; empty?: string }>; list: List }) {
+function TabbedLists({ tabs, list }: { tabs: Array<{ id: string; label: string; items: () => Item[]; empty?: string; render?: () => any }>; list: List }) {
     const { Tabs, useSegmentedControlState } = Design as any
     const [index, setIndex] = useState(0)
     const items = useMemo(() => tabs.map(t => ({ id: t.id, label: t.label })), [tabs.map(t => t.id).join()])
@@ -217,7 +256,7 @@ function TabbedLists({ tabs, list }: { tabs: Array<{ id: string; label: string; 
     return (
         <View style={{ gap: 12 }}>
             {Tabs && state ? <Tabs state={state} grow /> : null}
-            <ItemList key={cur.id} items={data} list={list} empty={cur.empty} />
+            {cur.render ? cur.render() : <ItemList key={cur.id} items={data} list={list} empty={cur.empty} />}
         </View>
     )
 }
@@ -269,7 +308,7 @@ function PickerScreen({ navigation, route }: any) {
                     list={list}
                     tabs={[
                         { id: 'channels', label: 'Channels', items: () => channels(place), empty: 'No channels' },
-                        { id: 'members', label: 'Members', items: () => members(place), empty: 'Discord has not loaded members of this server yet. Open the member list in the server, then come back.' },
+                        { id: 'members', label: 'Members', items: () => [], render: () => <MembersTab gid={place} list={list} /> },
                     ]}
                 />
             </>
