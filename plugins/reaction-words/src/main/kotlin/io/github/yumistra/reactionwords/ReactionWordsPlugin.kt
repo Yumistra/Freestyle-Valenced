@@ -302,6 +302,22 @@ val reactionWordsPlugin = plugin {
                     }
                     if (changed) v.layoutParams = lp
                 }
+                // 정사각형으로 줄이면 아이콘이 왼쪽으로 쏠린다: 좌우 안쪽 여백을 없애고 가운데로
+                if (v is android.widget.LinearLayout) {
+                    if (v.gravity != Gravity.CENTER) v.gravity = Gravity.CENTER
+                    if (v.paddingLeft != 0 || v.paddingRight != 0) v.setPadding(0, v.paddingTop, 0, v.paddingBottom)
+                    for (i in 0 until v.childCount) {
+                        val c = v.getChildAt(i)
+                        val clp = c.layoutParams as? android.view.ViewGroup.MarginLayoutParams ?: continue
+                        if (c.visibility == View.VISIBLE && (clp.leftMargin != 0 || clp.rightMargin != 0 || clp.marginStart != 0 || clp.marginEnd != 0)) {
+                            clp.leftMargin = 0
+                            clp.rightMargin = 0
+                            clp.marginStart = 0
+                            clp.marginEnd = 0
+                            c.layoutParams = clp
+                        }
+                    }
+                }
             }
             // 반응 칸 사이 간격 (Aa 버튼도 같은 간격으로 띄운다)
             var gap = (6 * v.resources.displayMetrics.density).toInt()
