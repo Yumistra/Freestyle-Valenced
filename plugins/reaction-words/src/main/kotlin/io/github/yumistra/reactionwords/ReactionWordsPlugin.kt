@@ -110,6 +110,33 @@ val reactionWordsPlugin = plugin {
             return null
         }
 
+        /** 버튼과 같은 줄의 첫 칸 (첫 반응) */
+        fun firstSibling(v: View): View? {
+            val p = v.parent as? android.view.ViewGroup ?: return null
+            for (i in 0 until p.childCount) {
+                val c = p.getChildAt(i)
+                if (c !== v && c.visibility == View.VISIBLE && c.width > 0 && addViewClass?.isInstance(c) != true) return c
+            }
+            return null
+        }
+
+        /** 칸 가운데를 꾹 누르고 있다가 취소한다 (손 떼기가 아니라 취소라 누르기는 안 된다) */
+        fun simulateLongPress(target: View) {
+            val t0 = SystemClock.uptimeMillis()
+            val x = target.width / 2f
+            val y = target.height / 2f
+            val down = MotionEvent.obtain(t0, t0, MotionEvent.ACTION_DOWN, x, y, 0)
+            target.dispatchTouchEvent(down)
+            down.recycle()
+            target.postDelayed({
+                val now = SystemClock.uptimeMillis()
+                val cancel = MotionEvent.obtain(t0, now, MotionEvent.ACTION_CANCEL, x, y, 0)
+                target.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                target.isPressed = false
+            }, ViewConfiguration.getLongPressTimeout() + 150L)
+        }
+
         fun fire(v: View) {
             try {
                 pendingAt = SystemClock.uptimeMillis()
@@ -124,6 +151,12 @@ val reactionWordsPlugin = plugin {
                 // 2) 아니면 옆의 첫 반응을 꾹 누른 것처럼 (디스코드가 같은 일을 한다)
                 val first = firstReactionNear(v)
                 if (first != null && first.performLongClick()) return
+                // 3) 반응 칸이 꾹 누르기를 터치로 직접 알아내는 버전: 옆 반응 칸에 손가락을 대고 있는 것처럼 터치를 보낸다
+                val sib = firstSibling(v)
+                if (sib != null) {
+                    simulateLongPress(sib)
+                    return
+                }
                 pendingAt = 0L
                 lastError = "No reaction next to the button (reactionView=${reactionViewClass != null}, found=${first != null}, near: $seenNear)"
             } catch (e: Throwable) {
