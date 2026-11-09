@@ -21,7 +21,7 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 
 /**
- * Reaction Words 의 네이티브 부분: 반응 줄 끝의 "반응 추가" 버튼에 꾹 누르기를 붙인다.
+ * Reaction+ (예전 이름 Reaction Words) 의 네이티브 부분: 반응 줄 끝의 "반응 추가" 버튼에 꾹 누르기를 붙인다.
  *
  * 디스코드는 이 버튼에 누르기만 있고 꾹 누르기가 없어서 JS 로는 알 수 없다.
  * 디스코드의 터치 처리(스크롤과 겹치지 않게 하는 리스너)에 기대지 않으려고, 버튼으로 들어오는 터치
@@ -477,8 +477,11 @@ val reactionWordsPlugin = plugin {
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (wantWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
-            noFlex(v)
-            noFlex(v.parent as? View)
+            // 감싼 칸까지 손대는 건 채팅 반응 줄에서만 (다른 곳은 감싼 칸을 바꾸면 버튼이 크게 늘어났다)
+            if (!loose) {
+                noFlex(v)
+                noFlex(v.parent as? View)
+            }
             if (loose && v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
                 skipped[v] = true
                 note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
@@ -489,7 +492,7 @@ val reactionWordsPlugin = plugin {
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
             // 버튼을 감싼 칸이 폭을 고정해 두면 늘어나지 못한다: 내용만큼으로
-            (v.parent as? View)?.takeIf { it !== sib?.parent }?.layoutParams?.let { plp ->
+            (v.parent as? View)?.takeIf { !loose && it !== sib?.parent }?.layoutParams?.let { plp ->
                 if (plp.width >= 0 && plp.width < width) {
                     plp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
                     (v.parent as View).layoutParams = plp
