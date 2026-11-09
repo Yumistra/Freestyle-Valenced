@@ -7,7 +7,7 @@ import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useState } from 'react'
-import { View } from 'react-native'
+import { ScrollView, View } from 'react-native'
 
 /**
  * Reaction Words
@@ -311,6 +311,13 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 // ── 반응 추가 버튼 꾹 누르기 ────────────────────────────────────
 
 let eventUtils: any
+let storage: any
+const DEFAULT_IGNORE = 1000
+const ignoreMs = (): number => {
+    const v = Number(storage?.cache?.ignoreMs)
+    return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
+}
+const sendIgnoreMs = () => Promise.resolve((callNativeMethod as any)(`${NATIVE}.setIgnoreMs`, [ignoreMs()])).catch(() => {})
 /** 안드로이드 부분이 켜져 있는지 (켜져 있을 때만 반응 누르기를 잠깐 기다려 확인한다) */
 let nativeOk = false
 const NATIVE = 'yumistra.reaction-words'
@@ -400,7 +407,22 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 // ── 설정 화면 (상태) ────────────────────────────────────────────
 
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableRow } = D()
+    const { Stack, TableRowGroup, TableRow, TextInput, Button, Text } = D()
+    storage?.use?.()
+    const ms = ignoreMs()
+    const [draft, setDraft] = useState(String(ms))
+    const apply = (v: number) => {
+        const n = Math.min(5000, Math.max(100, Math.round(v)))
+        storage?.set?.({ ...(storage?.cache ?? {}), ignoreMs: n }, true)
+        if (storage?.cache) storage.cache.ignoreMs = n
+        setDraft(String(n))
+        sendIgnoreMs()
+    }
+    const save = () => {
+        const n = Number(draft)
+        if (Number.isFinite(n) && n > 0) apply(n)
+        else setDraft(String(ms))
+    }
     const [st, setSt] = useState<any>(undefined)
     const refresh = () =>
         (callNativeMethod as any)(`${NATIVE}.status`, [])
@@ -409,11 +431,31 @@ function SettingsPage() {
     useState(() => void refresh())
     const yes = (b: any) => (b ? 'yes' : 'no')
     return (
-        <View style={{ padding: 16 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
             <Stack spacing={24}>
                 <TableRowGroup title="How to use">
                     <TableRow label="React with a word" subLabel="Long press a message, then React with a word." />
                     <TableRow label="React with every emoji" subLabel="Long press the add reaction button at the end of the reactions." />
+                </TableRowGroup>
+                <TableRowGroup title="Delay">
+                    <View style={{ padding: 12, gap: 8 }}>
+                        <Text variant="text-md/semibold">{`Ignore reaction taps for ${ms} ms`}</Text>
+                        <Text variant="text-sm/normal" color="text-muted">After the add reaction button long press (from the vibration). Too short and the first reaction can turn off, too long and your next tap is ignored.</Text>
+                        <TextInput
+                            value={draft}
+                            placeholder={String(DEFAULT_IGNORE)}
+                            keyboardType="number-pad"
+                            onChange={(v: string) => setDraft(v.replace(/[^0-9]/g, ''))}
+                            onSubmitEditing={save}
+                            returnKeyType="done"
+                        />
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                            {[600, 800, 1000, 1500, 2000].map(v => (
+                                <Button key={v} text={`${v}`} size="sm" variant={ms === v ? 'primary' : 'secondary'} onPress={() => apply(v)} />
+                            ))}
+                            <Button text="Save" size="sm" variant="primary" onPress={save} />
+                        </View>
+                    </View>
                 </TableRowGroup>
                 <TableRowGroup title="Status">
                     {st === undefined ? (
@@ -428,14 +470,19 @@ function SettingsPage() {
                     <TableRow label="Refresh" onPress={refresh} arrow />
                 </TableRowGroup>
             </Stack>
-        </View>
+        </ScrollView>
     )
 }
 
 export default plugin({
-    start({ cleanup }: any) {
-        (callNativeMethod as any)(`${NATIVE}.ping`, [])
-            .then((r: any) => (nativeOk = r === 'pong'))
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE } },
+    start({ cleanup, jsonStorage }: any) {
+        storage = jsonStorage
+        ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
+            .then((r: any) => {
+                nativeOk = r === 'pong'
+                if (nativeOk) sendIgnoreMs()
+            })
             .catch(() => (nativeOk = false))
         patchHandlers(cleanup)
         patchSheet(cleanup)

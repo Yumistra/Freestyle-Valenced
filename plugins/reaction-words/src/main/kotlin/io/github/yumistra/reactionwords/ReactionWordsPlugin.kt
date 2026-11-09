@@ -32,10 +32,11 @@ private const val FLEXBOX = "com.discord.reactions.ShortcutsFlexbox"
 private const val ADD_VIEW = "com.discord.reactions.AddReactionView"
 private const val REACTION_VIEW = "com.discord.reactions.ReactionView"
 /**
- * 표시가 살아 있는 시간: 흉내 낸 꾹 누르기(꾹 누르기 시간 + 150ms 뒤 취소)에서 오는 신호만 잡을 만큼.
- * 그 뒤에 사용자가 누르는 반응은 평소대로 된다
+ * 표시가 살아 있는 시간 (진동부터, ms). 흉내 낸 꾹 누르기(꾹 누르기 시간 + 150ms 뒤 취소)에서 오는 신호를 잡을 만큼.
+ * 그 뒤에 사용자가 누르는 반응은 평소대로 된다. 설정에서 바꾼다 (setIgnoreMs)
  */
-private fun pendingTtl() = ViewConfiguration.getLongPressTimeout() + 550L
+@Volatile private var ignoreMs = 1000L
+private fun pendingTtl() = ignoreMs
 
 private class Row(val first: Any, val longPress: Any)
 
@@ -297,6 +298,11 @@ val reactionWordsPlugin = plugin {
         /** 방금(3초 안) 반응 추가 버튼을 꾹 눌렀으면 그 번호, 아니면 0 (지우지 않는다) */
         registerNativeMethod("${manifest.id}.addPending") {
             if (pendingAt != 0L && SystemClock.uptimeMillis() - pendingAt < pendingTtl()) pendingSeq else 0
+        }
+        registerNativeMethod("${manifest.id}.setIgnoreMs") { args ->
+            val ms = (args.getOrNull(0) as? Number)?.toLong() ?: return@registerNativeMethod false
+            ignoreMs = ms.coerceIn(100L, 5000L)
+            true
         }
         registerNativeMethod("${manifest.id}.ping") { "pong" }
         registerNativeMethod("${manifest.id}.status") {
