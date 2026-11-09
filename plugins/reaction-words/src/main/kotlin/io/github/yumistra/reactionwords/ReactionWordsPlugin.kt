@@ -397,9 +397,10 @@ val reactionWordsPlugin = plugin {
                 val lp = v.layoutParams
                 origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
             }
-            // 채팅 반응 줄(ShortcutsFlexbox) 안의 버튼만 바꾼다. 포럼 글 머리 같은 다른 곳은 원래대로
             // 채팅 반응 줄(ShortcutsFlexbox)이 아니면(포럼 글 머리 등) 해 보되, 크기가 안 맞고 늘어나면 원래대로 둔다
             val loose = !inChatRow(v)
+            // 채팅 반응 줄이 아닌 곳(포럼 글 머리)은 줄이 넘어가지 않아 옆 버튼(팔로우 등)과 겹친다: Aa 는 넣지 않는다
+            val wantWord = showWord && !loose
             if (skipped[v] == true) {
                 restore(v)
                 return
@@ -409,7 +410,7 @@ val reactionWordsPlugin = plugin {
             // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
             val cur = v.background
             val orig = if (cur is Twin) cur.orig else cur
-            if (!fitSize && !showWord) {
+            if (!fitSize && !wantWord) {
                 aa?.let { v.removeView(it) }
                 if (cur is Twin) v.background = cur.orig
                 return
@@ -429,7 +430,7 @@ val reactionWordsPlugin = plugin {
                 if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
             }
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
-            val width = if (showWord) size * 2 + gap else size
+            val width = if (wantWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
             noFlex(v)
             noFlex(v.parent as? View)
@@ -461,7 +462,7 @@ val reactionWordsPlugin = plugin {
                 }
             }
             // 배경
-            if (showWord) {
+            if (wantWord) {
                 if (orig != null && (cur !is Twin || cur.gap != gap)) v.background = Twin(orig, gap)
             } else if (cur is Twin) {
                 v.background = cur.orig
@@ -484,7 +485,7 @@ val reactionWordsPlugin = plugin {
             if (v.gravity != (Gravity.START or Gravity.CENTER_VERTICAL)) v.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             if (v.paddingLeft != padL || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(padL, 0, 0, 0)
             // Aa: 오른쪽 정사각형
-            if (showWord) {
+            if (wantWord) {
                 if (aa == null) {
                     aa = makeButton(v)
                     wordButtons[v] = aa
