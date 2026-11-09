@@ -4,9 +4,10 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useRef, useState } from 'react'
-import { Image, LayoutAnimation, Pressable, View } from 'react-native'
-import { addTo, KIND_LABEL, kindOf, nameOf, removeFrom } from './filters'
-import { settings } from './store'
+import { LayoutAnimation, Pressable, View } from 'react-native'
+import { KIND_LABEL, kindOf, nameOf, removeFrom } from './filters'
+import { useOpenPicker } from './picker'
+import { onChange, settings } from './store'
 
 function tokenColor(names: string[], fallback: string) {
     try {
@@ -58,188 +59,12 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     )
 }
 
-// ── 눌러서 추가하기 (서버, 채널, 사용자) ────────────────────────
-
-type Tab = 'server' | 'channel' | 'user'
-interface Item {
-    id: string
-    name: string
-    sub?: string
-    image?: string
-    icon: string
-    /** 채널 탭에서 서버를 고르는 줄 */
-    open?: string
-}
-
-const S = () => Stores as any
-const DM = 'dm'
-
-function guildIcon(g: any): string | undefined {
-    try {
-        if (typeof g?.getIconURL === 'function') return g.getIconURL(64, false) ?? undefined
-        if (g?.icon) return `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png?size=64`
-    } catch {}
-}
-function userAvatar(u: any): string | undefined {
-    try {
-        if (typeof u?.getAvatarURL === 'function') return u.getAvatarURL(undefined, 64, false) ?? undefined
-        if (u?.avatar) return `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`
-    } catch {}
-}
-const uname = (u: any) => u?.globalName ?? u?.global_name ?? u?.username ?? u?.id
-
-function servers(): Item[] {
-    try {
-        const all = S().GuildStore?.getGuilds?.() ?? {}
-        const order: string[] = S().SortedGuildStore?.getFlattenedGuildIds?.() ?? Object.keys(all)
-        return order.map(id => all[id]).filter(Boolean).map((g: any) => ({ id: g.id, name: g.name, image: guildIcon(g), icon: 'ServerIcon' }))
-    } catch {
-        return []
-    }
-}
-
-function channelsOf(gid: string): Item[] {
-    try {
-        if (gid === DM) {
-            const list: any[] = S().ChannelStore?.getSortedPrivateChannels?.() ?? []
-            return list.map(c => {
-                const u = c.recipients?.length === 1 ? S().UserStore?.getUser?.(c.recipients[0]) : undefined
-                return { id: c.id, name: c.name || (u ? uname(u) : 'Group DM'), sub: u ? 'DM' : 'Group DM', image: u ? userAvatar(u) : undefined, icon: 'ChatIcon' }
-            })
-        }
-        const sel: any[] = S().GuildChannelStore?.getChannels?.(gid)?.SELECTABLE ?? []
-        let list = sel.map(x => x.channel ?? x).filter(Boolean)
-        if (!list.length) {
-            const m = S().ChannelStore?.getMutableGuildChannelsForGuild?.(gid) ?? {}
-            list = Object.values(m).filter((c: any) => c && c.type !== 4)
-        }
-        const cats: Record<string, string> = {}
-        try {
-            const m = S().ChannelStore?.getMutableGuildChannelsForGuild?.(gid) ?? {}
-            for (const c of Object.values(m) as any[]) if (c?.type === 4) cats[c.id] = c.name
-        } catch {}
-        return list.map((c: any) => ({ id: c.id, name: `#${c.name}`, sub: c.parent_id ? cats[c.parent_id] : undefined, icon: c.type === 2 || c.type === 13 ? 'VoiceNormalIcon' : 'TextIcon' }))
-    } catch {
-        return []
-    }
-}
-
-function users(): Item[] {
-    const ids = new Set<string>()
-    try {
-        for (const id of S().RelationshipStore?.getFriendIDs?.() ?? []) ids.add(String(id))
-        for (const c of S().ChannelStore?.getSortedPrivateChannels?.() ?? []) for (const r of c.recipients ?? []) ids.add(String(r))
-    } catch {}
-    const out: Item[] = []
-    for (const id of ids) {
-        const u = S().UserStore?.getUser?.(id)
-        if (!u) continue
-        out.push({ id, name: uname(u), sub: u.username && u.username !== uname(u) ? `@${u.username}` : isFriendQuick(id) ? 'Friend' : undefined, image: userAvatar(u), icon: 'UserIcon' })
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name))
-}
-const isFriendQuick = (id: string) => {
-    try {
-        return !!S().RelationshipStore?.isFriend?.(id)
-    } catch {
-        return false
-    }
-}
-
-function Avatar({ item }: { item: Item }) {
-    if (item.image) return <Image source={{ uri: item.image }} style={{ width: 32, height: 32, borderRadius: 16 }} />
-    return <TableRowAssetIcon name={item.icon} />
-}
-
-const LIMIT = 60
-
-function Picker({ list }: { list: 'allow' | 'block' }) {
-    const { TableRow, TextInput, Button, Text } = Design as any
-    const [tab, setTab] = useState<Tab>('server')
-    const [server, setServer] = useState<string | undefined>()
-    const [q, setQ] = useState('')
-    const [, force] = useState(0)
-    const items: Item[] = (() => {
-        if (tab === 'server') return servers()
-        if (tab === 'user') return users()
-        if (!server) return [{ id: DM, name: 'Direct messages', icon: 'ChatIcon', open: DM } as Item, ...servers().map(g => ({ ...g, open: g.id, sub: 'Pick a channel' }))]
-        return channelsOf(server)
-    })()
-    const query = q.trim().toLowerCase()
-    const shown = (query ? items.filter(i => i.name.toLowerCase().includes(query) || (i.sub ?? '').toLowerCase().includes(query) || i.id === query) : items).slice(0, LIMIT)
-    const Check = lookupGeneratedIconComponent('CheckmarkLargeIcon' as any) as any
-    const accent = tokenColor(['TEXT_BRAND', 'BRAND_500'], '#5865f2')
-    const toggle = (id: string) => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-        if ((settings()[list] ?? []).includes(id)) removeFrom(list, id)
-        else addTo(list, id)
-        force(n => n + 1)
-    }
-    const tabs: Array<[Tab, string]> = [
-        ['server', 'Servers'],
-        ['channel', 'Channels'],
-        ['user', 'Users'],
-    ]
-    return (
-        <View style={{ gap: 8 }}>
-            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 12 }}>
-                {tabs.map(([t, label]) => (
-                    <View key={t} style={{ flex: 1 }}>
-                        <Button
-                            text={label}
-                            size="sm"
-                            variant={tab === t ? 'primary' : 'secondary'}
-                            onPress={() => {
-                                setTab(t)
-                                setServer(undefined)
-                                setQ('')
-                            }}
-                        />
-                    </View>
-                ))}
-            </View>
-            <View style={{ paddingHorizontal: 12 }}>
-                <TextInput value={q} placeholder="Search" onChange={setQ} isClearable />
-            </View>
-            {tab === 'channel' && server ? <TableRow label="All servers" icon={<TableRowAssetIcon name="ArrowLargeLeftIcon" />} onPress={() => (setServer(undefined), setQ(''))} /> : null}
-            {shown.map(item => {
-                const added = !item.open && (settings()[list] ?? []).includes(item.id)
-                return (
-                    <TableRow
-                        key={`${tab}-${item.id}`}
-                        icon={<Avatar item={item} />}
-                        label={item.name}
-                        subLabel={item.sub}
-                        arrow={!!item.open}
-                        trailing={added && Check ? <Check size="sm" color={accent} /> : undefined}
-                        onPress={() => {
-                            if (item.open) {
-                                setServer(item.open)
-                                setQ('')
-                            } else toggle(item.id)
-                        }}
-                    />
-                )
-            })}
-            {!shown.length ? (
-                <View style={{ padding: 12 }}>
-                    <Text variant="text-sm/normal" color="text-muted">
-                        Nothing found
-                    </Text>
-                </View>
-            ) : null}
-            {items.length > LIMIT && !query ? (
-                <View style={{ paddingHorizontal: 12 }}>
-                    <Text variant="text-xs/normal" color="text-muted">{`Showing ${LIMIT} of ${items.length}, search to find more`}</Text>
-                </View>
-            ) : null}
-        </View>
-    )
-}
-
 function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; title: string; hint: string; children?: any }) {
     const { TableRowGroup, TableRow, Button, Text } = Design as any
-    const [open, setOpen] = useState(false)
+    const openPicker = useOpenPicker()
+    // 고르는 화면에서 바꾼 게 돌아왔을 때 바로 보이게
+    const [, force] = useState(0)
+    useEffect(() => onChange(() => force(n => n + 1)) as any, [])
     const ids = settings()[list] ?? []
     return (
         <TableRowGroup title={title}>
@@ -269,17 +94,8 @@ function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; t
                         {hint}
                     </Text>
                 ) : null}
-                <Button
-                    text={open ? 'Done' : 'Add'}
-                    size="md"
-                    variant={open ? 'primary' : 'secondary'}
-                    onPress={() => {
-                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-                        setOpen(o => !o)
-                    }}
-                />
+                <Button text="Add" size="md" variant="secondary" onPress={() => openPicker(list)} />
             </View>
-            {open ? <Picker list={list} /> : null}
         </TableRowGroup>
     )
 }
