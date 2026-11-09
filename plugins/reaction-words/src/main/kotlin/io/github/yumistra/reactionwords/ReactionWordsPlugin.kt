@@ -106,6 +106,15 @@ val reactionWordsPlugin = plugin {
         var touches = 0
         var fires = 0
         var lastError = ""
+        /** 최근 일 (로그 복사용) */
+        val nlog = java.util.ArrayDeque<String>()
+        fun note(msg: String) {
+            val t = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+            synchronized(nlog) {
+                nlog.addLast("$t $msg")
+                while (nlog.size > 40) nlog.removeFirst()
+            }
+        }
 
         val addViewClass: Class<*>? = try {
             cl.loadClass(ADD_VIEW)
@@ -195,6 +204,7 @@ val reactionWordsPlugin = plugin {
                 pendingSeq++
                 pendingKind = kind
                 fires++
+                note("fire kind=$kind seq=$pendingSeq view=${v.javaClass.simpleName} w=${v.width} h=${v.height}")
                 if (kind == "all") v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 // 1) 반응 줄을 기억해 뒀으면 그 꾹 누르기 함수로
                 val row = rowOf(v)
@@ -209,6 +219,7 @@ val reactionWordsPlugin = plugin {
                 val sib = firstSibling(v)
                 if (sib != null) {
                     simulateLongPress(sib)
+                    note("simulated long press on ${sib.javaClass.simpleName} w=${sib.width} h=${sib.height}")
                     lastError = ""
                     return
                 }
@@ -475,6 +486,7 @@ val reactionWordsPlugin = plugin {
                         // 끝내 안 맞으면 보여는 준다 (배경은 Twin 이 알아서 원래 모양으로 그린다)
                         v.alpha = 1f
                         lastError = "button size did not apply (w=${v.width}, h=${v.height})"
+                        note(lastError)
                     }
                 } else {
                     tries.remove(v)
@@ -680,6 +692,22 @@ val reactionWordsPlugin = plugin {
                 "fires" to fires,
                 "buttons" to buttonsMade,
                 "error" to lastError,
+                "knownSize" to knownSize,
+                "knownGap" to knownGap,
+                "knownIconW" to knownIconW,
+                "knownT" to (if (knownT.isNaN()) "none" else knownT.toString()),
+                "ignoreMs" to ignoreMs,
+                "fitSize" to fitSize,
+                "showWord" to showWord,
+                "pendingSeq" to pendingSeq,
+                "pendingKind" to pendingKind,
+                "pendingAgeMs" to (if (pendingAt == 0L) -1L else SystemClock.uptimeMillis() - pendingAt),
+                "addView" to (addViewClass?.name ?: "missing"),
+                "reactionView" to (reactionViewClass?.name ?: "missing"),
+                "longPressTimeout" to ViewConfiguration.getLongPressTimeout(),
+                "density" to android.content.res.Resources.getSystem().displayMetrics.density,
+                "liveButtons" to wordButtons.size,
+                "log" to nlog.joinToString("\n"),
             )
         }
     }

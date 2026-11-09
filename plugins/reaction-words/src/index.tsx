@@ -1,13 +1,15 @@
 import { ActionSheetActionCreators, AlertActionCreators } from '@valenced/discord/actions'
+import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule, getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { useState } from 'react'
-import { ScrollView, Text as RNText, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Platform, ScrollView, Switch as RNSwitch, Text as RNText, View } from 'react-native'
 
 /**
  * Reaction Words
@@ -69,8 +71,9 @@ async function run(_label: string, jobs: Array<() => Promise<void>>) {
     if (busy) return
     busy = true
     try {
+        note(`send ${jobs.length} reactions, ${wordDelay()} ms apart`)
         for (let i = 0; i < jobs.length; i++) {
-            jobs[i]().catch(() => {})
+            jobs[i]().catch((e: any) => note(`reaction ${i + 1} failed: ${String(e?.message ?? e).slice(0, 200)}`))
             if (i < jobs.length - 1) await sleep(wordDelay())
         }
     } finally {
@@ -372,12 +375,14 @@ function viaPending(inst: any, event: any, orig: (e: any) => void) {
         if (event?.nativeEvent) copy = { ...event, nativeEvent: JSON.parse(JSON.stringify(event.nativeEvent)) }
     } catch {}
     addPending().then(p => {
+        note(`event message=${d?.messageId ?? '?'} pending=${p ? `${p.seq}:${p.kind}` : 'none'} handled=${handledSeq}`)
         if (!p) return orig(copy)
         if (p.seq === handledSeq || !d?.messageId) return
         handledSeq = p.seq
         try {
             const result = inst.getMessageData?.(d.messageId)
             if (!result?.message || !result.messageChannel) return
+            note(`do ${p.kind} on ${d.messageId}`)
             if (p.kind === 'word') openWordDialog(result.message, result.messageChannel)
             else reactWithAll(result.message, result.messageChannel)
         } catch {}
@@ -429,127 +434,248 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
     )
 }
 
-// ── 설정 화면 (상태) ────────────────────────────────────────────
+// ── 로그 ────────────────────────────────────────────────────────
+
+const VERSION = '1.0.40'
+/** 최근 일 (로그 복사용) */
+const jlog: string[] = []
+function note(msg: string) {
+    const d = new Date()
+    const t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`
+    jlog.push(`${t} ${msg}`)
+    if (jlog.length > 60) jlog.shift()
+}
+
+async function buildLog(): Promise<string> {
+    const lines: string[] = []
+    const add = (k: string, v: unknown) => lines.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    lines.push('Reaction Words log')
+    add('Time', new Date().toISOString())
+    add('Plugin', VERSION)
+    try {
+        const C: any = Platform.constants ?? {}
+        add('Platform', `${Platform.OS} ${Platform.Version}`)
+        add('Device', `${C.Manufacturer ?? '?'} ${C.Model ?? '?'} (${C.Brand ?? '?'})`)
+        add('React Native', C.reactNativeVersion ? `${C.reactNativeVersion.major}.${C.reactNativeVersion.minor}.${C.reactNativeVersion.patch}` : '?')
+    } catch {}
+    try {
+        add('Theme', S().ThemeStore?.theme ?? '?')
+        add('Nitro', isNitro())
+    } catch {}
+    add('Settings', storage?.cache ?? {})
+    add('Native ok (ping)', nativeOk)
+    add('Reaction module', typeof reactions()?.addReaction === 'function' ? 'found' : 'missing')
+    add('Event utils', eventUtils ? 'found' : 'not used yet')
+    add('Handled long press seq', handledSeq)
+    try {
+        const st = await (callNativeMethod as any)(`${NATIVE}.status`, [])
+        lines.push('')
+        lines.push('Android part:')
+        for (const [k, v] of Object.entries(st ?? {})) if (k !== 'log') add(`  ${k}`, v)
+        if (st?.log) {
+            lines.push('')
+            lines.push('Android recent:')
+            lines.push(String(st.log))
+        }
+    } catch (e: any) {
+        lines.push('')
+        lines.push(`Android part: not reachable (${String(e?.stack ?? e?.message ?? e).slice(0, 800)})`)
+    }
+    lines.push('')
+    lines.push('JS recent:')
+    lines.push(jlog.length ? jlog.join('\n') : '(nothing yet)')
+    return lines.join('\n')
+}
+
+// ── 설정 화면 ───────────────────────────────────────────────────
+
+/** 테마 색 (CSS 그대로) */
+function col(names: string[], fallback: string) {
+    try {
+        const t: any = (Tokens as any).default ?? Tokens
+        const theme = S().ThemeStore?.theme ?? 'dark'
+        for (const n of names) {
+            const key = t.colors?.[n]
+            if (!key) continue
+            const c = t.internal.resolveSemanticColor(theme, key)
+            if (typeof c === 'string' && c) return c
+        }
+    } catch {}
+    return fallback
+}
+const C = () => ({
+    card: col(['CARD_PRIMARY_BG', 'BACKGROUND_SECONDARY', 'BACKGROUND_BASE_LOWER'], '#1e1f22'),
+    border: col(['BORDER_SUBTLE', 'BACKGROUND_MODIFIER_ACCENT'], 'rgba(128,128,128,0.25)'),
+    pill: col(['BACKGROUND_MOD_SUBTLE', 'BACKGROUND_SECONDARY_ALT', 'BACKGROUND_MODIFIER_HOVER'], 'rgba(128,128,128,0.16)'),
+    pillBorder: col(['BORDER_SUBTLE', 'BACKGROUND_MODIFIER_ACCENT'], 'rgba(128,128,128,0.25)'),
+    tile: col(['BACKGROUND_MOD_NORMAL', 'BACKGROUND_TERTIARY'], 'rgba(128,128,128,0.24)'),
+    icon: col(['INTERACTIVE_NORMAL', 'TEXT_MUTED'], '#b5bac1'),
+})
+
+/** 그림 Semantic Types 같은 카드: 굵은 제목, 흐린 설명, 그 밑에 내용 */
+function SectionCard({ title, desc, children }: { title: string; desc?: string; children: any }) {
+    const { Text } = D()
+    const c = C()
+    return (
+        <View style={{ backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 16, padding: 16, gap: 10 }}>
+            <Text variant="heading-lg/bold">{title}</Text>
+            {desc ? (
+                <Text variant="text-md/normal" color="text-muted">
+                    {desc}
+                </Text>
+            ) : null}
+            {children}
+        </View>
+    )
+}
+
+/** 반응 추가 버튼, Aa 버튼 같은 작은 그림 */
+function Tile({ kind }: { kind: 'add' | 'aa' | 'msg'; key?: number }) {
+    const { Text } = D()
+    const c = C()
+    const name = kind === 'add' ? 'ReactionIcon' : 'ChatIcon'
+    const Icon: any = kind === 'aa' ? null : lookupGeneratedIconComponent(name as any) ?? lookupGeneratedIconComponent('EmojiSmileIcon' as any)
+    return (
+        <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: c.tile, alignItems: 'center', justifyContent: 'center' }}>
+            {kind === 'aa' ? (
+                <RNText style={{ color: c.icon, fontWeight: '700', fontSize: 13 }}>Aa</RNText>
+            ) : Icon ? (
+                <Icon size="sm" color={c.icon} />
+            ) : (
+                <Text variant="text-sm/bold">{kind === 'add' ? '☺' : '…'}</Text>
+            )}
+        </View>
+    )
+}
+
+/** 그림 속 버튼처럼 생긴 한 줄 (그림 + 글) */
+function Pill({ tiles, text }: { tiles: Array<'add' | 'aa' | 'msg'>; text: string }) {
+    const { Text } = D()
+    const c = C()
+    return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.pill, borderColor: c.pillBorder, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+                {tiles.map((t, i) => (
+                    <Tile key={i} kind={t} />
+                ))}
+            </View>
+            <Text variant="text-md/semibold" style={{ flex: 1 }}>
+                {text}
+            </Text>
+        </View>
+    )
+}
+
+/** 두 칸 중 하나 (짝) */
+function Half({ children }: { children: any }) {
+    const c = C()
+    return <View style={{ flex: 1, backgroundColor: c.pill, borderColor: c.pillBorder, borderWidth: 1, borderRadius: 12, padding: 12, gap: 8, justifyContent: 'space-between' }}>{children}</View>
+}
+
+function ToggleHalf({ tiles, label, value, onChange }: { tiles: Array<'add' | 'aa' | 'msg'>; label: string; value: boolean; onChange: (v: boolean) => void }) {
+    const { Text } = D()
+    const Sw: any = D().FormSwitch ?? D().Switch ?? RNSwitch
+    return (
+        <Half>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+                {tiles.map((t, i) => (
+                    <Tile key={i} kind={t} />
+                ))}
+            </View>
+            <Text variant="text-md/semibold">{label}</Text>
+            <View style={{ alignItems: 'flex-start' }}>
+                <Sw value={value} onValueChange={onChange} />
+            </View>
+        </Half>
+    )
+}
+
+/** 숫자 칸 (적고 잠깐 뒤에 저장) */
+function NumberHalf({ label, value, min, max, onSave }: { label: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
+    const { Text, TextInput } = D()
+    const [draft, setDraft] = useState(String(value))
+    const timer = useRef<any>(undefined)
+    useEffect(() => () => clearTimeout(timer.current), [])
+    const change = (v: string) => {
+        const clean = v.replace(/[^0-9]/g, '')
+        setDraft(clean)
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => {
+            if (clean === '') return
+            const n = Math.min(max, Math.max(min, Math.round(Number(clean))))
+            if (String(n) !== clean) setDraft(String(n))
+            onSave(n)
+        }, 700)
+    }
+    return (
+        <Half>
+            <Text variant="text-md/semibold">{label}</Text>
+            <TextInput value={draft} placeholder={String(value)} keyboardType="number-pad" onChange={change} returnKeyType="done" />
+            <Text variant="text-xs/normal" color="text-muted">
+                ms
+            </Text>
+        </Half>
+    )
+}
 
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TextInput, Button, Text } = D()
+    const { Stack, Button } = D()
     storage?.use?.()
-    const ms = ignoreMs()
-    const [draft, setDraft] = useState(String(ms))
-    const wd = wordDelay()
-    const [wdDraft, setWdDraft] = useState(String(wd))
-    const applyWd = (v: number) => {
-        const n = Math.min(3000, Math.max(0, Math.round(v)))
-        storage?.set?.({ ...(storage?.cache ?? {}), wordDelay: n }, true)
-        if (storage?.cache) storage.cache.wordDelay = n
-        setWdDraft(String(n))
+    const set = (patch: Record<string, unknown>) => {
+        storage?.set?.({ ...(storage?.cache ?? {}), ...patch }, true)
+        if (storage?.cache) Object.assign(storage.cache, patch)
     }
-    const saveWd = () => {
-        const n = Number(wdDraft)
-        if (wdDraft !== '' && Number.isFinite(n)) applyWd(n)
-        else setWdDraft(String(wd))
+    const copyLog = async () => {
+        try {
+            Clipboard.setString(await buildLog())
+        } catch {}
     }
-    const apply = (v: number) => {
-        const n = Math.min(5000, Math.max(100, Math.round(v)))
-        storage?.set?.({ ...(storage?.cache ?? {}), ignoreMs: n }, true)
-        if (storage?.cache) storage.cache.ignoreMs = n
-        setDraft(String(n))
-        sendIgnoreMs()
-    }
-    const save = () => {
-        const n = Number(draft)
-        if (Number.isFinite(n) && n > 0) apply(n)
-        else setDraft(String(ms))
-    }
-    const [st, setSt] = useState<any>(undefined)
-    const refresh = () =>
-        (callNativeMethod as any)(`${NATIVE}.status`, [])
-            .then((r: any) => setSt(r ?? {}))
-            .catch((e: any) => setSt({ error: `Android part not loaded: ${String(e?.message ?? e).slice(0, 300)}` }))
-    useState(() => void refresh())
-    const yes = (b: any) => (b ? 'yes' : 'no')
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
-            <Stack spacing={24}>
-                <TableRowGroup title="How to use">
-                    <TableRow label="React with a word" subLabel="Long press a message, then React with a word." />
-                    <TableRow label="React with every emoji" subLabel="Long press the add reaction button at the end of the reactions." />
-                    <TableRow label="Word button" subLabel="Tap Aa next to the add reaction button to react with a word." />
-                </TableRowGroup>
-                <TableRowGroup title="Buttons">
-                    <TableSwitchRow
-                        label="Word button"
-                        subLabel="An Aa button next to the add reaction button. Tap it to react with a word."
-                        value={look().wordButton}
-                        onValueChange={(v: boolean) => {
-                            storage?.set?.({ ...(storage?.cache ?? {}), wordButton: v }, true)
-                            if (storage?.cache) storage.cache.wordButton = v
-                            sendLook()
-                        }}
-                    />
-                    <TableSwitchRow
-                        label="Square buttons"
-                        subLabel="Makes the add reaction button square and a bit smaller than the reactions."
-                        value={look().fitSize}
-                        onValueChange={(v: boolean) => {
-                            storage?.set?.({ ...(storage?.cache ?? {}), fitSize: v }, true)
-                            if (storage?.cache) storage.cache.fitSize = v
-                            sendLook()
-                        }}
-                    />
-                </TableRowGroup>
-                <TableRowGroup title="Reaction speed">
-                    <View style={{ padding: 12, gap: 8 }}>
-                        <Text variant="text-md/semibold">{`${wd} ms between reactions`}</Text>
-                        <Text variant="text-sm/normal" color="text-muted">Reactions are sent one by one, waiting this long after each one. Used for words and for every emoji. Too short and Discord may skip some or mix up the order.</Text>
-                        <TextInput
-                            value={wdDraft}
-                            placeholder={String(DEFAULT_WORD_DELAY)}
-                            keyboardType="number-pad"
-                            onChange={(v: string) => setWdDraft(v.replace(/[^0-9]/g, ''))}
-                            onSubmitEditing={saveWd}
-                            returnKeyType="done"
+            <Stack spacing={16}>
+                <SectionCard title="How to use" desc="Two buttons sit after the reactions of a message.">
+                    <Pill tiles={['add']} text="Hold to react with every emoji" />
+                    <Pill tiles={['aa']} text="Tap to react with a word" />
+                    <Pill tiles={['msg']} text="Or hold a message, then React with a word" />
+                </SectionCard>
+                <SectionCard title="Buttons">
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <ToggleHalf
+                            tiles={['aa']}
+                            label="Aa button"
+                            value={look().wordButton}
+                            onChange={v => {
+                                set({ wordButton: v })
+                                sendLook()
+                            }}
                         />
-                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                            {[0, 200, 300, 500, 800].map(v => (
-                                <Button key={v} text={`${v}`} size="sm" variant={wd === v ? 'primary' : 'secondary'} onPress={() => applyWd(v)} />
-                            ))}
-                            <Button text="Save" size="sm" variant="primary" onPress={saveWd} />
-                        </View>
-                    </View>
-                </TableRowGroup>
-                <TableRowGroup title="Delay">
-                    <View style={{ padding: 12, gap: 8 }}>
-                        <Text variant="text-md/semibold">{`Ignore reaction taps for ${ms} ms`}</Text>
-                        <Text variant="text-sm/normal" color="text-muted">After the add reaction button long press (from the vibration). Too short and the first reaction can turn off, too long and your next tap is ignored.</Text>
-                        <TextInput
-                            value={draft}
-                            placeholder={String(DEFAULT_IGNORE)}
-                            keyboardType="number-pad"
-                            onChange={(v: string) => setDraft(v.replace(/[^0-9]/g, ''))}
-                            onSubmitEditing={save}
-                            returnKeyType="done"
+                        <ToggleHalf
+                            tiles={['add', 'aa']}
+                            label="Square"
+                            value={look().fitSize}
+                            onChange={v => {
+                                set({ fitSize: v })
+                                sendLook()
+                            }}
                         />
-                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                            {[600, 800, 1000, 1500, 2000].map(v => (
-                                <Button key={v} text={`${v}`} size="sm" variant={ms === v ? 'primary' : 'secondary'} onPress={() => apply(v)} />
-                            ))}
-                            <Button text="Save" size="sm" variant="primary" onPress={save} />
-                        </View>
                     </View>
-                </TableRowGroup>
-                <TableRowGroup title="Status">
-                    {st === undefined ? (
-                        <TableRow label="Checking…" />
-                    ) : (
-                        <>
-                            <TableRow label="Android part" subLabel={st.rowHook === undefined ? 'Not loaded' : `Reactions row ${yes(st.rowHook)}, button touch ${yes(st.touchHook)}`} />
-                            {st.rowHook !== undefined ? <TableRow label="Seen" subLabel={`${st.rows} reaction rows, ${st.touches} button touches, ${st.fires} presses, ${st.buttons ?? 0} word buttons`} /> : null}
-                            {st.error ? <TableRow label="Last error" subLabel={String(st.error)} /> : null}
-                        </>
-                    )}
-                    <TableRow label="Refresh" onPress={refresh} arrow />
-                </TableRowGroup>
+                </SectionCard>
+                <SectionCard title="Timing">
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <NumberHalf label="Between reactions" value={wordDelay()} min={0} max={3000} onSave={n => set({ wordDelay: n })} />
+                        <NumberHalf
+                            label="Ignore taps after hold"
+                            value={ignoreMs()}
+                            min={100}
+                            max={5000}
+                            onSave={n => {
+                                set({ ignoreMs: n })
+                                sendIgnoreMs()
+                            }}
+                        />
+                    </View>
+                </SectionCard>
+                <Button text="Copy log" variant="secondary" size="lg" onPress={copyLog} />
             </Stack>
         </ScrollView>
     )
