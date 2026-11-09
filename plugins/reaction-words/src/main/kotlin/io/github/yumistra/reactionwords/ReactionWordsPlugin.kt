@@ -451,6 +451,10 @@ val reactionWordsPlugin = plugin {
                 return
             }
             val sib = firstSibling(v)
+            if (loose && (sib == null || sib.height <= 0)) {
+                restore(v)
+                return
+            }
             var aa = wordButtons[v] as? TextView
             // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
             val cur = v.background
@@ -477,11 +481,10 @@ val reactionWordsPlugin = plugin {
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (wantWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
-            // 감싼 칸까지 손대는 건 채팅 반응 줄에서만 (다른 곳은 감싼 칸을 바꾸면 버튼이 크게 늘어났다)
-            if (!loose) {
-                noFlex(v)
-                noFlex(v.parent as? View)
-            }
+            // 줄이 버튼을 늘리거나 줄이지 못하게 (포럼 글 머리에서는 남는 폭만큼 커다랗게 늘어났다).
+            // 감싼 칸까지 손대는 건 채팅 반응 줄에서만
+            noFlex(v)
+            if (!loose) noFlex(v.parent as? View)
             if (loose && v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
                 skipped[v] = true
                 note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
@@ -524,11 +527,12 @@ val reactionWordsPlugin = plugin {
                 iconW += c.measuredWidth + (m?.leftMargin ?: 0) + (m?.rightMargin ?: 0)
             }
             if (iconW <= 0 && knownIconW > 0) iconW = knownIconW
-            if (sib != null && sib.height > 0) {
+            // 기억해 두는 값은 채팅 반응 줄에서만 (포럼 글 머리의 큰 값이 채팅 버튼 크기를 망쳤다)
+            if (!loose && sib != null && sib.height > 0) {
                 knownSize = size
                 knownGap = gap
             }
-            if (iconW > 0) knownIconW = iconW
+            if (!loose && iconW > 0) knownIconW = iconW
             val padL = ((size - iconW) / 2).coerceAtLeast(0)
             if (v.gravity != (Gravity.START or Gravity.CENTER_VERTICAL)) v.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             if (v.paddingLeft != padL || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(padL, 0, 0, 0)
@@ -595,7 +599,7 @@ val reactionWordsPlugin = plugin {
                 val want = refCenter - vCenterNoShift
                 val t = if (abs(want) < ref.height) want else 0f
                 if (abs(v.translationY - t) > 1f) v.translationY = t
-                if (t != 0f) knownT = t
+                if (!loose && t != 0f) knownT = t
             }
         }
 
@@ -616,7 +620,7 @@ val reactionWordsPlugin = plugin {
                     tries[v] = n
                     if (n <= 6) {
                         v.requestLayout()
-                        v.postDelayed({ schedule(v) }, 32L)
+                        v.postDelayed({ schedule(v) }, 16L)
                     } else {
                         // 끝내 안 맞으면 보여는 준다 (배경은 Twin 이 알아서 원래 모양으로 그린다)
                         v.alpha = 1f
