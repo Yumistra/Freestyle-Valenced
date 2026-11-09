@@ -59,32 +59,15 @@ async function react(channelId: string, messageId: string, emoji: any, burst = f
 const keyOf = (e: any) => (e?.id ? `id:${e.id}` : `u:${String(e?.name ?? '').replace(/️/g, '')}`)
 
 let busy = false
-/** inOrder: 앞 반응이 끝나면 바로 다음 (단어용, 글자 순서 유지). 아니면 전부 한 번에 */
-async function run(label: string, jobs: Array<() => Promise<void>>, inOrder = false) {
-    if (busy) return toast('Still reacting, wait a moment')
+/** 반응을 전부 한 번에 보낸다 */
+async function run(_label: string, jobs: Array<() => Promise<void>>) {
+    if (busy) return
     busy = true
-    let ok = 0
-    let fail = 0
     try {
-        if (!inOrder) {
-            // 한 번에: 전부 동시에 보낸다 (순서는 섞일 수 있다)
-            const res = await Promise.allSettled(jobs.map(j => j()))
-            for (const r of res) r.status === 'fulfilled' ? ok++ : fail++
-        } else {
-            // 순서대로: 앞 반응이 끝나면 바로 다음 (디스코드가 답하는 속도)
-            for (const job of jobs) {
-                try {
-                    await job()
-                    ok++
-                } catch {
-                    fail++
-                }
-            }
-        }
+        await Promise.allSettled(jobs.map(j => j()))
     } finally {
         busy = false
     }
-    toast(fail ? `${label}: ${ok} added, ${fail} failed` : `${label}: ${ok} added`)
 }
 
 // ── 1. 달린 이모지 전부로 반응 ──────────────────────────────────
@@ -103,7 +86,7 @@ function reactWithAll(message: any, channel: any) {
         }
     }
     if (!jobs.length) return toast(skipped ? 'Only super reactions left, they need Nitro' : 'You already reacted with all of them')
-    run('React with all', jobs, false)
+    run('React with all', jobs)
 }
 
 // ── 2. 단어로 반응 ──────────────────────────────────────────────
@@ -202,7 +185,7 @@ function openWordDialog(message: any, channel: any) {
         const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
         const { emojis } = spell(word, taken)
         if (!emojis.length) return toast('Type a word first')
-        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })), true)
+        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })))
     }
     AlertActionCreators.openAlert(
         `reaction-words-${seq++}`,
