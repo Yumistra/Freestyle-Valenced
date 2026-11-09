@@ -3,6 +3,7 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule, getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
+import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useState } from 'react'
@@ -310,51 +311,51 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 // ── 반응 추가 버튼 꾹 누르기 ────────────────────────────────────
 
 let eventUtils: any
-/** 테스트용: 꾹 누를 때 디스코드가 보내는 내용을 보여 준다 */
-const DEBUG = true
-function wrapInstance(inst: any) {
-    const orig = inst?.handleLongPressReaction
-    if (typeof orig !== 'function' || orig.__reactionWords) return
-    const wrapped = function (this: unknown, event: any) {
-        try {
-            eventUtils ??= find('getNativeSyntheticEventData')
-            const data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
-            if (DEBUG) {
-                let txt = ''
-                try {
-                    txt = JSON.stringify(data, (k, v) => (k === 'message' ? undefined : v)).slice(0, 300)
-                } catch {
-                    txt = String(Object.keys(data ?? {}))
-                }
-                toast(`[debug] long press: ${txt}`)
-            }
-            // 반응 없이 오면 "반응 추가" 버튼을 꾹 누른 것
-            if (data?.messageId && !data.reaction) {
-                const result = inst.getMessageData?.(data.messageId)
-                if (result?.message && result.messageChannel) {
-                    reactWithAll(result.message, result.messageChannel)
-                    return
-                }
-            }
-        } catch {}
-        return orig.apply(this, arguments as any)
+/** 안드로이드 부분이 켜져 있는지 (켜져 있을 때만 반응 누르기를 잠깐 기다려 확인한다) */
+let nativeOk = false
+const NATIVE = 'yumistra.reaction-words'
+
+/** 방금 반응 추가 버튼을 꾹 눌렀는지 안드로이드에 묻는다 */
+async function tookAddLongPress(): Promise<boolean> {
+    if (!nativeOk) return false
+    try {
+        return (await callNativeMethod(`${NATIVE}.takeAddLongPress`)) === true
+    } catch {
+        return false
     }
-    ;(wrapped as any).__reactionWords = true
-    inst.handleLongPressReaction = wrapped
-    if (DEBUG) {
-        // 비교용: 반응 추가 버튼을 그냥 눌렀을 때 오는 내용
-        for (const name of ['handleTapReaction', 'handleTapReactionOverflow']) {
-            const o = inst[name]
-            if (typeof o !== 'function') continue
-            inst[name] = function (this: unknown, event: any) {
-                try {
-                    eventUtils ??= find('getNativeSyntheticEventData')
-                    const d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
-                    toast(`[debug] ${name}: ${JSON.stringify(d).slice(0, 200)}`)
-                } catch {}
-                return o.apply(this, arguments as any)
-            }
+}
+
+/**
+ * 안드로이드가 반응 추가 버튼을 꾹 누르면 첫 번째 반응의 꾹 누르기로 디스코드에 알린다.
+ * 그래서 반응 꾹 누르기(혹시 순서가 바뀌면 누르기)가 올 때 안드로이드에 확인하고,
+ * 맞으면 원래 동작(반응 목록 열기, 반응 켜고 끄기) 대신 전부 반응한다.
+ */
+function wrapInstance(inst: any) {
+    for (const name of ['handleLongPressReaction', 'handleTapReaction']) {
+        const orig = inst?.[name]
+        if (typeof orig !== 'function' || orig.__reactionWords) continue
+        const wrapped = function (this: unknown, event: any) {
+            if (!nativeOk) return orig.apply(this, arguments as any)
+            const self = this
+            const args = arguments
+            let data: any
+            try {
+                eventUtils ??= find('getNativeSyntheticEventData')
+                // 이벤트는 바로 읽어 둔다 (기다리는 동안 재사용될 수 있다)
+                data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+            } catch {}
+            tookAddLongPress().then(took => {
+                if (took && data?.messageId) {
+                    try {
+                        const result = inst.getMessageData?.(data.messageId)
+                        if (result?.message && result.messageChannel) return reactWithAll(result.message, result.messageChannel)
+                    } catch {}
+                }
+                orig.apply(self, args as any)
+            })
         }
+        ;(wrapped as any).__reactionWords = true
+        inst[name] = wrapped
     }
 }
 
@@ -367,7 +368,6 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
             const Patched: any = function (this: unknown, ...args: any[]) {
                 const inst = Reflect.construct(Orig, args, Patched)
                 wrapInstance(inst)
-                if (DEBUG) toast('[debug] chat handlers wrapped')
                 return inst
             }
             Patched.prototype = Orig.prototype
@@ -387,6 +387,9 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 
 export default plugin({
     start({ cleanup }: any) {
+        callNativeMethod(`${NATIVE}.ping`)
+            .then((r: any) => (nativeOk = r === 'pong'))
+            .catch(() => (nativeOk = false))
         patchHandlers(cleanup)
         patchSheet(cleanup)
     },
