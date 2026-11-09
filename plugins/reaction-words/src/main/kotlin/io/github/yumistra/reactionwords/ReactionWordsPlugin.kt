@@ -330,6 +330,37 @@ val reactionWordsPlugin = plugin {
 
         /** 크기가 맞지 않고 늘어나 버리는 곳(포럼 글 머리 등)의 버튼. 이런 곳은 원래대로 둔다 */
         val skipped = WeakHashMap<View, Boolean>()
+        val flexboxClass: Class<*>? = try {
+            cl.loadClass(FLEXBOX)
+        } catch (e: Throwable) {
+            null
+        }
+        fun inChatRow(v: View): Boolean {
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is View && depth < 3) {
+                if (flexboxClass?.isInstance(p) == true) return true
+                p = p.parent
+                depth++
+            }
+            return flexboxClass == null
+        }
+
+        /** 줄 폭이 모자라도 줄이지 말고(다음 줄로 넘어가게), 남는다고 늘리지도 않게 */
+        fun noFlex(x: View?) {
+            val lp = x?.layoutParams ?: return
+            try {
+                val shrink = lp.javaClass.getMethod("getFlexShrink").invoke(lp) as? Float
+                val grow = lp.javaClass.getMethod("getFlexGrow").invoke(lp) as? Float
+                if (shrink != 0f || grow != 0f) {
+                    lp.javaClass.getMethod("setFlexShrink", Float::class.javaPrimitiveType).invoke(lp, 0f)
+                    lp.javaClass.getMethod("setFlexGrow", Float::class.javaPrimitiveType).invoke(lp, 0f)
+                    x.layoutParams = lp
+                }
+            } catch (e: Throwable) {
+            }
+        }
+
         fun parents(v: View): String {
             val out = ArrayList<String>()
             var p: Any? = v.parent
@@ -364,7 +395,12 @@ val reactionWordsPlugin = plugin {
                 val lp = v.layoutParams
                 origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
             }
-            if (skipped[v] == true) {
+            // 채팅 반응 줄(ShortcutsFlexbox) 안의 버튼만 바꾼다. 포럼 글 머리 같은 다른 곳은 원래대로
+            if (!inChatRow(v)) {
+                if (skipped[v] != true) {
+                    skipped[v] = true
+                    note("not a chat reactions row, left as is: ${parents(v)}")
+                }
                 restore(v)
                 return
             }
@@ -395,13 +431,8 @@ val reactionWordsPlugin = plugin {
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (showWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
-            // 주는 크기보다 훨씬 크게 늘어나면 이 자리는 크기를 정할 수 없는 곳이다: 원래대로 두고 다시 건드리지 않는다
-            if (v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
-                skipped[v] = true
-                note("skip stretched add button w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
-                restore(v)
-                return
-            }
+            noFlex(v)
+            noFlex(v.parent as? View)
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
