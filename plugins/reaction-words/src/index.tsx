@@ -315,7 +315,7 @@ let eventUtils: any
 let nativeOk = false
 const NATIVE = 'yumistra.reaction-words'
 
-/** 방금 반응 추가 버튼을 꾹 눌렀으면 그 번호 (안드로이드는 3초 동안 같은 번호를 준다), 아니면 0 */
+/** 방금 반응 추가 버튼을 꾹 눌렀으면 그 번호 (흉내 낸 꾹 누르기가 끝날 때까지 같은 번호를 준다), 아니면 0 */
 async function addPending(): Promise<number> {
     if (!nativeOk) return 0
     try {
