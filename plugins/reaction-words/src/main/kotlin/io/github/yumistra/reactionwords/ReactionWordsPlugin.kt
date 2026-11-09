@@ -392,6 +392,20 @@ val reactionWordsPlugin = plugin {
                     v.layoutParams = vlp
                 }
             }
+            // 세로 가운데: 여백이 안 먹는 경우가 있어서, 화면에서 재고 모자란 만큼 옮긴다
+            if (fitSize && sib != null && sib.height > 0 && v.height > 0) {
+                fun centerY(x: View): Float {
+                    val a = IntArray(2)
+                    x.getLocationOnScreen(a)
+                    return a[1] + x.height / 2f
+                }
+                val diff = centerY(sib) - centerY(v)
+                if (abs(diff) > 1f) v.translationY = v.translationY + diff
+                if (btn.height > 0 && btn.visibility == View.VISIBLE) {
+                    val d2 = centerY(sib) - centerY(btn)
+                    if (abs(d2) > 1f) btn.translationY = btn.translationY + d2
+                }
+            }
             // 테마가 바뀌면 반응 추가 버튼 모양을 다시 따라간다
             if (btn is TextView) theme(btn, v, sib)
             val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE
