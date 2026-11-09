@@ -1,0 +1,366 @@
+import { ActionSheetActionCreators, AlertActionCreators, ToastActionCreators } from '@valenced/discord/actions'
+import { Design } from '@valenced/discord/design'
+import { Stores } from '@valenced/discord/flux'
+import { lookupModule, getModules } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
+import { instead } from '@valenced/patcher'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { useState } from 'react'
+import { View } from 'react-native'
+
+/**
+ * Reaction Words
+ *  - 메시지를 꾹 누르면 나오는 창에 "React with a word" 줄을 넣는다. 단어를 쓰면 글자 이모지(🇵🇱🇺🇬🇮🇳)로 반응한다.
+ *    같은 글자가 또 나오면 🅰️ ⭕ 같은 다른 모양을 쓴다.
+ *  - 반응 옆 "반응 추가" 버튼을 꾹 누르면 그 메시지에 달린 이모지 전부로 반응한다.
+ *    니트로가 없으면 슈퍼 반응만 있는 이모지는 건너뛴다.
+ * 디스코드 채팅은 반응 추가 버튼을 꾹 누르면 반응(reaction) 없이 handleLongPressReaction 을 부른다.
+ */
+
+const D = () => Design as any
+const S = () => Stores as any
+const VS = '️'
+
+let seq = 0
+const toast = (text: string) => {
+    try {
+        ToastActionCreators.open(`reaction-words-${Date.now()}-${seq++}`, { text })
+    } catch {}
+}
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+// ── 반응 달기 ───────────────────────────────────────────────────
+
+/** lookupModule 은 [모듈, ...] 을 돌려준다 */
+const find = (...props: string[]) => {
+    try {
+        return (lookupModule(withProps(...(props as [string])) as any) as any)?.[0]
+    } catch {}
+}
+
+let reactionMod: any
+function reactions(): any {
+    reactionMod ??= find('addReaction', 'removeReaction')
+    return reactionMod
+}
+
+const isNitro = () => {
+    try {
+        return (S().UserStore?.getCurrentUser?.()?.premiumType ?? 0) > 0
+    } catch {
+        return false
+    }
+}
+
+async function react(channelId: string, messageId: string, emoji: any, burst = false) {
+    const m = reactions()
+    if (typeof m?.addReaction !== 'function') throw new Error('Could not find how Discord adds reactions')
+    await m.addReaction(channelId, messageId, emoji, undefined, burst ? { burst: true } : undefined)
+}
+
+/** 같은 이모지인지 (커스텀은 id, 유니코드는 이름. 변형 선택자는 무시) */
+const keyOf = (e: any) => (e?.id ? `id:${e.id}` : `u:${String(e?.name ?? '').replace(/️/g, '')}`)
+
+let busy = false
+async function run(label: string, jobs: Array<() => Promise<void>>) {
+    if (busy) return toast('Still reacting, wait a moment')
+    busy = true
+    let ok = 0
+    let fail = 0
+    try {
+        for (const job of jobs) {
+            try {
+                await job()
+                ok++
+            } catch {
+                fail++
+            }
+            // 너무 빨리 달면 디스코드가 막는다
+            await sleep(350)
+        }
+    } finally {
+        busy = false
+    }
+    toast(fail ? `${label}: ${ok} added, ${fail} failed` : `${label}: ${ok} added`)
+}
+
+// ── 1. 달린 이모지 전부로 반응 ──────────────────────────────────
+
+function reactWithAll(message: any, channel: any) {
+    const list: any[] = message?.reactions ?? []
+    const nitro = isNitro()
+    const jobs: Array<() => Promise<void>> = []
+    let skipped = 0
+    for (const r of list) {
+        const normal = (r.count ?? 0) - (r.me ? 1 : 0) > 0 || (r.count ?? 0) > (r.burst_count ?? 0)
+        if (!r.me && (r.count ?? 0) > 0 && normal) jobs.push(() => react(channel.id, message.id, r.emoji))
+        if ((r.burst_count ?? 0) > 0 && !r.me_burst) {
+            if (nitro) jobs.push(() => react(channel.id, message.id, r.emoji, true))
+            else skipped++
+        }
+    }
+    if (!jobs.length) return toast(skipped ? 'Only super reactions left, they need Nitro' : 'You already reacted with all of them')
+    run('React with all', jobs)
+}
+
+// ── 2. 단어로 반응 ──────────────────────────────────────────────
+
+const REGIONAL = (c: string) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)
+/** 같은 글자를 또 쓸 때 쓰는 다른 모양 */
+const ALT: Record<string, string[]> = {
+    A: ['🅰' + VS],
+    B: ['🅱' + VS],
+    C: ['©' + VS],
+    E: ['📧'],
+    I: ['ℹ' + VS],
+    M: ['Ⓜ' + VS],
+    O: ['🅾' + VS, '⭕'],
+    P: ['🅿' + VS],
+    R: ['®' + VS],
+    X: ['❌', '✖' + VS],
+    '!': ['❗', '❕'],
+    '?': ['❓', '❔'],
+}
+const KEYCAP = (d: string) => `${d}${VS}⃣`
+
+function choices(ch: string): string[] {
+    if (/[A-Z]/.test(ch)) return [REGIONAL(ch), ...(ALT[ch] ?? [])]
+    if (/[0-9]/.test(ch)) return [KEYCAP(ch)]
+    return ALT[ch] ?? []
+}
+
+/** 단어를 이모지 목록으로. 못 만드는 글자는 missing 에 */
+function spell(word: string, taken: Set<string>): { emojis: string[]; missing: string[] } {
+    const used = new Set(taken)
+    const emojis: string[] = []
+    const missing: string[] = []
+    for (const raw of word.toUpperCase()) {
+        if (raw === ' ') continue
+        const pick = choices(raw).find(e => !used.has(keyOf({ name: e })))
+        if (!pick) {
+            missing.push(raw)
+            continue
+        }
+        used.add(keyOf({ name: pick }))
+        emojis.push(pick)
+    }
+    return { emojis, missing }
+}
+
+function WordInput({ message, onChange }: { message: any; onChange: (v: string) => void }) {
+    const { TextInput, Text } = D()
+    const [v, setV] = useState('')
+    const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
+    const { emojis, missing } = spell(v, taken)
+    return (
+        <View style={{ gap: 8 }}>
+            <TextInput
+                value={v}
+                placeholder="Type a word"
+                autoFocus
+                autoCapitalize="characters"
+                onChange={(t: string) => {
+                    setV(t)
+                    onChange(t)
+                }}
+                isClearable
+            />
+            <Text variant="text-lg/normal">{emojis.join(' ') || ' '}</Text>
+            {missing.length ? <Text variant="text-sm/normal" color="text-danger">{`Can't use again: ${[...new Set(missing)].join(', ')}`}</Text> : null}
+            {emojis.length > 20 ? <Text variant="text-sm/normal" color="text-danger">Messages can only have 20 different reactions</Text> : null}
+        </View>
+    )
+}
+
+function openWordDialog(message: any, channel: any) {
+    const { AlertModal, AlertActionButton } = D()
+    let word = ''
+    const go = () => {
+        const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
+        const { emojis } = spell(word, taken)
+        if (!emojis.length) return toast('Type a word first')
+        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })))
+    }
+    AlertActionCreators.openAlert(
+        `reaction-words-${seq++}`,
+        <AlertModal
+            title="React with a word"
+            content={<WordInput message={message} onChange={v => (word = v)} />}
+            actions={[<AlertActionButton key="go" text="React" variant="primary" onPress={go} />, <AlertActionButton key="no" text="Cancel" variant="secondary" />]}
+        />,
+    )
+}
+
+// ── 메시지 꾹 누르기 창에 줄 넣기 ───────────────────────────────
+
+const nameOf = (t: any): string => t?.name || t?.displayName || t?.type?.name || t?.type?.displayName || t?.render?.name || ''
+function isGroup(n: any) {
+    if (!n || typeof n !== 'object' || Array.isArray(n)) return false
+    const G = D().ActionSheetRow?.Group
+    return (G && n.type === G) || /ActionSheetRowGroup$/.test(nameOf(n.type))
+}
+const flat = (c: any): any[] => (Array.isArray(c) ? c.flatMap(flat) : [c])
+
+function addRow(node: any, message: any, channel: any, close: () => void, depth = 0): any {
+    if (!node || typeof node !== 'object' || depth > 12) return node
+    if (Array.isArray(node)) {
+        let changed = false
+        const out = node.map(n => {
+            const r = addRow(n, message, channel, close, depth + 1)
+            if (r !== n) changed = true
+            return r
+        })
+        return changed ? out : node
+    }
+    const props = node.props
+    if (!props) return node
+    const kids = flat(props.children)
+    const groupAt = kids.findIndex(isGroup)
+    if (groupAt >= 0) {
+        if (kids.some((k: any) => k?.key === 'reaction-words')) return node
+        const { ActionSheetRow } = D()
+        const Icon: any = lookupGeneratedIconComponent('ReactionIcon' as any) ?? lookupGeneratedIconComponent('EmojiSmileIcon' as any)
+        const group = (
+            <ActionSheetRow.Group key="reaction-words" hasIcons>
+                <ActionSheetRow
+                    label="React with a word"
+                    icon={Icon ? <ActionSheetRow.Icon IconComponent={Icon} /> : undefined}
+                    onPress={() => {
+                        close()
+                        setTimeout(() => openWordDialog(message, channel), 350)
+                    }}
+                />
+            </ActionSheetRow.Group>
+        )
+        const next = [...kids]
+        next.splice(groupAt, 0, group)
+        return { ...node, props: { ...props, children: next } }
+    }
+    if (props.children == null || typeof props.children !== 'object') return node
+    const c = addRow(props.children, message, channel, close, depth + 1)
+    return c === props.children ? node : { ...node, props: { ...props, children: c } }
+}
+
+const innerWrapped = new WeakMap<any, any>()
+function patchSheet(cleanup: (...f: any[]) => void) {
+    const patched = new WeakSet<any>()
+    const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
+        const out = orig.apply(self, args)
+        try {
+            const p = args[0] ?? {}
+            const channel = p.channel ?? S().ChannelStore?.getChannel?.(p.channelId ?? p.message?.channel_id)
+            const message = p.message ?? S().MessageStore?.getMessage?.(channel?.id, p.messageId)
+            if (!message || !channel) return out
+            const close = () => {
+                try {
+                    if (typeof p.onClose === 'function') p.onClose()
+                    else (ActionSheetActionCreators as any).hideActionSheet()
+                } catch {}
+            }
+            const direct = addRow(out, message, channel, close)
+            if (direct !== out) return direct
+            // 바깥 컴포넌트가 안쪽 컴포넌트 하나만 돌려주면 안쪽을 감싼다
+            const type = out?.type
+            if (type && typeof type !== 'string') {
+                const MEMO = Symbol.for('react.memo')
+                const inner = type.$$typeof === MEMO ? type.type : type
+                if (typeof inner === 'function') {
+                    let w = innerWrapped.get(type)
+                    if (!w) {
+                        w = function ReactionWordsSheet(props: any) {
+                            const o = inner(props)
+                            try {
+                                return addRow(o, message, channel, close)
+                            } catch {
+                                return o
+                            }
+                        }
+                        innerWrapped.set(type, w)
+                    }
+                    return { ...out, type: w }
+                }
+            }
+        } catch {}
+        return out
+    }
+    const patchMod = (mod: any) => {
+        if (!mod || typeof mod.default !== 'function' || patched.has(mod)) return mod
+        try {
+            cleanup(instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                return render(args, orig, this)
+            }))
+            patched.add(mod)
+            return mod
+        } catch {
+            const Original = mod.default
+            return { ...mod, default: (props: any) => render([props], Original, undefined) }
+        }
+    }
+    cleanup(
+        instead(ActionSheetActionCreators as any, 'openLazy', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+            try {
+                const [sheet, key] = args
+                if (key === 'MessageLongPressActionSheet' && typeof sheet?.then === 'function') args[0] = sheet.then((m: any) => patchMod(m))
+            } catch {}
+            return orig.apply(this, args)
+        }),
+    )
+}
+
+// ── 반응 추가 버튼 꾹 누르기 ────────────────────────────────────
+
+let eventUtils: any
+function wrapInstance(inst: any) {
+    const orig = inst?.handleLongPressReaction
+    if (typeof orig !== 'function' || orig.__reactionWords) return
+    const wrapped = function (this: unknown, event: any) {
+        try {
+            eventUtils ??= find('getNativeSyntheticEventData')
+            const data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+            // 반응 없이 오면 "반응 추가" 버튼을 꾹 누른 것
+            if (data?.messageId && !data.reaction) {
+                const result = inst.getMessageData?.(data.messageId)
+                if (result?.message && result.messageChannel) {
+                    reactWithAll(result.message, result.messageChannel)
+                    return
+                }
+            }
+        } catch {}
+        return orig.apply(this, arguments as any)
+    }
+    ;(wrapped as any).__reactionWords = true
+    inst.handleLongPressReaction = wrapped
+}
+
+function patchHandlers(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModules(withProps('MessagesHandlers') as any, (mod: any) => {
+            const Orig = mod?.MessagesHandlers
+            if (typeof Orig !== 'function' || Orig.__reactionWords) return
+            // 채팅 화면이 new MessagesHandlers(...) 할 때 만들어진 인스턴스를 감싼다
+            const Patched: any = function (this: unknown, ...args: any[]) {
+                const inst = Reflect.construct(Orig, args, Patched)
+                wrapInstance(inst)
+                return inst
+            }
+            Patched.prototype = Orig.prototype
+            Patched.__reactionWords = true
+            Object.setPrototypeOf(Patched, Orig)
+            try {
+                mod.MessagesHandlers = Patched
+            } catch {
+                return
+            }
+            cleanup(() => {
+                if (mod.MessagesHandlers === Patched) mod.MessagesHandlers = Orig
+            })
+        }) as any,
+    )
+}
+
+export default plugin({
+    start({ cleanup }: any) {
+        patchHandlers(cleanup)
+        patchSheet(cleanup)
+    },
+} as any)
