@@ -50,9 +50,13 @@ private class Row(val first: Any, val longPress: Any)
 private class Twin(val orig: android.graphics.drawable.Drawable, val gap: Int) : android.graphics.drawable.Drawable() {
     override fun draw(canvas: android.graphics.Canvas) {
         val b = bounds
-        // 폭이 아직 덜 늘어난 첫 순간에도 찌그러지지 않게, 들어가는 만큼의 정사각형으로
-        val side = minOf(b.height(), (b.width() - gap) / 2)
-        if (side <= 0) return
+        // 폭이 두 칸만큼 안 되면(크기가 아직 안 맞음) 원래 배경을 그대로 그린다 (부서져 보이지 않게)
+        if (b.width() < b.height() * 2 + gap - 2) {
+            orig.bounds = b
+            orig.draw(canvas)
+            return
+        }
+        val side = b.height()
         val top = b.top + (b.height() - side) / 2
         val save = android.graphics.Rect(orig.bounds)
         orig.setBounds(b.left, top, b.left + side, top + side)
@@ -341,6 +345,17 @@ val reactionWordsPlugin = plugin {
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
+            // 버튼을 감싼 칸이 폭을 고정해 두면 늘어나지 못한다: 내용만큼으로
+            (v.parent as? View)?.takeIf { it !== sib?.parent }?.layoutParams?.let { plp ->
+                if (plp.width >= 0 && plp.width < width) {
+                    plp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    (v.parent as View).layoutParams = plp
+                }
+                if (plp.height >= 0 && plp.height < size) {
+                    plp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    (v.parent as View).layoutParams = plp
+                }
+            }
             v.layoutParams?.let { lp ->
                 if (lp.width != width || lp.height != size) {
                     lp.width = width
@@ -438,6 +453,7 @@ val reactionWordsPlugin = plugin {
             }
         }
 
+        val tries = WeakHashMap<View, Int>()
         fun schedule(v: View) {
             if (scheduled[v] == true) return
             scheduled[v] = true
@@ -448,8 +464,21 @@ val reactionWordsPlugin = plugin {
                 } catch (e: Throwable) {
                     lastError = "button: $e"
                 }
-                // 다 그려진 뒤에도 크기가 안 맞으면(줄 폭이 모자라는 등) 그래도 보여 준다
-                v.postDelayed({ if (v.alpha == 0f) v.alpha = 1f }, 150L)
+                if (v.alpha == 0f) {
+                    // 아직 크기가 안 맞으면 다시 재게 하고 몇 번 더 맞춰 본다
+                    val n = (tries[v] ?: 0) + 1
+                    tries[v] = n
+                    if (n <= 6) {
+                        v.requestLayout()
+                        v.postDelayed({ schedule(v) }, 32L)
+                    } else {
+                        // 끝내 안 맞으면 보여는 준다 (배경은 Twin 이 알아서 원래 모양으로 그린다)
+                        v.alpha = 1f
+                        lastError = "button size did not apply (w=${v.width}, h=${v.height})"
+                    }
+                } else {
+                    tries.remove(v)
+                }
             }
         }
 
