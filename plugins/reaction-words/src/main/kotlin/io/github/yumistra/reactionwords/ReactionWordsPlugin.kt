@@ -110,12 +110,19 @@ val reactionWordsPlugin = plugin {
             return null
         }
 
-        /** 버튼과 같은 줄의 첫 칸 (첫 반응) */
+        /** 버튼과 같은 줄의 첫 칸 (첫 반응). 버튼이 한 겹 감싸져 있을 수 있어서 위로 몇 단계 올라가며 찾는다 */
         fun firstSibling(v: View): View? {
-            val p = v.parent as? android.view.ViewGroup ?: return null
-            for (i in 0 until p.childCount) {
-                val c = p.getChildAt(i)
-                if (c !== v && c.visibility == View.VISIBLE && c.width > 0 && addViewClass?.isInstance(c) != true) return c
+            var self: View = v
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is android.view.ViewGroup && depth < 3) {
+                for (i in 0 until p.childCount) {
+                    val c = p.getChildAt(i)
+                    if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && addViewClass?.isInstance(c) != true) return c
+                }
+                self = p
+                p = p.parent
+                depth++
             }
             return null
         }
@@ -155,10 +162,11 @@ val reactionWordsPlugin = plugin {
                 val sib = firstSibling(v)
                 if (sib != null) {
                     simulateLongPress(sib)
+                    lastError = ""
                     return
                 }
                 pendingAt = 0L
-                lastError = "No reaction next to the button (reactionView=${reactionViewClass != null}, found=${first != null}, near: $seenNear)"
+                lastError = "No reaction next to the button (sibling=${firstSibling(v) != null}, reactionView=${reactionViewClass != null}, found=${first != null}, near: $seenNear)"
             } catch (e: Throwable) {
                 pendingAt = 0L
                 lastError = "long press: $e"
