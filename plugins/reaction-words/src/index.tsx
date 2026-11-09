@@ -7,7 +7,7 @@ import { callNativeMethod } from '@valenced/modules/native'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { ScrollView, Text as RNText, View } from 'react-native'
 
 /**
  * Reaction Words
@@ -154,19 +154,34 @@ function WordInput({ message, onChange }: { message: any; onChange: (v: string) 
     const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
     const { emojis, missing } = spell(v, taken)
     return (
-        <View style={{ gap: 8 }}>
-            <TextInput
-                value={v}
-                placeholder="Type a word"
-                autoFocus
-                autoCapitalize="characters"
-                onChange={(t: string) => {
-                    setV(t)
-                    onChange(t)
-                }}
-                isClearable
-            />
-            <Text variant="text-lg/normal">{emojis.join(' ') || ' '}</Text>
+        // 창이 안쪽을 가운데로 모아서 입력칸이 글자만큼만 커졌다: 폭을 꽉 채운다
+        <View style={{ gap: 12, alignSelf: 'stretch', width: '100%' }}>
+            <View style={{ alignSelf: 'stretch', width: '100%' }}>
+                <TextInput
+                    value={v}
+                    placeholder="Type a word"
+                    autoFocus
+                    autoCapitalize="characters"
+                    onChange={(t: string) => {
+                        setV(t)
+                        onChange(t)
+                    }}
+                    isClearable
+                />
+            </View>
+            <View style={{ alignSelf: 'stretch', minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                {emojis.length ? (
+                    emojis.map((e, i) => (
+                        <RNText key={i} style={{ fontSize: 30, lineHeight: 40 }}>
+                            {e}
+                        </RNText>
+                    ))
+                ) : (
+                    <Text variant="text-sm/normal" color="text-muted">
+                        Letters show up here
+                    </Text>
+                )}
+            </View>
             {missing.length ? <Text variant="text-sm/normal" color="text-danger">{`Can't use again: ${[...new Set(missing)].join(', ')}`}</Text> : null}
             {emojis.length > 20 ? <Text variant="text-sm/normal" color="text-danger">Messages can only have 20 different reactions</Text> : null}
         </View>
