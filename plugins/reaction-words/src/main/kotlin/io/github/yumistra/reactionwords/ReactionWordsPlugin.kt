@@ -382,15 +382,18 @@ val reactionWordsPlugin = plugin {
                     v.layoutParams = vlp
                 }
             }
-            // 세로 가운데 (화면에서 재고 모자란 만큼 옮긴다)
-            if (sib != null && sib.height > 0 && v.height > 0) {
-                fun centerY(x: View): Float {
-                    val p = IntArray(2)
-                    x.getLocationOnScreen(p)
-                    return p[1] + x.height / 2f
-                }
-                val diff = centerY(sib) - centerY(v)
-                if (abs(diff) > 1f) v.translationY = v.translationY + diff
+            // 세로 가운데: 같은 줄의 반응(바로 앞 반응)에 맞춘다. 반응이 두 줄이 되면 첫 반응은 윗줄이라
+            // 거기에 맞추면 버튼이 윗줄로 올라가 가려졌다. 옮기기 전 위치로 재고, 한 줄 넘게 차이 나면 옮기지 않는다
+            val ref = lastReaction ?: sib
+            if (ref != null && ref.height > 0 && v.height > 0) {
+                val p = IntArray(2)
+                ref.getLocationOnScreen(p)
+                val refCenter = p[1] + ref.height / 2f
+                v.getLocationOnScreen(p)
+                val vCenterNoShift = p[1] - v.translationY + v.height / 2f
+                val want = refCenter - vCenterNoShift
+                val t = if (abs(want) < ref.height) want else 0f
+                if (abs(v.translationY - t) > 1f) v.translationY = t
             }
         }
 
