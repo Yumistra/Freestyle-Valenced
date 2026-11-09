@@ -59,12 +59,28 @@ async function react(channelId: string, messageId: string, emoji: any, burst = f
 const keyOf = (e: any) => (e?.id ? `id:${e.id}` : `u:${String(e?.name ?? '').replace(/️/g, '')}`)
 
 let busy = false
-/** 반응을 전부 한 번에 보낸다 */
-async function run(_label: string, jobs: Array<() => Promise<void>>) {
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+/**
+ * inOrder 가 아니면 전부 한 번에 보낸다 (전부 반응).
+ * inOrder 면 하나씩: 앞 반응이 끝나고, 시작부터 설정한 시간이 지나면 다음 (단어, 글자 순서 유지)
+ */
+async function run(_label: string, jobs: Array<() => Promise<void>>, inOrder = false) {
     if (busy) return
     busy = true
     try {
-        await Promise.allSettled(jobs.map(j => j()))
+        if (!inOrder) {
+            await Promise.allSettled(jobs.map(j => j()))
+            return
+        }
+        for (const job of jobs) {
+            const started = Date.now()
+            try {
+                await job()
+            } catch {}
+            const left = wordDelay() - (Date.now() - started)
+            if (left > 0) await sleep(left)
+        }
     } finally {
         busy = false
     }
@@ -185,7 +201,7 @@ function openWordDialog(message: any, channel: any) {
         const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
         const { emojis } = spell(word, taken)
         if (!emojis.length) return toast('Type a word first')
-        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })))
+        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })), true)
     }
     AlertActionCreators.openAlert(
         `reaction-words-${seq++}`,
@@ -318,6 +334,12 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 let eventUtils: any
 let storage: any
 const DEFAULT_IGNORE = 1000
+const DEFAULT_WORD_DELAY = 300
+/** 단어로 반응할 때 글자 하나에서 다음 글자까지 (ms) */
+const wordDelay = (): number => {
+    const v = Number(storage?.cache?.wordDelay)
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_WORD_DELAY
+}
 const ignoreMs = (): number => {
     const v = Number(storage?.cache?.ignoreMs)
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
@@ -422,6 +444,19 @@ function SettingsPage() {
     storage?.use?.()
     const ms = ignoreMs()
     const [draft, setDraft] = useState(String(ms))
+    const wd = wordDelay()
+    const [wdDraft, setWdDraft] = useState(String(wd))
+    const applyWd = (v: number) => {
+        const n = Math.min(3000, Math.max(0, Math.round(v)))
+        storage?.set?.({ ...(storage?.cache ?? {}), wordDelay: n }, true)
+        if (storage?.cache) storage.cache.wordDelay = n
+        setWdDraft(String(n))
+    }
+    const saveWd = () => {
+        const n = Number(wdDraft)
+        if (wdDraft !== '' && Number.isFinite(n)) applyWd(n)
+        else setWdDraft(String(wd))
+    }
     const apply = (v: number) => {
         const n = Math.min(5000, Math.max(100, Math.round(v)))
         storage?.set?.({ ...(storage?.cache ?? {}), ignoreMs: n }, true)
@@ -471,6 +506,26 @@ function SettingsPage() {
                         }}
                     />
                 </TableRowGroup>
+                <TableRowGroup title="Word speed">
+                    <View style={{ padding: 12, gap: 8 }}>
+                        <Text variant="text-md/semibold">{`${wd} ms between letters`}</Text>
+                        <Text variant="text-sm/normal" color="text-muted">When reacting with a word, letters go one by one so they stay in order. Counted from the start of each letter. If Discord answers slower than this, the next letter goes as soon as it answers.</Text>
+                        <TextInput
+                            value={wdDraft}
+                            placeholder={String(DEFAULT_WORD_DELAY)}
+                            keyboardType="number-pad"
+                            onChange={(v: string) => setWdDraft(v.replace(/[^0-9]/g, ''))}
+                            onSubmitEditing={saveWd}
+                            returnKeyType="done"
+                        />
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                            {[0, 200, 300, 500, 800].map(v => (
+                                <Button key={v} text={`${v}`} size="sm" variant={wd === v ? 'primary' : 'secondary'} onPress={() => applyWd(v)} />
+                            ))}
+                            <Button text="Save" size="sm" variant="primary" onPress={saveWd} />
+                        </View>
+                    </View>
+                </TableRowGroup>
                 <TableRowGroup title="Delay">
                     <View style={{ padding: 12, gap: 8 }}>
                         <Text variant="text-md/semibold">{`Ignore reaction taps for ${ms} ms`}</Text>
@@ -509,7 +564,7 @@ function SettingsPage() {
 }
 
 export default plugin({
-    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, fitSize: true, wordButton: true } },
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, wordDelay: DEFAULT_WORD_DELAY, fitSize: true, wordButton: true } },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
