@@ -131,28 +131,32 @@ function choices(ch: string): string[] {
 }
 
 /** 단어를 이모지 목록으로. 못 만드는 글자는 missing 에 */
-function spell(word: string, taken: Set<string>): { emojis: string[]; missing: string[] } {
+function spell(word: string, taken: Set<string>): { emojis: string[]; missing: string[]; items: Array<{ ch: string; emoji?: string }> } {
     const used = new Set(taken)
     const emojis: string[] = []
     const missing: string[] = []
+    /** 글자 순서대로 (못 쓰는 글자는 emoji 없음) */
+    const items: Array<{ ch: string; emoji?: string }> = []
     for (const raw of word.toUpperCase()) {
         if (raw === ' ') continue
         const pick = choices(raw).find(e => !used.has(keyOf({ name: e })))
         if (!pick) {
             missing.push(raw)
+            items.push({ ch: raw })
             continue
         }
         used.add(keyOf({ name: pick }))
         emojis.push(pick)
+        items.push({ ch: raw, emoji: pick })
     }
-    return { emojis, missing }
+    return { emojis, missing, items }
 }
 
 function WordInput({ message, onChange }: { message: any; onChange: (v: string) => void }) {
     const { TextInput, Text } = D()
     const [v, setV] = useState('')
     const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
-    const { emojis, missing } = spell(v, taken)
+    const { items } = spell(v, taken)
     return (
         // 창이 안쪽을 가운데로 모아서 입력칸이 글자만큼만 커졌다: 폭을 꽉 채운다
         <View style={{ gap: 12, alignSelf: 'stretch', width: '100%' }}>
@@ -169,21 +173,20 @@ function WordInput({ message, onChange }: { message: any; onChange: (v: string) 
                     isClearable
                 />
             </View>
-            <View style={{ alignSelf: 'stretch', minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
-                {emojis.length ? (
-                    emojis.map((e, i) => (
+            {/* 미리보기: 줄이 바뀌지 않게 칸 높이를 고정하고, 못 쓰는 글자는 그 자리에 흐린 빨간 글자로 보여 준다 */}
+            <View style={{ alignSelf: 'stretch', minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                {items.map((it, i) =>
+                    it.emoji ? (
                         <RNText key={i} style={{ fontSize: 30, lineHeight: 40 }}>
-                            {e}
+                            {it.emoji}
                         </RNText>
-                    ))
-                ) : (
-                    <Text variant="text-sm/normal" color="text-muted">
-                        Letters show up here
-                    </Text>
+                    ) : (
+                        <RNText key={i} style={{ fontSize: 26, lineHeight: 40, fontWeight: '700', color: '#F23F43', opacity: 0.6, textDecorationLine: 'line-through' }}>
+                            {it.ch}
+                        </RNText>
+                    ),
                 )}
             </View>
-            {missing.length ? <Text variant="text-sm/normal" color="text-danger">{`Can't use again: ${[...new Set(missing)].join(', ')}`}</Text> : null}
-            {emojis.length > 20 ? <Text variant="text-sm/normal" color="text-danger">Messages can only have 20 different reactions</Text> : null}
         </View>
     )
 }
