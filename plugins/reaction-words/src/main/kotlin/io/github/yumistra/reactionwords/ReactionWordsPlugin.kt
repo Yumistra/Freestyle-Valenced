@@ -363,6 +363,51 @@ val reactionWordsPlugin = plugin {
             }
         }
 
+        /** 반응 추가 버튼 오른쪽에 Aa 한 칸이 들어갈 자리가 있는지 (오른쪽에 붙은 다른 버튼과 겹치지 않게) */
+        fun roomForAa(v: View): Boolean {
+            val size = if (knownSize > 0) knownSize else v.height
+            val gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
+            if (size <= 0 || !v.isLaidOut) return false
+            val a = IntArray(2)
+            v.getLocationOnScreen(a)
+            val left = a[0]
+            val top = a[1] - v.translationY.toInt()
+            val bottom = top + v.height
+            // Aa 까지 들어간 오른쪽 끝
+            val need = left + size * 2 + gap * 2
+            var limit = Int.MAX_VALUE
+            fun scan(g: android.view.ViewGroup, depth: Int) {
+                for (i in 0 until g.childCount) {
+                    val c = g.getChildAt(i)
+                    if (c.visibility != View.VISIBLE || c === v || c.width <= 0) continue
+                    // 버튼을 품고 있는 칸은 건너뛰고 그 안을 본다
+                    var inside: Any? = v.parent
+                    var holds = false
+                    while (inside is View) {
+                        if (inside === c) {
+                            holds = true
+                            break
+                        }
+                        inside = inside.parent
+                    }
+                    if (holds) {
+                        if (c is android.view.ViewGroup && depth < 3) scan(c, depth + 1)
+                        continue
+                    }
+                    val b = IntArray(2)
+                    c.getLocationOnScreen(b)
+                    val overlapsRow = b[1] < bottom && b[1] + c.height > top
+                    if (overlapsRow && b[0] > left) limit = minOf(limit, b[0])
+                }
+            }
+            var root: Any? = v.parent
+            repeat(3) { if (root is View) root = (root as View).parent }
+            (root as? android.view.ViewGroup)?.let { scan(it, 0) }
+            // 화면 오른쪽 끝도 넘지 않게
+            val screenRight = v.resources.displayMetrics.widthPixels
+            return need <= minOf(limit, screenRight)
+        }
+
         fun parents(v: View): String {
             val out = ArrayList<String>()
             var p: Any? = v.parent
@@ -399,8 +444,8 @@ val reactionWordsPlugin = plugin {
             }
             // 채팅 반응 줄(ShortcutsFlexbox)이 아니면(포럼 글 머리 등) 해 보되, 크기가 안 맞고 늘어나면 원래대로 둔다
             val loose = !inChatRow(v)
-            // 채팅 반응 줄이 아닌 곳(포럼 글 머리)은 줄이 넘어가지 않아 옆 버튼(팔로우 등)과 겹친다: Aa 는 넣지 않는다
-            val wantWord = showWord && !loose
+            // 채팅 반응 줄이 아닌 곳(포럼 글 머리)은 줄이 넘어가지 않는다: 오른쪽 버튼(팔로우 등)까지 자리가 있을 때만 Aa
+            val wantWord = showWord && (!loose || roomForAa(v))
             if (skipped[v] == true) {
                 restore(v)
                 return
