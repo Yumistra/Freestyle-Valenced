@@ -173,7 +173,8 @@ function WordInput({ message, onChange }: { message: any; onChange: (v: string) 
                     isClearable
                 />
             </View>
-            {/* 미리보기: 줄이 바뀌지 않게 칸 높이를 고정하고, 못 쓰는 글자는 그 자리에 흐린 빨간 글자로 보여 준다 */}
+            {/* 미리보기: 아무것도 안 쓰면 칸을 없앤다. 쓰고 나면 높이를 고정하고, 못 쓰는 글자는 그 자리에 흐린 빨간 글자로 */}
+            {items.length ? (
             <View style={{ alignSelf: 'stretch', minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
                 {items.map((it, i) =>
                     it.emoji ? (
@@ -187,6 +188,7 @@ function WordInput({ message, onChange }: { message: any; onChange: (v: string) 
                     ),
                 )}
             </View>
+            ) : null}
         </View>
     )
 }
