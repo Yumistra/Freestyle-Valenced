@@ -35,6 +35,8 @@ import kotlin.math.abs
 private const val FLEXBOX = "com.discord.reactions.ShortcutsFlexbox"
 private const val ADD_VIEW = "com.discord.reactions.AddReactionView"
 private const val REACTION_VIEW = "com.discord.reactions.ReactionView"
+/** 반응 추가 버튼과 Aa 버튼 크기 (반응 칸 높이에 대한 비율, 정사각형) */
+private const val SIZE_RATIO = 0.86f
 /**
  * 표시가 살아 있는 시간 (진동부터, ms). 흉내 낸 꾹 누르기(꾹 누르기 시간 + 150ms 뒤 취소)에서 오는 신호를 잡을 만큼.
  * 그 뒤에 사용자가 누르는 반응은 평소대로 된다. 설정에서 바꾼다 (setIgnoreMs)
@@ -220,7 +222,8 @@ val reactionWordsPlugin = plugin {
             tv.text = "Aa"
             tv.gravity = Gravity.CENTER
             tv.typeface = Typeface.DEFAULT_BOLD
-            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            tv.includeFontPadding = false
             val sampleText = firstTextView(sample)
             tv.setTextColor(sampleText?.currentTextColor ?: 0xFFB5BAC1.toInt())
             add.background?.constantState?.newDrawable()?.mutate()?.let { tv.background = it }
@@ -234,11 +237,13 @@ val reactionWordsPlugin = plugin {
         fun ensure(v: View) {
             if (!v.isAttachedToWindow) return
             val sib = firstSibling(v)
-            // 1) 반응 칸과 같은 높이
+            // 1) 정사각형, 반응 칸보다 조금 작게
             if (fitSize && sib != null && sib.height > 0) {
+                val size = (sib.height * SIZE_RATIO).toInt()
                 val lp = v.layoutParams
-                if (lp != null && lp.height != sib.height) {
-                    lp.height = sib.height
+                if (lp != null && (lp.height != size || lp.width != size)) {
+                    lp.height = size
+                    lp.width = size
                     v.layoutParams = lp
                 }
             }
@@ -269,9 +274,10 @@ val reactionWordsPlugin = plugin {
             }
             // 크기는 반응 추가 버튼과 같게
             val blp = btn.layoutParams
-            if (blp != null && v.width > 0 && (blp.width != v.width || blp.height != v.height)) {
-                blp.width = v.width
-                blp.height = v.height
+            val side = if (v.height > 0) v.height else v.width
+            if (blp != null && side > 0 && (blp.width != side || blp.height != side)) {
+                blp.width = side
+                blp.height = side
                 btn.layoutParams = blp
             }
             val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE

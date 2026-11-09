@@ -456,8 +456,8 @@ function SettingsPage() {
                         }}
                     />
                     <TableSwitchRow
-                        label="Same size as reactions"
-                        subLabel="Makes the add reaction button as tall as the reactions."
+                        label="Square buttons"
+                        subLabel="Makes the add reaction button square and a bit smaller than the reactions."
                         value={look().fitSize}
                         onValueChange={(v: boolean) => {
                             storage?.set?.({ ...(storage?.cache ?? {}), fitSize: v }, true)
