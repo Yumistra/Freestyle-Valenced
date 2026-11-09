@@ -330,8 +330,26 @@ async function tookAddLongPress(): Promise<boolean> {
  * 그래서 반응 꾹 누르기(혹시 순서가 바뀌면 누르기)가 올 때 안드로이드에 확인하고,
  * 맞으면 원래 동작(반응 목록 열기, 반응 켜고 끄기) 대신 전부 반응한다.
  */
+/** 꾹 누르기 바로 뒤에 같은 메시지로 오는 누르기는 버린다 (버튼 꾹 누르기를 흉내 낼 때 누르기도 같이 와서 반응이 꺼졌다) */
+let quietTap: { messageId: string; until: number } | undefined
+
 function wrapInstance(inst: any) {
-    // 누르기는 건드리지 않는다 (기다렸다 넘기면 이벤트가 사라져 누르기가 안 먹었다)
+    // 누르기는 기다리지 않고 바로 넘긴다 (기다렸다 넘기면 이벤트가 사라져 누르기가 안 먹었다)
+    const tap = inst?.handleTapReaction
+    if (typeof tap === 'function' && !tap.__reactionWords) {
+        const w = function (this: unknown, event: any) {
+            try {
+                if (quietTap && Date.now() < quietTap.until) {
+                    eventUtils ??= find('getNativeSyntheticEventData')
+                    const d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+                    if (d?.messageId === quietTap.messageId) return
+                }
+            } catch {}
+            return tap.apply(this, arguments as any)
+        }
+        ;(w as any).__reactionWords = true
+        inst.handleTapReaction = w
+    }
     for (const name of ['handleLongPressReaction']) {
         const orig = inst?.[name]
         if (typeof orig !== 'function' || orig.__reactionWords) continue
@@ -346,6 +364,7 @@ function wrapInstance(inst: any) {
                 eventUtils ??= find('getNativeSyntheticEventData')
                 // 이벤트는 바로 읽어 둔다 (기다리는 동안 재사용될 수 있다)
                 data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+                if (data?.messageId) quietTap = { messageId: data.messageId, until: Date.now() + 1500 }
             } catch {}
             tookAddLongPress().then(took => {
                 if (took && data?.messageId) {
