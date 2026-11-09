@@ -334,18 +334,30 @@ async function tookAddLongPress(): Promise<boolean> {
 let quietTap: { messageId: string; until: number } | undefined
 
 function wrapInstance(inst: any) {
-    // 누르기는 기다리지 않고 바로 넘긴다 (기다렸다 넘기면 이벤트가 사라져 누르기가 안 먹었다)
+    // 누르기: 버튼 꾹 누르기를 흉내 낼 때 꾹 누르기 대신 누르기가 올 수도 있어서(손을 일찍 떼면) 안드로이드에 확인한다.
+    // 기다리는 동안 이벤트가 재사용되면 누르기가 안 먹으니, 이벤트 내용을 복사해서 넘긴다
     const tap = inst?.handleTapReaction
     if (typeof tap === 'function' && !tap.__reactionWords) {
         const w = function (this: unknown, event: any) {
+            if (!nativeOk) return tap.apply(this, arguments as any)
+            const self = this
+            let copy: any = event
+            let d: any
             try {
-                if (quietTap && Date.now() < quietTap.until) {
-                    eventUtils ??= find('getNativeSyntheticEventData')
-                    const d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
-                    if (d?.messageId === quietTap.messageId) return
-                }
+                eventUtils ??= find('getNativeSyntheticEventData')
+                d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+                if (event?.nativeEvent) copy = { ...event, nativeEvent: JSON.parse(JSON.stringify(event.nativeEvent)) }
+                if (quietTap && Date.now() < quietTap.until && d?.messageId === quietTap.messageId) return
             } catch {}
-            return tap.apply(this, arguments as any)
+            tookAddLongPress().then(took => {
+                if (took && d?.messageId) {
+                    try {
+                        const result = inst.getMessageData?.(d.messageId)
+                        if (result?.message && result.messageChannel) return reactWithAll(result.message, result.messageChannel)
+                    } catch {}
+                }
+                tap.call(self, copy)
+            })
         }
         ;(w as any).__reactionWords = true
         inst.handleTapReaction = w
