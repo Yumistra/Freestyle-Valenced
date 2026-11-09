@@ -317,19 +317,23 @@ const ignoreMs = (): number => {
     const v = Number(storage?.cache?.ignoreMs)
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
 }
+const look = () => ({ fitSize: storage?.cache?.fitSize !== false, wordButton: storage?.cache?.wordButton !== false })
+const sendLook = () => Promise.resolve((callNativeMethod as any)(`${NATIVE}.setLook`, [look().fitSize, look().wordButton])).catch(() => {})
 const sendIgnoreMs = () => Promise.resolve((callNativeMethod as any)(`${NATIVE}.setIgnoreMs`, [ignoreMs()])).catch(() => {})
 /** 안드로이드 부분이 켜져 있는지 (켜져 있을 때만 반응 누르기를 잠깐 기다려 확인한다) */
 let nativeOk = false
 const NATIVE = 'yumistra.reaction-words'
 
 /** 방금 반응 추가 버튼을 꾹 눌렀으면 그 번호 (흉내 낸 꾹 누르기가 끝날 때까지 같은 번호를 준다), 아니면 0 */
-async function addPending(): Promise<number> {
-    if (!nativeOk) return 0
+async function addPending(): Promise<{ seq: number; kind: string } | undefined> {
+    if (!nativeOk) return undefined
     try {
         const r = await (callNativeMethod as any)(`${NATIVE}.addPending`, [])
-        return typeof r === 'number' ? r : 0
+        // "번호:종류" (all = 전부 반응, word = 단어로 반응 창)
+        const m = typeof r === 'string' ? /^(\d+):(\w+)$/.exec(r) : null
+        return m ? { seq: Number(m[1]), kind: m[2] } : undefined
     } catch {
-        return 0
+        return undefined
     }
 }
 /** 이미 전부 반응한 꾹 누르기 번호 */
@@ -348,13 +352,15 @@ function viaPending(inst: any, event: any, orig: (e: any) => void) {
         // 기다리는 동안 이벤트가 재사용되면 원래 동작이 안 먹으니, 내용을 복사해서 넘긴다
         if (event?.nativeEvent) copy = { ...event, nativeEvent: JSON.parse(JSON.stringify(event.nativeEvent)) }
     } catch {}
-    addPending().then(seq => {
-        if (!seq) return orig(copy)
-        if (seq === handledSeq || !d?.messageId) return
-        handledSeq = seq
+    addPending().then(p => {
+        if (!p) return orig(copy)
+        if (p.seq === handledSeq || !d?.messageId) return
+        handledSeq = p.seq
         try {
             const result = inst.getMessageData?.(d.messageId)
-            if (result?.message && result.messageChannel) reactWithAll(result.message, result.messageChannel)
+            if (!result?.message || !result.messageChannel) return
+            if (p.kind === 'word') openWordDialog(result.message, result.messageChannel)
+            else reactWithAll(result.message, result.messageChannel)
         } catch {}
     })
 }
@@ -407,7 +413,7 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 // ── 설정 화면 (상태) ────────────────────────────────────────────
 
 function SettingsPage() {
-    const { Stack, TableRowGroup, TableRow, TextInput, Button, Text } = D()
+    const { Stack, TableRowGroup, TableRow, TableSwitchRow, TextInput, Button, Text } = D()
     storage?.use?.()
     const ms = ignoreMs()
     const [draft, setDraft] = useState(String(ms))
@@ -436,6 +442,29 @@ function SettingsPage() {
                 <TableRowGroup title="How to use">
                     <TableRow label="React with a word" subLabel="Long press a message, then React with a word." />
                     <TableRow label="React with every emoji" subLabel="Long press the add reaction button at the end of the reactions." />
+                    <TableRow label="Word button" subLabel="Tap Aa next to the add reaction button to react with a word." />
+                </TableRowGroup>
+                <TableRowGroup title="Buttons">
+                    <TableSwitchRow
+                        label="Word button"
+                        subLabel="An Aa button next to the add reaction button. Tap it to react with a word."
+                        value={look().wordButton}
+                        onValueChange={(v: boolean) => {
+                            storage?.set?.({ ...(storage?.cache ?? {}), wordButton: v }, true)
+                            if (storage?.cache) storage.cache.wordButton = v
+                            sendLook()
+                        }}
+                    />
+                    <TableSwitchRow
+                        label="Same size as reactions"
+                        subLabel="Makes the add reaction button as tall as the reactions."
+                        value={look().fitSize}
+                        onValueChange={(v: boolean) => {
+                            storage?.set?.({ ...(storage?.cache ?? {}), fitSize: v }, true)
+                            if (storage?.cache) storage.cache.fitSize = v
+                            sendLook()
+                        }}
+                    />
                 </TableRowGroup>
                 <TableRowGroup title="Delay">
                     <View style={{ padding: 12, gap: 8 }}>
@@ -463,7 +492,7 @@ function SettingsPage() {
                     ) : (
                         <>
                             <TableRow label="Android part" subLabel={st.rowHook === undefined ? 'Not loaded' : `Reactions row ${yes(st.rowHook)}, button touch ${yes(st.touchHook)}`} />
-                            {st.rowHook !== undefined ? <TableRow label="Seen" subLabel={`${st.rows} reaction rows, ${st.touches} button touches, ${st.fires} long presses`} /> : null}
+                            {st.rowHook !== undefined ? <TableRow label="Seen" subLabel={`${st.rows} reaction rows, ${st.touches} button touches, ${st.fires} presses, ${st.buttons ?? 0} word buttons`} /> : null}
                             {st.error ? <TableRow label="Last error" subLabel={String(st.error)} /> : null}
                         </>
                     )}
@@ -475,13 +504,16 @@ function SettingsPage() {
 }
 
 export default plugin({
-    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE } },
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, fitSize: true, wordButton: true } },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
             .then((r: any) => {
                 nativeOk = r === 'pong'
-                if (nativeOk) sendIgnoreMs()
+                if (nativeOk) {
+                    sendIgnoreMs()
+                    sendLook()
+                }
             })
             .catch(() => (nativeOk = false))
         patchHandlers(cleanup)

@@ -3,10 +3,14 @@
 package io.github.yumistra.reactionwords
 
 import android.os.SystemClock
+import android.graphics.Typeface
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.widget.TextView
 import app.valenced.plugins.plugin
 import app.valenced.xposed.api.registerNativeMethod
 import de.robv.android.xposed.XC_MethodHook
@@ -59,6 +63,8 @@ val reactionWordsPlugin = plugin {
         var pendingAt = 0L
         /** 꾹 누를 때마다 1씩 오르는 번호 (JS 가 같은 꾹 누르기를 두 번 처리하지 않게) */
         var pendingSeq = 0
+        /** 무엇을 할지: all (전부 반응), word (단어로 반응 창) */
+        var pendingKind = "all"
         var press: Press? = null
         // 상태 (설정 화면에 보여 준다)
         var rowHook = false
@@ -150,12 +156,13 @@ val reactionWordsPlugin = plugin {
             }, ViewConfiguration.getLongPressTimeout() + 150L)
         }
 
-        fun fire(v: View) {
+        fun fire(v: View, kind: String = "all") {
             try {
                 pendingAt = SystemClock.uptimeMillis()
                 pendingSeq++
+                pendingKind = kind
                 fires++
-                v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                if (kind == "all") v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 // 1) 반응 줄을 기억해 뒀으면 그 꾹 누르기 함수로
                 val row = rowOf(v)
                 if (row != null) {
@@ -178,6 +185,109 @@ val reactionWordsPlugin = plugin {
                 pendingAt = 0L
                 lastError = "long press: $e"
                 log.e(lastError)
+            }
+        }
+
+        // ── 반응 추가 버튼 크기 맞추기 + 옆에 "단어로 반응" 버튼 ─────────────
+        val wordButtons = WeakHashMap<View, View>()
+        val scheduled = WeakHashMap<View, Boolean>()
+        var fitSize = true
+        var showWord = true
+        var buttonsMade = 0
+
+        fun firstTextView(v: View?): TextView? {
+            if (v is TextView) return v
+            if (v is android.view.ViewGroup) for (i in 0 until v.childCount) firstTextView(v.getChildAt(i))?.let { return it }
+            return null
+        }
+
+        fun copyLp(lp: android.view.ViewGroup.LayoutParams?): android.view.ViewGroup.LayoutParams? {
+            if (lp == null) return null
+            return try {
+                lp.javaClass.getConstructor(lp.javaClass).newInstance(lp)
+            } catch (e: Throwable) {
+                try {
+                    lp.javaClass.getConstructor(android.view.ViewGroup.MarginLayoutParams::class.java).newInstance(lp)
+                } catch (e2: Throwable) {
+                    null
+                }
+            }
+        }
+
+        fun makeButton(add: View, sample: View?): View {
+            val ctx = add.context
+            val tv = TextView(ctx)
+            tv.text = "Aa"
+            tv.gravity = Gravity.CENTER
+            tv.typeface = Typeface.DEFAULT_BOLD
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            val sampleText = firstTextView(sample)
+            tv.setTextColor(sampleText?.currentTextColor ?: 0xFFB5BAC1.toInt())
+            add.background?.constantState?.newDrawable()?.mutate()?.let { tv.background = it }
+            tv.contentDescription = "React with a word"
+            tv.isClickable = true
+            tv.setOnClickListener { b -> fire(b, "word") }
+            buttonsMade++
+            return tv
+        }
+
+        fun ensure(v: View) {
+            if (!v.isAttachedToWindow) return
+            val sib = firstSibling(v)
+            // 1) 반응 칸과 같은 높이
+            if (fitSize && sib != null && sib.height > 0) {
+                val lp = v.layoutParams
+                if (lp != null && lp.height != sib.height) {
+                    lp.height = sib.height
+                    v.layoutParams = lp
+                }
+            }
+            val btn0 = wordButtons[v]
+            if (!showWord) {
+                (btn0?.parent as? android.view.ViewGroup)?.removeView(btn0)
+                return
+            }
+            // 2) 단어 버튼: 버튼을 감싼 줄(LinearLayout)이면 그 안, 아니면 반응들이 있는 곳에 버튼 바로 뒤로
+            val parent = v.parent as? android.view.ViewGroup ?: return
+            val inner = parent is android.widget.LinearLayout && (sib == null || sib.parent !== parent)
+            val container: android.view.ViewGroup
+            val anchor: View
+            if (inner || (sib != null && sib.parent === parent)) {
+                container = parent
+                anchor = v
+            } else {
+                container = parent.parent as? android.view.ViewGroup ?: return
+                anchor = parent
+            }
+            val btn = btn0 ?: makeButton(v, sib).also { wordButtons[v] = it }
+            val want = container.indexOfChild(anchor) + 1
+            if (btn.parent !== container || container.indexOfChild(btn) != want) {
+                (btn.parent as? android.view.ViewGroup)?.removeView(btn)
+                val lp = copyLp(if (anchor === v) v.layoutParams else anchor.layoutParams) ?: android.view.ViewGroup.LayoutParams(-2, -2)
+                if (lp is android.view.ViewGroup.MarginLayoutParams && anchor === v) lp.marginStart = (6 * v.resources.displayMetrics.density).toInt()
+                container.addView(btn, container.indexOfChild(anchor) + 1, lp)
+            }
+            // 크기는 반응 추가 버튼과 같게
+            val blp = btn.layoutParams
+            if (blp != null && v.width > 0 && (blp.width != v.width || blp.height != v.height)) {
+                blp.width = v.width
+                blp.height = v.height
+                btn.layoutParams = blp
+            }
+            val vis = if (anchor.visibility == View.VISIBLE && v.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+            if (btn.visibility != vis) btn.visibility = vis
+        }
+
+        fun schedule(v: View) {
+            if (scheduled[v] == true) return
+            scheduled[v] = true
+            v.post {
+                scheduled.remove(v)
+                try {
+                    ensure(v)
+                } catch (e: Throwable) {
+                    lastError = "button: $e"
+                }
             }
         }
 
@@ -286,6 +396,30 @@ val reactionWordsPlugin = plugin {
                 log.e(lastError)
             }
         }
+        // 3. 반응 추가 버튼이 자리를 잡을 때마다 크기를 맞추고 옆에 단어 버튼을 둔다
+        if (addViewClass != null) {
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        android.widget.LinearLayout::class.java,
+                        "onLayout",
+                        Boolean::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (addViewClass.isInstance(v)) schedule(v)
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "layout: $e"
+            }
+        }
         unhooks = hooks
         log.i("rowHook=$rowHook touchHook=$touchHook")
 
@@ -297,7 +431,12 @@ val reactionWordsPlugin = plugin {
         }
         /** 방금(3초 안) 반응 추가 버튼을 꾹 눌렀으면 그 번호, 아니면 0 (지우지 않는다) */
         registerNativeMethod("${manifest.id}.addPending") {
-            if (pendingAt != 0L && SystemClock.uptimeMillis() - pendingAt < pendingTtl()) pendingSeq else 0
+            if (pendingAt != 0L && SystemClock.uptimeMillis() - pendingAt < pendingTtl()) "$pendingSeq:$pendingKind" else ""
+        }
+        registerNativeMethod("${manifest.id}.setLook") { args ->
+            fitSize = args.getOrNull(0) != false
+            showWord = args.getOrNull(1) != false
+            true
         }
         registerNativeMethod("${manifest.id}.setIgnoreMs") { args ->
             val ms = (args.getOrNull(0) as? Number)?.toLong() ?: return@registerNativeMethod false
@@ -312,6 +451,7 @@ val reactionWordsPlugin = plugin {
                 "rows" to rowsSeen,
                 "touches" to touches,
                 "fires" to fires,
+                "buttons" to buttonsMade,
                 "error" to lastError,
             )
         }
