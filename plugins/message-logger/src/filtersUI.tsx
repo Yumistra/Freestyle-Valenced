@@ -5,8 +5,9 @@ import { Stores } from '@valenced/discord/flux'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useRef, useState } from 'react'
 import { LayoutAnimation, Pressable, View } from 'react-native'
-import { addTo, KIND_LABEL, kindOf, nameOf, removeFrom } from './filters'
-import { settings } from './store'
+import { KIND_LABEL, kindOf, nameOf, removeFrom } from './filters'
+import { useOpenPicker } from './picker'
+import { onChange, settings } from './store'
 
 function tokenColor(names: string[], fallback: string) {
     try {
@@ -59,17 +60,12 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
 }
 
 function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; title: string; hint: string; children?: any }) {
-    const { TableRowGroup, TableRow, TextInput, Button, Stack } = Design as any
-    const [text, setText] = useState('')
-    const [error, setError] = useState('')
+    const { TableRowGroup, TableRow, Button, Text } = Design as any
+    const openPicker = useOpenPicker()
+    // 고르는 화면에서 바꾼 게 돌아왔을 때 바로 보이게
+    const [, force] = useState(0)
+    useEffect(() => onChange(() => force(n => n + 1)) as any, [])
     const ids = settings()[list] ?? []
-    const add = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-        const parts = text.split(/[\s,]+/).filter(Boolean)
-        const bad = parts.filter(p => !addTo(list, p))
-        setError(bad.length ? `Not an ID, ${bad.join(', ')}` : '')
-        setText(bad.join(' '))
-    }
     return (
         <TableRowGroup title={title}>
             {children}
@@ -80,7 +76,7 @@ function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; t
                         key={id}
                         icon={<TableRowAssetIcon name={ICON[kind]} />}
                         label={nameOf(id)}
-                        subLabel={`${KIND_LABEL[kind]}, ${id}`}
+                        subLabel={KIND_LABEL[kind]}
                         trailing={
                             <DeleteButton
                                 onDelete={() => {
@@ -92,11 +88,13 @@ function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; t
                     />
                 )
             })}
-            <View style={{ padding: 12 }}>
-                <Stack spacing={8}>
-                    <TextInput value={text} placeholder="User, channel or server ID" onChange={(v: string) => setText(v.replace(/[^\d\s,]/g, ''))} keyboardType="number-pad" errorMessage={error || undefined} description={hint} />
-                    <Button text="Add" size="md" variant="secondary" disabled={!text.trim()} onPress={add} />
-                </Stack>
+            <View style={{ padding: 12, gap: 8 }}>
+                {!ids.length ? (
+                    <Text variant="text-sm/normal" color="text-muted">
+                        {hint}
+                    </Text>
+                ) : null}
+                <Button text="Add" size="md" variant="secondary" onPress={() => openPicker(list)} />
             </View>
         </TableRowGroup>
     )
@@ -107,8 +105,9 @@ export function FilterSettings({ set }: { set: (patch: any) => void }) {
     const s = settings()
     return (
         <>
-            <ListGroup list="allow" title="Whitelist" hint="Always logged, even if blacklisted.">
+            <ListGroup list="allow" title="Whitelist" hint="Always logged, even if blacklisted or not a friend.">
                 <TableSwitchRow label="Only log the whitelist" value={s.allowOnly} onValueChange={(allowOnly: boolean) => set({ allowOnly })} />
+                <TableSwitchRow label="Only log friends" subLabel="Messages from people who aren't your friends are not logged" value={s.friendsOnly} onValueChange={(friendsOnly: boolean) => set({ friendsOnly })} />
             </ListGroup>
             <ListGroup list="block" title="Blacklist" hint="Never logged. Long press a message to add its author." />
         </>

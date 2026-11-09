@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.reaction-words",
+	"name": "Reaction Words",
+	"description": "Spell words with letter reactions, and long press the add reaction button to react with every emoji on a message.",
+	"author": "Yumistra",
+	"icon": "ReactionIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.reactionwords.ReactionWordsPlugin"
+		}
+	}
+}

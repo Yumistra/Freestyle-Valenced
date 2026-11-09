@@ -12,6 +12,7 @@ import { trim } from './away'
 import { bindNotes, nativeStatus, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
 import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
+import { registerPicker } from './picker'
 import { FilterSettings } from './filtersUI'
 import { patchSheet } from './sheet'
 import { setNative, styleRow } from './rows'
@@ -135,6 +136,7 @@ export default plugin({
     jsonStorage: { load: true, default: {} },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
+        registerPicker(cleanup)
         // 저장된 로그가 불러와지면 오래된 것부터 정리
         const me = () => {
             try {
