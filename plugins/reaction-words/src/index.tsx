@@ -62,24 +62,16 @@ let busy = false
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /**
- * inOrder 가 아니면 전부 한 번에 보낸다 (전부 반응).
- * inOrder 면 하나씩: 앞 반응이 끝나고, 시작부터 설정한 시간이 지나면 다음 (단어, 글자 순서 유지)
+ * 반응을 하나씩 보낸다. 디스코드 답을 기다리지 않고, 보내고 나서 정한 시간만큼 쉬고 다음을 보낸다
+ * (전부 반응, 단어 둘 다)
  */
-async function run(_label: string, jobs: Array<() => Promise<void>>, inOrder = false) {
+async function run(_label: string, jobs: Array<() => Promise<void>>) {
     if (busy) return
     busy = true
     try {
-        if (!inOrder) {
-            await Promise.allSettled(jobs.map(j => j()))
-            return
-        }
-        for (const job of jobs) {
-            const started = Date.now()
-            try {
-                await job()
-            } catch {}
-            const left = wordDelay() - (Date.now() - started)
-            if (left > 0) await sleep(left)
+        for (let i = 0; i < jobs.length; i++) {
+            jobs[i]().catch(() => {})
+            if (i < jobs.length - 1) await sleep(wordDelay())
         }
     } finally {
         busy = false
@@ -201,7 +193,7 @@ function openWordDialog(message: any, channel: any) {
         const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
         const { emojis } = spell(word, taken)
         if (!emojis.length) return toast('Type a word first')
-        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })), true)
+        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })))
     }
     AlertActionCreators.openAlert(
         `reaction-words-${seq++}`,
@@ -506,10 +498,10 @@ function SettingsPage() {
                         }}
                     />
                 </TableRowGroup>
-                <TableRowGroup title="Word speed">
+                <TableRowGroup title="Reaction speed">
                     <View style={{ padding: 12, gap: 8 }}>
-                        <Text variant="text-md/semibold">{`${wd} ms between letters`}</Text>
-                        <Text variant="text-sm/normal" color="text-muted">When reacting with a word, letters go one by one so they stay in order. Counted from the start of each letter. If Discord answers slower than this, the next letter goes as soon as it answers.</Text>
+                        <Text variant="text-md/semibold">{`${wd} ms between reactions`}</Text>
+                        <Text variant="text-sm/normal" color="text-muted">Reactions are sent one by one, waiting this long after each one. Used for words and for every emoji. Too short and Discord may skip some or mix up the order.</Text>
                         <TextInput
                             value={wdDraft}
                             placeholder={String(DEFAULT_WORD_DELAY)}
