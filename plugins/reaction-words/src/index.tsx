@@ -331,7 +331,8 @@ async function tookAddLongPress(): Promise<boolean> {
  * 맞으면 원래 동작(반응 목록 열기, 반응 켜고 끄기) 대신 전부 반응한다.
  */
 function wrapInstance(inst: any) {
-    for (const name of ['handleLongPressReaction', 'handleTapReaction']) {
+    // 누르기는 건드리지 않는다 (기다렸다 넘기면 이벤트가 사라져 누르기가 안 먹었다)
+    for (const name of ['handleLongPressReaction']) {
         const orig = inst?.[name]
         if (typeof orig !== 'function' || orig.__reactionWords) continue
         const wrapped = function (this: unknown, event: any) {
@@ -340,6 +341,8 @@ function wrapInstance(inst: any) {
             const args = arguments
             let data: any
             try {
+                // 기다리는 동안 디스코드가 이벤트를 재사용하지 않게 붙잡아 둔다
+                event?.persist?.()
                 eventUtils ??= find('getNativeSyntheticEventData')
                 // 이벤트는 바로 읽어 둔다 (기다리는 동안 재사용될 수 있다)
                 data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
