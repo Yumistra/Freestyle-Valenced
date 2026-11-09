@@ -448,6 +448,8 @@ val reactionWordsPlugin = plugin {
                 } catch (e: Throwable) {
                     lastError = "button: $e"
                 }
+                // 다 그려진 뒤에도 크기가 안 맞으면(줄 폭이 모자라는 등) 그래도 보여 준다
+                v.postDelayed({ if (v.alpha == 0f) v.alpha = 1f }, 150L)
             }
         }
 
