@@ -50,11 +50,14 @@ private class Row(val first: Any, val longPress: Any)
 private class Twin(val orig: android.graphics.drawable.Drawable, val gap: Int) : android.graphics.drawable.Drawable() {
     override fun draw(canvas: android.graphics.Canvas) {
         val b = bounds
-        val side = b.height()
+        // 폭이 아직 덜 늘어난 첫 순간에도 찌그러지지 않게, 들어가는 만큼의 정사각형으로
+        val side = minOf(b.height(), (b.width() - gap) / 2)
+        if (side <= 0) return
+        val top = b.top + (b.height() - side) / 2
         val save = android.graphics.Rect(orig.bounds)
-        orig.setBounds(b.left, b.top, b.left + side, b.bottom)
+        orig.setBounds(b.left, top, b.left + side, top + side)
         orig.draw(canvas)
-        orig.setBounds(b.left + side + gap, b.top, b.left + side * 2 + gap, b.bottom)
+        orig.setBounds(b.left + side + gap, top, b.left + side * 2 + gap, top + side)
         orig.draw(canvas)
         orig.bounds = save
     }
@@ -334,6 +337,10 @@ val reactionWordsPlugin = plugin {
             }
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (showWord) size * 2 + gap else size
+            // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
+            val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
+            val alpha = if (ready) 1f else 0f
+            if (v.alpha != alpha) v.alpha = alpha
             v.layoutParams?.let { lp ->
                 if (lp.width != width || lp.height != size) {
                     lp.width = width
