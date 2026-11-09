@@ -3,11 +3,11 @@ name: Native build check
 # main 이 아닌 브랜치에서 네이티브(Kotlin) 부분이 컴파일되는지 확인하고, 테스트용 plugin.jar 를 올린다 (배포 안 함)
 on:
   push:
-    branches-ignore: [main]
+    branches-ignore: [main, test-jars]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   native:
@@ -36,3 +36,15 @@ jobs:
           name: plugin-jars
           path: plugins/*/build/plugin.jar
           retention-days: 7
+      # 아티팩트는 받을 수 없는 곳이 있어서, 같은 jar 를 test-jars 브랜치에도 올린다 (git 으로 받는다)
+      - name: Push jars to test-jars branch
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          OUT=$(mktemp -d)
+          for j in plugins/*/build/plugin.jar; do n=$(basename "$(dirname "$(dirname "$j")")"); mkdir -p "$OUT/$n"; cp "$j" "$OUT/$n/plugin.jar"; done
+          cd "$OUT"
+          git init -q && git checkout -q -b test-jars
+          git config user.name "github-actions" && git config user.email "github-actions@users.noreply.github.com"
+          echo "$GITHUB_REF_NAME $SHA" > SOURCE
+          git add -A && git commit -qm "jars from $GITHUB_REF_NAME $SHA"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" test-jars
