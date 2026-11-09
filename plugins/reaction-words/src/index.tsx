@@ -436,7 +436,7 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 
 // ── 로그 ────────────────────────────────────────────────────────
 
-const VERSION = '1.0.42'
+const VERSION = '1.0.43'
 /** 최근 일 (로그 복사용) */
 const jlog: string[] = []
 function note(msg: string) {

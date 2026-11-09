@@ -172,7 +172,9 @@ val reactionWordsPlugin = plugin {
             while (p is android.view.ViewGroup && depth < 3) {
                 for (i in 0 until p.childCount) {
                     val c = p.getChildAt(i)
-                    if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && addViewClass?.isInstance(c) != true) return c
+                    // 반응 칸만 (가는 구분선 같은 건 빼고): 어느 정도 높고, 옆으로 넓은 칸
+                    val minH = 16 * c.resources.displayMetrics.density
+                    if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && c.height >= minH && c.width >= c.height * 0.8f && addViewClass?.isInstance(c) != true) return c
                 }
                 self = p
                 p = p.parent
@@ -396,11 +398,9 @@ val reactionWordsPlugin = plugin {
                 origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
             }
             // 채팅 반응 줄(ShortcutsFlexbox) 안의 버튼만 바꾼다. 포럼 글 머리 같은 다른 곳은 원래대로
-            if (!inChatRow(v)) {
-                if (skipped[v] != true) {
-                    skipped[v] = true
-                    note("not a chat reactions row, left as is: ${parents(v)}")
-                }
+            // 채팅 반응 줄(ShortcutsFlexbox)이 아니면(포럼 글 머리 등) 해 보되, 크기가 안 맞고 늘어나면 원래대로 둔다
+            val loose = !inChatRow(v)
+            if (skipped[v] == true) {
                 restore(v)
                 return
             }
@@ -433,6 +433,12 @@ val reactionWordsPlugin = plugin {
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
             noFlex(v)
             noFlex(v.parent as? View)
+            if (loose && v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
+                skipped[v] = true
+                note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
+                restore(v)
+                return
+            }
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
