@@ -282,6 +282,9 @@ val reactionWordsPlugin = plugin {
          * 버튼 칸과 아이콘은 그대로 두고, 버튼을 [정사각형][간격][정사각형] 폭으로 늘린 뒤
          * 원래 배경을 두 번 그리는 배경(Twin)으로 바꿔서 두 개의 버튼처럼 보이게 한다.
          */
+        /** 처음 본 왼쪽 여백 (줄이 바뀌면 이걸로 되돌린다) */
+        val baseMargin = WeakHashMap<View, Int>()
+
         fun makeButton(add: View): TextView {
             val tv = TextView(add.context)
             tv.text = "Aa"
@@ -375,11 +378,26 @@ val reactionWordsPlugin = plugin {
             // 왼쪽 간격을 반응 사이 간격과 같게 (화면에서 잰다)
             val lastReaction = lastReactionBefore(v)
             val vlp = v.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+            if (vlp != null && !baseMargin.containsKey(v)) baseMargin[v] = vlp.marginStart
             if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
-                val g = screenX(v) - (screenX(lastReaction) + lastReaction.width)
-                if (abs(g - gap) > 1) {
-                    vlp.marginStart = (vlp.marginStart + gap - g).coerceAtLeast(0)
-                    v.layoutParams = vlp
+                // 같은 줄일 때만 (반응이 두 줄이 되어 버튼이 다음 줄 맨 앞으로 가면 앞 반응은 윗줄 끝이다)
+                val a = IntArray(2)
+                val b = IntArray(2)
+                lastReaction.getLocationOnScreen(a)
+                v.getLocationOnScreen(b)
+                val sameLine = abs((a[1] + lastReaction.height / 2f) - (b[1] - v.translationY + v.height / 2f)) < lastReaction.height
+                if (sameLine) {
+                    val g = screenX(v) - (screenX(lastReaction) + lastReaction.width)
+                    if (abs(g - gap) > 1) {
+                        vlp.marginStart = (vlp.marginStart + gap - g).coerceAtLeast(0)
+                        v.layoutParams = vlp
+                    }
+                } else {
+                    val base = baseMargin[v] ?: 0
+                    if (vlp.marginStart != base) {
+                        vlp.marginStart = base
+                        v.layoutParams = vlp
+                    }
                 }
             }
             // 세로 가운데: 같은 줄의 반응(바로 앞 반응)에 맞춘다. 반응이 두 줄이 되면 첫 반응은 윗줄이라
