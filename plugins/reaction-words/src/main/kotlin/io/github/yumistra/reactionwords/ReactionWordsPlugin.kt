@@ -85,18 +85,28 @@ val reactionWordsPlugin = plugin {
             null
         }
 
-        /** 버튼 근처(같은 줄)에서 보이는 첫 반응 */
+        /** 버튼 근처(같은 줄)에서 보이는 첫 반응. 이름이 바뀐 버전도 있어서, 못 찾으면 꾹 누를 수 있는 옆 칸을 쓴다 */
+        var seenNear = ""
         fun firstReactionNear(v: View): View? {
             var p: Any? = v.parent
+            var self: View = v
             var depth = 0
+            val names = ArrayList<String>()
             while (p is android.view.ViewGroup && depth < 3) {
+                var fallback: View? = null
                 for (i in 0 until p.childCount) {
                     val c = p.getChildAt(i)
-                    if (c.visibility == View.VISIBLE && (reactionViewClass?.isInstance(c) == true)) return c
+                    if (c === self || c.visibility != View.VISIBLE) continue
+                    if (names.size < 6) names.add("${c.javaClass.simpleName}${if (c.isLongClickable) "*" else ""}")
+                    if (reactionViewClass?.isInstance(c) == true) return c
+                    if (fallback == null && c.isLongClickable && addViewClass?.isInstance(c) != true) fallback = c
                 }
+                if (fallback != null) return fallback
+                self = p
                 p = p.parent
                 depth++
             }
+            seenNear = names.joinToString(", ")
             return null
         }
 
@@ -115,7 +125,7 @@ val reactionWordsPlugin = plugin {
                 val first = firstReactionNear(v)
                 if (first != null && first.performLongClick()) return
                 pendingAt = 0L
-                lastError = "No reaction next to the button (reactionView=${reactionViewClass != null}, found=${first != null})"
+                lastError = "No reaction next to the button (reactionView=${reactionViewClass != null}, found=${first != null}, near: $seenNear)"
             } catch (e: Throwable) {
                 pendingAt = 0L
                 lastError = "long press: $e"
