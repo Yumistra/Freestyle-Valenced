@@ -37,8 +37,6 @@ private const val ADD_VIEW = "com.discord.reactions.AddReactionView"
 private const val REACTION_VIEW = "com.discord.reactions.ReactionView"
 /** 반응 추가 버튼과 Aa 버튼 크기 (반응 칸 높이에 대한 비율, 정사각형) */
 private const val SIZE_RATIO = 0.86f
-/** setTag 키 (리소스 id 처럼 보이는 아무 값) */
-private const val TAG_BG = 0x7f0f2a01
 /**
  * 표시가 살아 있는 시간 (진동부터, ms). 흉내 낸 꾹 누르기(꾹 누르기 시간 + 150ms 뒤 취소)에서 오는 신호를 잡을 만큼.
  * 그 뒤에 사용자가 누르는 반응은 평소대로 된다. 설정에서 바꾼다 (setIgnoreMs)
@@ -47,6 +45,30 @@ private const val TAG_BG = 0x7f0f2a01
 private fun pendingTtl() = ignoreMs
 
 private class Row(val first: Any, val longPress: Any)
+
+/** 원래 배경을 왼쪽 정사각형과 오른쪽 정사각형에 한 번씩 그린다 (반응 추가 + Aa 두 버튼처럼 보이게) */
+private class Twin(val orig: android.graphics.drawable.Drawable, val gap: Int) : android.graphics.drawable.Drawable() {
+    override fun draw(canvas: android.graphics.Canvas) {
+        val b = bounds
+        val side = b.height()
+        val save = android.graphics.Rect(orig.bounds)
+        orig.setBounds(b.left, b.top, b.left + side, b.bottom)
+        orig.draw(canvas)
+        orig.setBounds(b.left + side + gap, b.top, b.left + side * 2 + gap, b.bottom)
+        orig.draw(canvas)
+        orig.bounds = save
+    }
+    override fun setAlpha(alpha: Int) {
+        orig.alpha = alpha
+    }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+        orig.colorFilter = colorFilter
+    }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    override fun isStateful(): Boolean = orig.isStateful
+    override fun onStateChange(state: IntArray): Boolean = orig.setState(state)
+}
 
 private class Press(val view: View, val x: Float, val y: Float, val run: Runnable) {
     var fired = false
@@ -257,10 +279,9 @@ val reactionWordsPlugin = plugin {
         /**
          * 반응 추가 버튼(LinearLayout) "안"에 Aa 를 넣는다. 반응들이 있는 줄에 직접 끼우면 디스코드가 반응 칸을
          * 순서대로 다시 쓰면서 Aa 가 반응 사이로 들어가거나 앱이 멈췄다.
-         * 버튼 배경은 버튼에서 떼어 아이콘과 Aa 에 각각 입혀서, 두 개의 정사각형 버튼처럼 보이게 한다.
+         * 버튼 칸과 아이콘은 그대로 두고, 버튼을 [정사각형][간격][정사각형] 폭으로 늘린 뒤
+         * 원래 배경을 두 번 그리는 배경(Twin)으로 바꿔서 두 개의 버튼처럼 보이게 한다.
          */
-        val origBg = WeakHashMap<View, android.graphics.drawable.Drawable>()
-
         fun makeButton(add: View): TextView {
             val tv = TextView(add.context)
             tv.text = "Aa"
@@ -276,31 +297,22 @@ val reactionWordsPlugin = plugin {
             return tv
         }
 
-        fun copyOf(d: android.graphics.drawable.Drawable?) = d?.constantState?.newDrawable()?.mutate()
-
         fun ensure(v: View) {
             if (!v.isAttachedToWindow || v !is android.widget.LinearLayout) return
             val sib = firstSibling(v)
-            val custom = fitSize || showWord
             var aa = wordButtons[v] as? TextView
-            // 디스코드가 배경을 다시 넣으면(테마 바뀜 등) 그걸 새 원본으로 삼는다
-            v.background?.let { bg ->
-                if (custom) {
-                    origBg[v] = bg
-                    v.background = null
-                }
-            }
-            if (!custom) {
+            // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
+            val cur = v.background
+            val orig = if (cur is Twin) cur.orig else cur
+            if (!fitSize && !showWord) {
                 aa?.let { v.removeView(it) }
-                origBg.remove(v)?.let { v.background = it }
+                if (cur is Twin) v.background = cur.orig
                 return
             }
-            val bg = origBg[v]
-            val icon = (0 until v.childCount).map { v.getChildAt(it) }.firstOrNull { it !== aa } ?: return
             val size = if (sib != null && sib.height > 0) {
                 if (fitSize) (sib.height * SIZE_RATIO).toInt() else sib.height
             } else {
-                icon.height.takeIf { it > 0 } ?: return
+                v.height.takeIf { it > 0 } ?: return
             }
             var gap = (6 * v.resources.displayMetrics.density).toInt()
             if (sib != null) {
@@ -309,34 +321,33 @@ val reactionWordsPlugin = plugin {
                 val next = if (sp != null && i >= 0 && i + 1 < sp.childCount) sp.getChildAt(i + 1) else null
                 if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
             }
-            // 버튼 전체: 가로는 내용만큼, 안쪽 여백 없음, 가운데 정렬
-            if (v.gravity != Gravity.CENTER) v.gravity = Gravity.CENTER
-            if (v.paddingLeft != 0 || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(0, 0, 0, 0)
+            // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
+            val width = if (showWord) size * 2 + gap else size
             v.layoutParams?.let { lp ->
-                if (lp.width != android.view.ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != size) {
-                    lp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                if (lp.width != width || lp.height != size) {
+                    lp.width = width
                     lp.height = size
                     v.layoutParams = lp
                 }
             }
-            // 아이콘 칸: 정사각형 + 원래 배경
-            (icon.layoutParams as? android.widget.LinearLayout.LayoutParams)?.let { lp ->
-                if (lp.width != size || lp.height != size || lp.leftMargin != 0 || lp.rightMargin != 0 || lp.marginStart != 0 || lp.marginEnd != 0) {
-                    lp.width = size
-                    lp.height = size
-                    lp.leftMargin = 0
-                    lp.rightMargin = 0
-                    lp.marginStart = 0
-                    lp.marginEnd = 0
-                    icon.layoutParams = lp
-                }
+            // 배경
+            if (showWord) {
+                if (orig != null && (cur !is Twin || cur.gap != gap)) v.background = Twin(orig, gap)
+            } else if (cur is Twin) {
+                v.background = cur.orig
             }
-            if (icon is android.widget.ImageView && icon.scaleType != android.widget.ImageView.ScaleType.CENTER_INSIDE) icon.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-            if (icon.getTag(TAG_BG) !== bg) {
-                icon.setTag(TAG_BG, bg)
-                icon.background = copyOf(bg)
+            // 아이콘은 왼쪽 정사각형 가운데로 (아이콘 칸 자체는 건드리지 않고 왼쪽 여백만)
+            var iconW = 0
+            for (i in 0 until v.childCount) {
+                val c = v.getChildAt(i)
+                if (c === aa || c.visibility == View.GONE) continue
+                val m = c.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+                iconW += c.measuredWidth + (m?.leftMargin ?: 0) + (m?.rightMargin ?: 0)
             }
-            // Aa 칸
+            val padL = ((size - iconW) / 2).coerceAtLeast(0)
+            if (v.gravity != (Gravity.START or Gravity.CENTER_VERTICAL)) v.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            if (v.paddingLeft != padL || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(padL, 0, 0, 0)
+            // Aa: 오른쪽 정사각형
             if (showWord) {
                 if (aa == null) {
                     aa = makeButton(v)
@@ -346,18 +357,15 @@ val reactionWordsPlugin = plugin {
                     (aa.parent as? android.view.ViewGroup)?.removeView(aa)
                     v.addView(aa, android.widget.LinearLayout.LayoutParams(size, size))
                 }
+                val start = (size + gap - padL - iconW).coerceAtLeast(0)
                 (aa.layoutParams as? android.widget.LinearLayout.LayoutParams)?.let { lp ->
-                    if (lp.width != size || lp.height != size || lp.marginStart != gap) {
+                    if (lp.width != size || lp.height != size || lp.leftMargin != start) {
                         lp.width = size
                         lp.height = size
-                        lp.marginStart = gap
-                        lp.leftMargin = gap
+                        lp.leftMargin = start
+                        lp.marginStart = start
                         aa.layoutParams = lp
                     }
-                }
-                if (aa.getTag(TAG_BG) !== bg) {
-                    aa.setTag(TAG_BG, bg)
-                    aa.background = copyOf(bg)
                 }
                 val c = iconColor(v, sib)
                 if (aa.currentTextColor != c) aa.setTextColor(c)
