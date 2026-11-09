@@ -324,8 +324,50 @@ val reactionWordsPlugin = plugin {
         var knownIconW = 0
         var knownT = Float.NaN
 
+        /** 처음 본 모양 (채팅 반응 줄이 아니면 이걸로 되돌린다) */
+        class Orig(val w: Int, val h: Int, val pl: Int, val pt: Int, val pr: Int, val pb: Int, val gravity: Int)
+        val origLook = WeakHashMap<View, Orig>()
+
+        /** 크기가 맞지 않고 늘어나 버리는 곳(포럼 글 머리 등)의 버튼. 이런 곳은 원래대로 둔다 */
+        val skipped = WeakHashMap<View, Boolean>()
+        fun parents(v: View): String {
+            val out = ArrayList<String>()
+            var p: Any? = v.parent
+            while (p is View && out.size < 3) {
+                out.add(p.javaClass.name)
+                p = p.parent
+            }
+            return out.joinToString(" < ")
+        }
+
+        fun restore(v: android.widget.LinearLayout) {
+            (wordButtons[v] as? View)?.let { v.removeView(it) }
+            (v.background as? Twin)?.let { v.background = it.orig }
+            origLook[v]?.let { o ->
+                v.layoutParams?.let { lp ->
+                    if (lp.width != o.w || lp.height != o.h) {
+                        lp.width = o.w
+                        lp.height = o.h
+                        v.layoutParams = lp
+                    }
+                }
+                if (v.paddingLeft != o.pl || v.paddingTop != o.pt || v.paddingRight != o.pr || v.paddingBottom != o.pb) v.setPadding(o.pl, o.pt, o.pr, o.pb)
+                if (v.gravity != o.gravity) v.gravity = o.gravity
+            }
+            if (v.alpha != 1f) v.alpha = 1f
+            if (v.translationY != 0f) v.translationY = 0f
+        }
+
         fun ensure(v: View) {
             if (!v.isAttachedToWindow || v !is android.widget.LinearLayout) return
+            if (!origLook.containsKey(v)) {
+                val lp = v.layoutParams
+                origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
+            }
+            if (skipped[v] == true) {
+                restore(v)
+                return
+            }
             val sib = firstSibling(v)
             var aa = wordButtons[v] as? TextView
             // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
@@ -353,6 +395,13 @@ val reactionWordsPlugin = plugin {
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (showWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
+            // 주는 크기보다 훨씬 크게 늘어나면 이 자리는 크기를 정할 수 없는 곳이다: 원래대로 두고 다시 건드리지 않는다
+            if (v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
+                skipped[v] = true
+                note("skip stretched add button w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
+                restore(v)
+                return
+            }
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
