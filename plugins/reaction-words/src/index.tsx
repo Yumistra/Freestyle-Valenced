@@ -67,14 +67,17 @@ async function run(label: string, jobs: Array<() => Promise<void>>) {
     let fail = 0
     try {
         for (const job of jobs) {
+            // 간격은 "반응 하나가 시작되고 다음 반응이 시작될 때까지". 요청이 그보다 오래 걸리면 기다리지 않는다
+            // (글자 순서를 지키려고 앞 반응이 끝나야 다음을 보낸다. 그래서 요청 시간보다 빨라질 수는 없다)
+            const started = Date.now()
             try {
                 await job()
                 ok++
             } catch {
                 fail++
             }
-            // 너무 빨리 달면 디스코드가 막는다
-            await sleep(stepMs())
+            const left = stepMs() - (Date.now() - started)
+            if (left > 0) await sleep(left)
         }
     } finally {
         busy = false
@@ -505,7 +508,7 @@ function SettingsPage() {
                 <TableRowGroup title="Reaction speed">
                     <View style={{ padding: 12, gap: 8 }}>
                         <Text variant="text-md/semibold">{`Wait ${step} ms between reactions`}</Text>
-                        <Text variant="text-sm/normal" color="text-muted">Used when reacting with a word or with every emoji. Too short and Discord may skip some.</Text>
+                        <Text variant="text-sm/normal" color="text-muted">Time from one reaction to the next, when reacting with a word or with every emoji. It can not go faster than Discord answers (each reaction waits for the one before, to keep the letters in order).</Text>
                         <TextInput
                             value={stepDraft}
                             placeholder={String(DEFAULT_STEP)}
