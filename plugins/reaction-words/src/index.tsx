@@ -1,4 +1,4 @@
-import { ActionSheetActionCreators, AlertActionCreators, ToastActionCreators } from '@valenced/discord/actions'
+import { ActionSheetActionCreators, AlertActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupModule, getModules } from '@valenced/modules/finders'
@@ -23,11 +23,8 @@ const S = () => Stores as any
 const VS = '️'
 
 let seq = 0
-const toast = (text: string) => {
-    try {
-        ToastActionCreators.open(`reaction-words-${Date.now()}-${seq++}`, { text })
-    } catch {}
-}
+/** 알림(토스트)은 띄우지 않는다 */
+const toast = (_text: string) => {}
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // ── 반응 달기 ───────────────────────────────────────────────────
@@ -77,7 +74,7 @@ async function run(label: string, jobs: Array<() => Promise<void>>) {
                 fail++
             }
             // 너무 빨리 달면 디스코드가 막는다
-            await sleep(350)
+            await sleep(stepMs())
         }
     } finally {
         busy = false
@@ -333,6 +330,12 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 let eventUtils: any
 let storage: any
 const DEFAULT_IGNORE = 1000
+const DEFAULT_STEP = 350
+/** 반응 하나 달고 다음까지 기다리는 시간 (너무 짧으면 디스코드가 막는다) */
+const stepMs = (): number => {
+    const v = Number(storage?.cache?.stepMs)
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_STEP
+}
 const ignoreMs = (): number => {
     const v = Number(storage?.cache?.ignoreMs)
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
@@ -437,6 +440,19 @@ function SettingsPage() {
     storage?.use?.()
     const ms = ignoreMs()
     const [draft, setDraft] = useState(String(ms))
+    const step = stepMs()
+    const [stepDraft, setStepDraft] = useState(String(step))
+    const applyStep = (v: number) => {
+        const n = Math.min(3000, Math.max(0, Math.round(v)))
+        storage?.set?.({ ...(storage?.cache ?? {}), stepMs: n }, true)
+        if (storage?.cache) storage.cache.stepMs = n
+        setStepDraft(String(n))
+    }
+    const saveStep = () => {
+        const n = Number(stepDraft)
+        if (stepDraft !== '' && Number.isFinite(n)) applyStep(n)
+        else setStepDraft(String(step))
+    }
     const apply = (v: number) => {
         const n = Math.min(5000, Math.max(100, Math.round(v)))
         storage?.set?.({ ...(storage?.cache ?? {}), ignoreMs: n }, true)
@@ -486,6 +502,26 @@ function SettingsPage() {
                         }}
                     />
                 </TableRowGroup>
+                <TableRowGroup title="Reaction speed">
+                    <View style={{ padding: 12, gap: 8 }}>
+                        <Text variant="text-md/semibold">{`Wait ${step} ms between reactions`}</Text>
+                        <Text variant="text-sm/normal" color="text-muted">Used when reacting with a word or with every emoji. Too short and Discord may skip some.</Text>
+                        <TextInput
+                            value={stepDraft}
+                            placeholder={String(DEFAULT_STEP)}
+                            keyboardType="number-pad"
+                            onChange={(v: string) => setStepDraft(v.replace(/[^0-9]/g, ''))}
+                            onSubmitEditing={saveStep}
+                            returnKeyType="done"
+                        />
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                            {[150, 250, 350, 500, 800].map(v => (
+                                <Button key={v} text={`${v}`} size="sm" variant={step === v ? 'primary' : 'secondary'} onPress={() => applyStep(v)} />
+                            ))}
+                            <Button text="Save" size="sm" variant="primary" onPress={saveStep} />
+                        </View>
+                    </View>
+                </TableRowGroup>
                 <TableRowGroup title="Delay">
                     <View style={{ padding: 12, gap: 8 }}>
                         <Text variant="text-md/semibold">{`Ignore reaction taps for ${ms} ms`}</Text>
@@ -524,7 +560,7 @@ function SettingsPage() {
 }
 
 export default plugin({
-    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, fitSize: true, wordButton: true } },
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, stepMs: DEFAULT_STEP, fitSize: true, wordButton: true } },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
