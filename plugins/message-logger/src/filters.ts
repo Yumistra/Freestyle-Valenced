@@ -36,11 +36,23 @@ export function allowed(m: any): boolean {
     const s = settings()
     const allow = s.allow ?? []
     const block = s.block ?? []
-    if (!allow.length && !block.length && !s.allowOnly) return true
+    if (!allow.length && !block.length && !s.allowOnly && !s.friendsOnly) return true
     const ids = idsOf(m)
     if (ids.some(id => allow.includes(id))) return true
     if (s.allowOnly) return false
+    if (s.friendsOnly && !isFriend(m?.author?.id)) return false
     return !ids.some(id => block.includes(id))
+}
+
+/** 친구인지 (RelationshipStore) */
+export function isFriend(id?: string): boolean {
+    if (!id) return false
+    try {
+        const R = S().RelationshipStore
+        if (typeof R?.isFriend === 'function') return !!R.isFriend(String(id))
+        return R?.getRelationshipType?.(String(id)) === 1
+    } catch {}
+    return false
 }
 
 export function kindOf(id: string): Kind {

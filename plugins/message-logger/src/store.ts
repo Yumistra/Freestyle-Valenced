@@ -51,9 +51,11 @@ export interface Settings {
     block: string[]
     /** 화이트리스트에 있는 것만 기록 */
     allowOnly: boolean
+    /** 친구가 보낸 메시지만 기록 (화이트리스트는 그대로 기록) */
+    friendsOnly: boolean
 }
 
-export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false }
+export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false, friendsOnly: false }
 
 /** 첨부파일 하나 저장 크기 상한 */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024
