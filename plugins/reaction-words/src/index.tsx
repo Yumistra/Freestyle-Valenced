@@ -310,6 +310,8 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 // ── 반응 추가 버튼 꾹 누르기 ────────────────────────────────────
 
 let eventUtils: any
+/** 테스트용: 꾹 누를 때 디스코드가 보내는 내용을 보여 준다 */
+const DEBUG = true
 function wrapInstance(inst: any) {
     const orig = inst?.handleLongPressReaction
     if (typeof orig !== 'function' || orig.__reactionWords) return
@@ -317,6 +319,15 @@ function wrapInstance(inst: any) {
         try {
             eventUtils ??= find('getNativeSyntheticEventData')
             const data = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+            if (DEBUG) {
+                let txt = ''
+                try {
+                    txt = JSON.stringify(data, (k, v) => (k === 'message' ? undefined : v)).slice(0, 300)
+                } catch {
+                    txt = String(Object.keys(data ?? {}))
+                }
+                toast(`[debug] long press: ${txt}`)
+            }
             // 반응 없이 오면 "반응 추가" 버튼을 꾹 누른 것
             if (data?.messageId && !data.reaction) {
                 const result = inst.getMessageData?.(data.messageId)
@@ -330,6 +341,21 @@ function wrapInstance(inst: any) {
     }
     ;(wrapped as any).__reactionWords = true
     inst.handleLongPressReaction = wrapped
+    if (DEBUG) {
+        // 비교용: 반응 추가 버튼을 그냥 눌렀을 때 오는 내용
+        for (const name of ['handleTapReaction', 'handleTapReactionOverflow']) {
+            const o = inst[name]
+            if (typeof o !== 'function') continue
+            inst[name] = function (this: unknown, event: any) {
+                try {
+                    eventUtils ??= find('getNativeSyntheticEventData')
+                    const d = eventUtils?.getNativeSyntheticEventData?.(event) ?? event?.nativeEvent ?? event
+                    toast(`[debug] ${name}: ${JSON.stringify(d).slice(0, 200)}`)
+                } catch {}
+                return o.apply(this, arguments as any)
+            }
+        }
+    }
 }
 
 function patchHandlers(cleanup: (...f: any[]) => void) {
@@ -341,6 +367,7 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
             const Patched: any = function (this: unknown, ...args: any[]) {
                 const inst = Reflect.construct(Orig, args, Patched)
                 wrapInstance(inst)
+                if (DEBUG) toast('[debug] chat handlers wrapped')
                 return inst
             }
             Patched.prototype = Orig.prototype
