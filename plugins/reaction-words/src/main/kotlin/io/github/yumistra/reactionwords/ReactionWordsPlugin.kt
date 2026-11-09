@@ -30,6 +30,7 @@ import kotlin.math.abs
 
 private const val FLEXBOX = "com.discord.reactions.ShortcutsFlexbox"
 private const val ADD_VIEW = "com.discord.reactions.AddReactionView"
+private const val REACTION_VIEW = "com.discord.reactions.ReactionView"
 /** 표시가 이보다 오래되면 무시한다 */
 private const val PENDING_TTL = 3000L
 
@@ -78,16 +79,43 @@ val reactionWordsPlugin = plugin {
             return null
         }
 
+        val reactionViewClass: Class<*>? = try {
+            cl.loadClass(REACTION_VIEW)
+        } catch (e: Throwable) {
+            null
+        }
+
+        /** 버튼 근처(같은 줄)에서 보이는 첫 반응 */
+        fun firstReactionNear(v: View): View? {
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is android.view.ViewGroup && depth < 3) {
+                for (i in 0 until p.childCount) {
+                    val c = p.getChildAt(i)
+                    if (c.visibility == View.VISIBLE && (reactionViewClass?.isInstance(c) == true)) return c
+                }
+                p = p.parent
+                depth++
+            }
+            return null
+        }
+
         fun fire(v: View) {
             try {
-                val row = rowOf(v) ?: run {
-                    lastError = "Reactions row not found for the button"
-                    return
-                }
                 pendingAt = SystemClock.uptimeMillis()
                 fires++
                 v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                invoke1(row.longPress, row.first)
+                // 1) 반응 줄을 기억해 뒀으면 그 꾹 누르기 함수로
+                val row = rowOf(v)
+                if (row != null) {
+                    invoke1(row.longPress, row.first)
+                    return
+                }
+                // 2) 아니면 옆의 첫 반응을 꾹 누른 것처럼 (디스코드가 같은 일을 한다)
+                val first = firstReactionNear(v)
+                if (first != null && first.performLongClick()) return
+                pendingAt = 0L
+                lastError = "No reaction next to the button (reactionView=${reactionViewClass != null}, found=${first != null})"
             } catch (e: Throwable) {
                 pendingAt = 0L
                 lastError = "long press: $e"
