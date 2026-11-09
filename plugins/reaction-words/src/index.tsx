@@ -59,13 +59,14 @@ async function react(channelId: string, messageId: string, emoji: any, burst = f
 const keyOf = (e: any) => (e?.id ? `id:${e.id}` : `u:${String(e?.name ?? '').replace(/️/g, '')}`)
 
 let busy = false
-async function run(label: string, jobs: Array<() => Promise<void>>) {
+/** inOrder: 앞 반응이 끝나면 바로 다음 (단어용, 글자 순서 유지). 아니면 전부 한 번에 */
+async function run(label: string, jobs: Array<() => Promise<void>>, inOrder = false) {
     if (busy) return toast('Still reacting, wait a moment')
     busy = true
     let ok = 0
     let fail = 0
     try {
-        if (allAtOnce()) {
+        if (!inOrder) {
             // 한 번에: 전부 동시에 보낸다 (순서는 섞일 수 있다)
             const res = await Promise.allSettled(jobs.map(j => j()))
             for (const r of res) r.status === 'fulfilled' ? ok++ : fail++
@@ -102,7 +103,7 @@ function reactWithAll(message: any, channel: any) {
         }
     }
     if (!jobs.length) return toast(skipped ? 'Only super reactions left, they need Nitro' : 'You already reacted with all of them')
-    run('React with all', jobs)
+    run('React with all', jobs, false)
 }
 
 // ── 2. 단어로 반응 ──────────────────────────────────────────────
@@ -201,7 +202,7 @@ function openWordDialog(message: any, channel: any) {
         const taken = new Set<string>((message?.reactions ?? []).filter((r: any) => r.me).map((r: any) => keyOf(r.emoji)))
         const { emojis } = spell(word, taken)
         if (!emojis.length) return toast('Type a word first')
-        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })))
+        run('React with a word', emojis.map(name => () => react(channel.id, message.id, { id: null, name, animated: false })), true)
     }
     AlertActionCreators.openAlert(
         `reaction-words-${seq++}`,
@@ -334,8 +335,6 @@ function patchSheet(cleanup: (...f: any[]) => void) {
 let eventUtils: any
 let storage: any
 const DEFAULT_IGNORE = 1000
-/** 한 번에 다 보낼지 (아니면 순서대로) */
-const allAtOnce = (): boolean => storage?.cache?.allAtOnce === true
 const ignoreMs = (): number => {
     const v = Number(storage?.cache?.ignoreMs)
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_IGNORE
@@ -489,17 +488,6 @@ function SettingsPage() {
                         }}
                     />
                 </TableRowGroup>
-                <TableRowGroup title="Reaction speed">
-                    <TableSwitchRow
-                        label="All at once"
-                        subLabel={allAtOnce() ? 'Sends every reaction at the same time. Letters can end up out of order.' : 'Off: one after another, as fast as Discord answers. Letters stay in order.'}
-                        value={allAtOnce()}
-                        onValueChange={(v: boolean) => {
-                            storage?.set?.({ ...(storage?.cache ?? {}), allAtOnce: v }, true)
-                            if (storage?.cache) storage.cache.allAtOnce = v
-                        }}
-                    />
-                </TableRowGroup>
                 <TableRowGroup title="Delay">
                     <View style={{ padding: 12, gap: 8 }}>
                         <Text variant="text-md/semibold">{`Ignore reaction taps for ${ms} ms`}</Text>
@@ -538,7 +526,7 @@ function SettingsPage() {
 }
 
 export default plugin({
-    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, allAtOnce: false, fitSize: true, wordButton: true } },
+    jsonStorage: { load: true, default: { ignoreMs: DEFAULT_IGNORE, fitSize: true, wordButton: true } },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         ;(callNativeMethod as any)(`${NATIVE}.ping`, [])
