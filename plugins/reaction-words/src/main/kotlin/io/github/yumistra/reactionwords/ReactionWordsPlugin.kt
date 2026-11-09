@@ -332,6 +332,7 @@ val reactionWordsPlugin = plugin {
 
         /** 크기가 맞지 않고 늘어나 버리는 곳(포럼 글 머리 등)의 버튼. 이런 곳은 원래대로 둔다 */
         val skipped = WeakHashMap<View, Boolean>()
+        val stretchCount = WeakHashMap<View, Int>()
         val flexboxClass: Class<*>? = try {
             cl.loadClass(FLEXBOX)
         } catch (e: Throwable) {
@@ -485,11 +486,22 @@ val reactionWordsPlugin = plugin {
             // 감싼 칸까지 손대는 건 채팅 반응 줄에서만
             noFlex(v)
             if (!loose) noFlex(v.parent as? View)
-            if (loose && v.height > 0 && v.width > 0 && (v.height > size * 1.6f || v.width > width * 1.6f)) {
-                skipped[v] = true
-                note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} want=${width}x$size in ${parents(v)}")
-                restore(v)
-                return
+            // 줄이 우리가 정한 크기를 무시하고 늘릴 때만 포기한다. 우리가 전에 넣은 크기(Aa 가 있던 폭)를
+            // 늘어난 걸로 착각해 원래대로 두면, Aa 만 빠지고 긴 버튼이 남았다
+            val cl0 = v.layoutParams
+            val ourW = cl0 != null && cl0.width > 0
+            val ourH = cl0 != null && cl0.height > 0
+            if (loose && v.height > 0 && v.width > 0 && ((ourW && v.width > cl0!!.width * 1.6f) || (ourH && v.height > cl0!!.height * 1.6f))) {
+                val n = (stretchCount[v] ?: 0) + 1
+                stretchCount[v] = n
+                if (n >= 3) {
+                    skipped[v] = true
+                    note("stretched outside the chat row, left as is: w=${v.width} h=${v.height} set=${cl0!!.width}x${cl0.height} in ${parents(v)}")
+                    restore(v)
+                    return
+                }
+            } else {
+                stretchCount.remove(v)
             }
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
             val alpha = if (ready) 1f else 0f
