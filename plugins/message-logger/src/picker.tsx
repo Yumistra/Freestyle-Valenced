@@ -179,7 +179,15 @@ function ItemList({ items, list, empty }: { items: Item[]; list: List; empty?: s
     const { has, toggle } = useToggle(list)
     const query = q.trim().toLowerCase()
     const filtered = query ? items.filter(i => i.name.toLowerCase().includes(query) || (i.sub ?? '').toLowerCase().includes(query) || i.id === query) : items
-    const shown = filtered.slice(0, LIMIT)
+    // 전부 보여 주되, 한꺼번에 그리면 느려서 조금씩 이어 그린다
+    const [count, setCount] = useState(LIMIT)
+    useEffect(() => setCount(LIMIT), [query, items])
+    useEffect(() => {
+        if (count >= filtered.length) return
+        const t = setTimeout(() => setCount(c => c + LIMIT), 16)
+        return () => clearTimeout(t)
+    }, [count, filtered.length])
+    const shown = filtered.slice(0, count)
     return (
         <View style={{ gap: 12 }}>
             <TextInput value={q} placeholder="Search" onChange={setQ} isClearable />
@@ -194,7 +202,6 @@ function ItemList({ items, list, empty }: { items: Item[]; list: List; empty?: s
                     {query ? 'Nothing found' : (empty ?? 'Nothing here')}
                 </Text>
             )}
-            {filtered.length > LIMIT ? <Text variant="text-xs/normal" color="text-muted">{`Showing ${LIMIT} of ${filtered.length}, search to find more`}</Text> : null}
         </View>
     )
 }
