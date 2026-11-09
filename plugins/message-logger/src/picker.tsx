@@ -8,7 +8,7 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { Image, LayoutAnimation, ScrollView, View } from 'react-native'
+import { FlatList, Image, LayoutAnimation, View } from 'react-native'
 import { addTo, removeFrom } from './filters'
 import { onChange, settings } from './store'
 
@@ -37,7 +37,6 @@ interface Item {
 
 const S = () => Stores as any
 const DM = 'dm'
-const LIMIT = 80
 
 function tokenColor(names: string[], fallback: string) {
     try {
@@ -174,95 +173,86 @@ function Check({ on }: { on: boolean }) {
     return <Icon size="sm" color={tokenColor(['TEXT_BRAND', 'BRAND_500'], '#5865f2')} />
 }
 
-/** 검색 + 고르는 목록 */
-function ItemList({ items, list, empty, onQuery }: { items: Item[]; list: List; empty?: string; key?: string; onQuery?: (q: string) => void }) {
-    const { TableRowGroup, TableRow, TextInput, Text } = Design as any
-    const [q, setQ] = useState('')
-    const { has, toggle } = useToggle(list)
-    const query = q.trim().toLowerCase()
-    useEffect(() => onQuery?.(query), [query])
-    const filtered = query ? items.filter(i => i.name.toLowerCase().includes(query) || (i.sub ?? '').toLowerCase().includes(query) || i.id === query) : items
-    // 전부 보여 주되, 한꺼번에 그리면 느려서 조금씩 이어 그린다
-    const [count, setCount] = useState(LIMIT)
-    useEffect(() => setCount(LIMIT), [query, items])
-    useEffect(() => {
-        if (count >= filtered.length) return
-        const t = setTimeout(() => setCount(c => c + LIMIT), 16)
-        return () => clearTimeout(t)
-    }, [count, filtered.length])
-    const shown = filtered.slice(0, count)
-    return (
-        <View style={{ gap: 12 }}>
-            <TextInput value={q} placeholder="Search" onChange={setQ} isClearable />
-            {shown.length ? (
-                <TableRowGroup>
-                    {shown.map(item => (
-                        <TableRow key={item.id} icon={<Avatar item={item} />} label={item.name} subLabel={item.sub} trailing={<Check on={has(item.id)} />} onPress={() => toggle(item.id)} />
-                    ))}
-                </TableRowGroup>
-            ) : (
-                <Text variant="text-sm/normal" color="text-muted">
-                    {query ? 'Nothing found' : (empty ?? 'Nothing here')}
-                </Text>
-            )}
-        </View>
-    )
-}
-
+// ── 멤버 전부 받기 ──────────────────────────────────────────────
 /**
- * 서버 멤버: 디스코드는 처음에 일부(봇, 나, 멤버 목록에서 본 사람)만 받아 둔다.
- * 그래서 탭을 열거나 검색할 때 디스코드에 멤버를 더 달라고 요청하고, 받는 대로 목록을 다시 그린다.
+ * 디스코드 앱은 서버 멤버를 처음부터 다 받아 두지 않는다 (봇, 나, 최근에 본 사람 정도).
+ * 오른쪽 멤버 목록이 하는 것처럼, 한 채널의 멤버 목록을 100명씩 구간으로 차례로 구독해서 받는다.
+ * (아주 큰 서버는 디스코드가 오프라인 멤버를 멤버 목록에 넣지 않아서, 그 사람들은 검색으로 찾는다)
  */
+const find = (...props: string[]) => {
+    try {
+        return (lookupModule(withProps(...(props as [string])) as any) as any)?.[0]
+    } catch {}
+}
 let memberActions: any
+let subscriptions: any
 function requestMembers(gid: string, query: string) {
     try {
-        memberActions ??= (lookupModule(withProps('requestMembers', 'requestMembersById') as any) as any)?.[0]
+        memberActions ??= find('requestMembers', 'requestMembersById')
         memberActions?.requestMembers?.([gid], query, 100)
     } catch {}
 }
 
-function MembersTab({ gid, list }: { gid: string; list: List }) {
-    const [ver, setVer] = useState(0)
-    useEffect(() => {
-        const store = S().GuildMemberStore
-        const f = () => setVer(v => v + 1)
-        store?.addChangeListener?.(f)
-        requestMembers(gid, '')
-        return () => store?.removeChangeListener?.(f)
-    }, [gid])
-    const items = useMemo(() => members(gid), [gid, ver])
-    const timer = useState<{ t?: any }>({})[0]
-    return (
-        <ItemList
-            items={items}
-            list={list}
-            empty="Loading members…"
-            onQuery={q => {
-                clearTimeout(timer.t)
-                if (q) timer.t = setTimeout(() => requestMembers(gid, q), 350)
-            }}
-        />
-    )
+/** 멤버 목록에 쓸 채널: 시스템, 규칙 채널, 아니면 맨 위 글 채널 */
+function listChannel(gid: string): string | undefined {
+    try {
+        const g = S().GuildStore?.getGuild?.(gid)
+        const all = Object.values(S().ChannelStore?.getMutableGuildChannelsForGuild?.(gid) ?? {}) as any[]
+        const text = all.filter(c => c?.type === 0).sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        const ok = (id?: string) => (id && text.some(c => c.id === id) ? id : undefined)
+        return ok(g?.systemChannelId) ?? ok(g?.rulesChannelId) ?? text[0]?.id
+    } catch {}
 }
 
-/** 이미지의 Tabs (Design.Tabs + useSegmentedControlState) 로 나눈 화면 */
-function TabbedLists({ tabs, list }: { tabs: Array<{ id: string; label: string; items: () => Item[]; empty?: string; render?: () => any }>; list: List }) {
-    const { Tabs, useSegmentedControlState } = Design as any
-    const [index, setIndex] = useState(0)
-    const items = useMemo(() => tabs.map(t => ({ id: t.id, label: t.label })), [tabs.map(t => t.id).join()])
-    const state = useSegmentedControlState?.({ items, pageWidth: 0, defaultIndex: 0, onSetActiveIndex: setIndex, onPageChange: setIndex })
-    const cur = tabs[index] ?? tabs[0]
-    const data = useMemo(() => cur.items(), [cur.id])
-    return (
-        <View style={{ gap: 12 }}>
-            {Tabs && state ? <Tabs state={state} grow /> : null}
-            {cur.render ? cur.render() : <ItemList key={cur.id} items={data} list={list} empty={cur.empty} />}
-        </View>
-    )
+function memberCount(gid: string): number {
+    try {
+        const n = S().GuildMemberCountStore?.getMemberCount?.(gid) ?? S().GuildStore?.getGuild?.(gid)?.memberCount
+        if (typeof n === 'number' && n > 0) return n
+    } catch {}
+    return 1000
+}
+
+/** 구간을 차례로 구독한다. 멈추는 함수를 돌려준다 */
+function loadAllMembers(gid: string, onStep: (done: number, total: number) => void): () => void {
+    let stopped = false
+    requestMembers(gid, '')
+    subscriptions ??= find('subscribeChannel', 'subscribeMembers') ?? find('subscribeChannel')
+    const cid = listChannel(gid)
+    const total = memberCount(gid)
+    if (!cid || typeof subscriptions?.subscribeChannel !== 'function') {
+        onStep(total, total)
+        return () => {}
+    }
+    let i = 1
+    const step = () => {
+        if (stopped) return
+        // 디스코드는 한 번에 구간 3개까지: 처음 100명 + 다음 두 구간
+        const ranges: number[][] = [[0, 99]]
+        for (const k of [i, i + 1]) if (k * 100 < total) ranges.push([k * 100, k * 100 + 99])
+        try {
+            subscriptions.subscribeChannel(gid, cid, ranges)
+        } catch {}
+        onStep(Math.min(total, (i + 2) * 100), total)
+        i += 2
+        if (i * 100 < total) setTimeout(step, 450)
+    }
+    step()
+    return () => {
+        stopped = true
+    }
+}
+
+// ── 화면 ────────────────────────────────────────────────────────
+
+interface TabDef {
+    id: string
+    label: string
+    items: () => Item[]
+    empty: string
 }
 
 function PickerScreen({ navigation, route }: any) {
-    const { TableRowGroup, TableRow, TableSwitchRow } = Design as any
+    const { TableRow, TableSwitchRow, TextInput, Text, Tabs, useSegmentedControlState } = Design as any
     const params: Params = route?.params ?? { list: 'block' }
     const { list, place } = params
     const { has, toggle } = useToggle(list)
@@ -272,52 +262,119 @@ function PickerScreen({ navigation, route }: any) {
         navigation?.setOptions?.({ title: place === DM ? 'Direct messages' : guild ? guild.name : `Add to ${listName}` })
     }, [])
     const open = (p: string) => navigation?.push?.(PICKER_ROUTE, { list, place: p })
-    let body: any
-    if (!place) {
-        // 첫 화면: DM + 서버 목록. 누르면 안으로
-        const all = servers()
-        body = (
-            <>
-                <TableRowGroup>
-                    <TableRow icon={<TableRowAssetIcon name="ChatIcon" />} label="Direct messages" subLabel="Friends and DMs" arrow onPress={() => open(DM)} />
-                </TableRowGroup>
-                <TableRowGroup title="Servers">
-                    {all.map(g => (
-                        <TableRow key={g.id} icon={<Avatar item={g} />} label={g.name} trailing={has(g.id) ? <Check on /> : undefined} arrow onPress={() => open(g.id)} />
-                    ))}
-                </TableRowGroup>
-            </>
-        )
-    } else if (place === DM) {
-        body = (
-            <TabbedLists
-                list={list}
-                tabs={[
-                    { id: 'friends', label: 'Friends', items: friends, empty: 'No friends' },
-                    { id: 'dms', label: 'DMs', items: dms, empty: 'No DMs' },
-                ]}
-            />
-        )
-    } else {
-        body = (
-            <>
-                <TableRowGroup>
-                    <TableSwitchRow icon={<Avatar item={{ id: place, name: '', image: guildIcon(guild), icon: 'ServerIcon' }} />} label="Whole server" subLabel={`Every channel and member here goes in the ${listName}`} value={has(place)} onValueChange={() => toggle(place)} />
-                </TableRowGroup>
-                <TabbedLists
-                    list={list}
-                    tabs={[
-                        { id: 'channels', label: 'Channels', items: () => channels(place), empty: 'No channels' },
-                        { id: 'members', label: 'Members', items: () => [], render: () => <MembersTab gid={place} list={list} /> },
-                    ]}
-                />
-            </>
-        )
-    }
+
+    const tabs: TabDef[] = useMemo(() => {
+        if (place === DM)
+            return [
+                { id: 'friends', label: 'Friends', items: friends, empty: 'No friends' },
+                { id: 'dms', label: 'DMs', items: dms, empty: 'No DMs' },
+            ]
+        if (place)
+            return [
+                { id: 'channels', label: 'Channels', items: () => channels(place), empty: 'No channels' },
+                { id: 'members', label: 'Members', items: () => members(place), empty: 'Loading members…' },
+            ]
+        return []
+    }, [place])
+    const [tab, setTab] = useState(0)
+    const tabItems = useMemo(() => tabs.map(t => ({ id: t.id, label: t.label })), [tabs])
+    const tabState = tabs.length ? useSegmentedControlState?.({ items: tabItems, pageWidth: 0, defaultIndex: 0, onSetActiveIndex: setTab, onPageChange: setTab }) : undefined
+    const cur = tabs[tab]
+    const [q, setQ] = useState('')
+    const query = q.trim().toLowerCase()
+
+    // 디스코드 쪽이 바뀌면(멤버를 받으면 등) 다시 그린다. 너무 자주 그리지 않게 묶는다
+    const [ver, setVer] = useState(0)
+    useEffect(() => {
+        let t: any
+        const bump = () => {
+            if (t) return
+            t = setTimeout(() => {
+                t = undefined
+                setVer(v => v + 1)
+            }, 250)
+        }
+        const stores = [S().GuildMemberStore, S().RelationshipStore, S().ChannelStore].filter(Boolean)
+        for (const st of stores) st.addChangeListener?.(bump)
+        return () => {
+            clearTimeout(t)
+            for (const st of stores) st.removeChangeListener?.(bump)
+        }
+    }, [])
+
+    // 멤버 탭: 전부 받기
+    const [progress, setProgress] = useState<[number, number] | undefined>()
+    const isMembers = !!guild && cur?.id === 'members'
+    useEffect(() => {
+        if (!isMembers || !place) return
+        return loadAllMembers(place, (d, t) => setProgress([d, t]))
+    }, [isMembers, place])
+    // 검색하면 그 이름으로도 찾아 달라고 한다
+    useEffect(() => {
+        if (!isMembers || !place || !query) return
+        const t = setTimeout(() => requestMembers(place, query), 350)
+        return () => clearTimeout(t)
+    }, [isMembers, place, query])
+
+    type Row = Item & { open?: string }
+    const all: Row[] = useMemo(() => {
+        if (!place) return [{ id: DM, name: 'Direct messages', sub: 'Friends and DMs', icon: 'ChatIcon', open: DM }, ...servers().map(g => ({ ...g, open: g.id }))]
+        return cur ? cur.items() : []
+    }, [place, cur?.id, ver])
+    const shown = useMemo(() => (query ? all.filter(i => i.name.toLowerCase().includes(query) || (i.sub ?? '').toLowerCase().includes(query) || i.id === query) : all), [all, query])
+
+    const header = (
+        <View style={{ gap: 12, marginBottom: 12 }}>
+            {guild ? (
+                <View style={{ borderRadius: 16, overflow: 'hidden' }}>
+                    <TableSwitchRow
+                        icon={<Avatar item={{ id: place!, name: '', image: guildIcon(guild), icon: 'ServerIcon' }} />}
+                        label="Whole server"
+                        subLabel={`Every channel and member here goes in the ${listName}`}
+                        value={has(place!)}
+                        onValueChange={() => toggle(place!)}
+                        start
+                        end
+                    />
+                </View>
+            ) : null}
+            {Tabs && tabState ? <Tabs state={tabState} grow /> : null}
+            <TextInput value={q} placeholder="Search" onChange={setQ} isClearable />
+            {isMembers && progress && progress[0] < progress[1] ? <Text variant="text-xs/normal" color="text-muted">{`Loading members, ${shown.length} so far`}</Text> : null}
+        </View>
+    )
+
     return (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }} keyboardShouldPersistTaps="handled">
-            {body}
-        </ScrollView>
+        <FlatList
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
+            data={shown}
+            keyExtractor={(i: Row) => i.id}
+            ListHeaderComponent={header}
+            ListEmptyComponent={
+                <Text variant="text-sm/normal" color="text-muted">
+                    {query ? 'Nothing found' : (cur?.empty ?? 'Nothing here')}
+                </Text>
+            }
+            renderItem={({ item, index }: { item: Row; index: number }) => (
+                <TableRow
+                    icon={<Avatar item={item} />}
+                    label={item.name}
+                    subLabel={item.sub}
+                    arrow={!!item.open}
+                    trailing={<Check on={has(item.id)} />}
+                    onPress={() => (item.open ? open(item.open) : toggle(item.id))}
+                    start={index === 0}
+                    end={index === shown.length - 1}
+                />
+            )}
+            extraData={[settings()[list]?.length, ver]}
+            initialNumToRender={20}
+            maxToRenderPerBatch={30}
+            windowSize={11}
+            removeClippedSubviews
+            keyboardShouldPersistTaps="handled"
+        />
     )
 }
 
