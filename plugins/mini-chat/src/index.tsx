@@ -8,7 +8,7 @@ import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleW
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { Component, createElement, useEffect, useRef, useState } from 'react'
+import { Component, createElement, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Dimensions, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.12'
+const VERSION = '1.0.13'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -637,7 +637,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
                     <NoInsets kb={kb}>
-                        <ChannelView win={win} />
+                        <ChannelView id={win.id} channelId={win.channelId} ready={!!Screen} />
                     </NoInsets>
                 </Boundary>
             </View>
@@ -674,9 +674,18 @@ function NoInsets({ children, kb }: { children: any; kb: number }) {
     return Ctx?.Provider ? <Ctx.Provider value={ZERO}>{inner}</Ctx.Provider> : inner
 }
 
-function ChannelView({ win }: { win: Win }) {
+/**
+ * 창 안의 채널 화면. 창을 옮기거나 앞으로 올릴 때마다 채널 화면을 다시 그리면 느려서,
+ * 채널이 바뀔 때만 다시 그린다 (props 도 그때만 새로 만든다)
+ */
+const ChannelView = memo(function ChannelView({ id, channelId, ready }: { id: number; channelId: string; ready: boolean }) {
+    const props = useMemo(() => (ready ? makeProps({ id, channelId } as Win) : null), [id, channelId, ready])
+    return <ChannelBody id={id} channelId={channelId} props={props} />
+})
+
+function ChannelBody({ id, channelId, props }: { id: number; channelId: string; props: any }) {
     const { Text } = D()
-    if (!Screen) {
+    if (!Screen || !props) {
         loadScreen('window')
         return (
             <View style={{ flex: 1, padding: 12, paddingTop: 12 + (StatusBar.currentHeight ?? 0) }}>
@@ -686,7 +695,7 @@ function ChannelView({ win }: { win: Win }) {
             </View>
         )
     }
-    return createElement(Screen, { key: `mini-${win.id}-${win.channelId}`, ...makeProps(win) })
+    return createElement(Screen, { key: `mini-${id}-${channelId}`, ...props })
 }
 
 function Windows({ host }: { host: Host }) {
