@@ -5,7 +5,7 @@
 	"description": "Spell words with letter reactions, and long press the add reaction button to react with every emoji on a message.",
 	"author": "Yumistra",
 	"icon": "ReactionIcon",
-	"version": "1.0.50",
+	"version": "1.0.51",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

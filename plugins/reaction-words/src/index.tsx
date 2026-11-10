@@ -436,7 +436,7 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 
 // ── 로그 ────────────────────────────────────────────────────────
 
-const VERSION = '1.0.50'
+const VERSION = '1.0.51'
 /** 최근 일 (로그 복사용) */
 const jlog: string[] = []
 function note(msg: string) {
@@ -484,6 +484,16 @@ async function buildLog(): Promise<string> {
     lines.push('')
     lines.push('JS recent:')
     lines.push(jlog.length ? jlog.join('\n') : '(nothing yet)')
+    // 반응 추가 버튼마다 자세한 상태와 지금까지 일어난 일
+    try {
+        const dump = await (callNativeMethod as any)(`${NATIVE}.dump`, [])
+        lines.push('')
+        lines.push('Buttons (detailed):')
+        lines.push(String(dump ?? '(empty)'))
+    } catch (e: any) {
+        lines.push('')
+        lines.push(`Buttons (detailed): not reachable (${String(e?.message ?? e).slice(0, 300)})`)
+    }
     return lines.join('\n')
 }
 

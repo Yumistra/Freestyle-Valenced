@@ -112,8 +112,77 @@ val reactionWordsPlugin = plugin {
             val t = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
             synchronized(nlog) {
                 nlog.addLast("$t $msg")
-                while (nlog.size > 40) nlog.removeFirst()
+                while (nlog.size > 120) nlog.removeFirst()
             }
+        }
+
+        // ── 자세한 로그: 버튼마다 일어난 일을 따로 쌓는다 (설정의 Copy log 로 복사) ──
+        val t0 = SystemClock.uptimeMillis()
+        val seenButtons = WeakHashMap<View, Boolean>()
+        val traces = WeakHashMap<View, ArrayList<String>>()
+        fun bid(v: View) = Integer.toHexString(System.identityHashCode(v))
+        val repRe = Regex(" \\(x(\\d+)\\)$")
+        fun trace(v: View, msg: String) {
+            seenButtons[v] = true
+            val q = traces.getOrPut(v) { ArrayList() }
+            val ms = SystemClock.uptimeMillis() - t0
+            synchronized(q) {
+                // 같은 일이 이어지면 횟수만 늘린다
+                val last = q.lastOrNull()
+                if (last != null) {
+                    val body = last.substringAfter(' ').replace(repRe, "")
+                    if (body == msg) {
+                        val n = repRe.find(last)?.groupValues?.get(1)?.toInt() ?: 1
+                        q[q.size - 1] = "+$ms $msg (x${n + 1})"
+                        return
+                    }
+                }
+                q.add("+$ms $msg")
+                // 처음 12줄(처음 붙을 때)은 남기고 중간을 버린다
+                while (q.size > 90) q.removeAt(12)
+            }
+        }
+        fun specStr(s: Int): String {
+            val m = when (View.MeasureSpec.getMode(s)) {
+                View.MeasureSpec.EXACTLY -> "E"
+                View.MeasureSpec.AT_MOST -> "A"
+                else -> "U"
+            }
+            return "$m${View.MeasureSpec.getSize(s)}"
+        }
+        fun lpStr(lp: android.view.ViewGroup.LayoutParams?): String {
+            if (lp == null) return "lp=null"
+            fun d(x: Int) = when (x) {
+                -1 -> "MATCH"
+                -2 -> "WRAP"
+                else -> x.toString()
+            }
+            val sb = StringBuilder("lp=${lp.javaClass.simpleName}(${d(lp.width)}x${d(lp.height)}")
+            (lp as? android.view.ViewGroup.MarginLayoutParams)?.let { sb.append(" m=${it.leftMargin},${it.topMargin},${it.rightMargin},${it.bottomMargin}") }
+            (lp as? android.widget.LinearLayout.LayoutParams)?.let { if (it.weight != 0f) sb.append(" weight=${it.weight}") }
+            for (f in listOf("FlexGrow", "FlexShrink", "FlexBasisPercent", "AlignSelf")) {
+                try {
+                    val x = lp.javaClass.getMethod("get$f").invoke(lp)
+                    sb.append(" $f=$x")
+                } catch (e: Throwable) {
+                }
+            }
+            sb.append(")")
+            return sb.toString()
+        }
+        fun viewStr(c: View): String {
+            val a = IntArray(2)
+            try {
+                c.getLocationOnScreen(a)
+            } catch (e: Throwable) {
+            }
+            val vis = when (c.visibility) {
+                View.VISIBLE -> ""
+                View.INVISIBLE -> " INVISIBLE"
+                else -> " GONE"
+            }
+            val kids = (c as? android.view.ViewGroup)?.let { " kids=${it.childCount}" } ?: ""
+            return "${c.javaClass.name}@${bid(c)} ${c.width}x${c.height} at(${a[0]},${a[1]}) frame(${c.left},${c.top},${c.right},${c.bottom}) measured=${c.measuredWidth}x${c.measuredHeight}$vis$kids ${lpStr(c.layoutParams)}"
         }
 
         val addViewClass: Class<*>? = try {
@@ -408,7 +477,9 @@ val reactionWordsPlugin = plugin {
             (root as? android.view.ViewGroup)?.let { scan(it, 0) }
             // 화면 오른쪽 끝도 넘지 않게
             val screenRight = v.resources.displayMetrics.widthPixels
-            return need <= minOf(limit, screenRight)
+            val ok = need <= minOf(limit, screenRight)
+            trace(v, "room for Aa: $ok (left=$left need=$need nextOnRight=${if (limit == Int.MAX_VALUE) "none" else limit} screen=$screenRight)")
+            return ok
         }
 
         fun parents(v: View): String {
@@ -422,6 +493,7 @@ val reactionWordsPlugin = plugin {
         }
 
         fun restore(v: android.widget.LinearLayout) {
+            trace(v, "restore: target=${targetSize[v]} now=${v.width}x${v.height}")
             if (targetSize.remove(v) != null) v.requestLayout()
             (wordButtons[v] as? View)?.let { v.removeView(it) }
             (v.background as? Twin)?.let { v.background = it.orig }
@@ -451,11 +523,13 @@ val reactionWordsPlugin = plugin {
             // 채팅 반응 줄이 아닌 곳(포럼 글 머리)은 줄이 넘어가지 않는다: 오른쪽 버튼(팔로우 등)까지 자리가 있을 때만 Aa
             val wantWord = showWord && (!loose || roomForAa(v))
             if (skipped[v] == true) {
+                trace(v, "ensure: skipped earlier, restore")
                 restore(v)
                 return
             }
             val sib = firstSibling(v)
             if (loose && (sib == null || sib.height <= 0)) {
+                trace(v, "ensure: loose and no reaction next to it (sib=${sib?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }}), restore, now ${v.width}x${v.height}")
                 restore(v)
                 return
             }
@@ -464,6 +538,7 @@ val reactionWordsPlugin = plugin {
             val cur = v.background
             val orig = if (cur is Twin) cur.orig else cur
             if (!fitSize && !wantWord) {
+                trace(v, "ensure: fit and Aa both off")
                 if (targetSize.remove(v) != null) v.requestLayout()
                 aa?.let { v.removeView(it) }
                 if (cur is Twin) v.background = cur.orig
@@ -474,7 +549,10 @@ val reactionWordsPlugin = plugin {
             } else if (knownSize > 0) {
                 knownSize
             } else {
-                v.height.takeIf { it > 0 } ?: return
+                v.height.takeIf { it > 0 } ?: run {
+                    trace(v, "ensure: no size yet (no sib, no known size, h=0)")
+                    return
+                }
             }
             var gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
             if (sib != null) {
@@ -505,6 +583,7 @@ val reactionWordsPlugin = plugin {
                 stretchCount.remove(v)
             }
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
+            trace(v, "ensure: ${if (loose) "LOOSE" else "chat"} want=${width}x$size now=${v.width}x${v.height} ready=$ready word=$wantWord gap=$gap sib=${sib?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }} alpha=${v.alpha} ty=${v.translationY} ${lpStr(v.layoutParams)}")
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
             // 버튼을 감싼 칸이 폭을 고정해 두면 늘어나지 못한다: 내용만큼으로
@@ -637,13 +716,15 @@ val reactionWordsPlugin = plugin {
                     val n = (tries[v] ?: 0) + 1
                     tries[v] = n
                     if (n <= 6) {
+                        trace(v, "retry $n: still hidden, now=${v.width}x${v.height} target=${targetSize[v]}")
                         v.requestLayout()
                         v.postDelayed({ schedule(v) }, 16L)
                     } else {
                         // 끝내 안 맞으면 보여는 준다 (배경은 Twin 이 알아서 원래 모양으로 그린다)
                         v.alpha = 1f
                         lastError = "button size did not apply (w=${v.width}, h=${v.height})"
-                        note(lastError)
+                        note("$lastError [${bid(v)}]")
+                        trace(v, "gave up after retries: now=${v.width}x${v.height} target=${targetSize[v]} ${lpStr(v.layoutParams)} parent=${(v.parent as? View)?.let { viewStr(it) }}")
                     }
                 } else {
                     tries.remove(v)
@@ -774,10 +855,12 @@ val reactionWordsPlugin = plugin {
                             override fun afterHookedMethod(param: MethodHookParam) {
                                 val v = param.thisObject as View
                                 if (!addViewClass.isInstance(v)) return
+                                trace(v, "attach: in ${parents(v)}")
                                 try {
                                     ensure(v)
                                 } catch (e: Throwable) {
                                     lastError = "attach: $e"
+                                    trace(v, "attach error: $e")
                                 }
                             }
                         },
@@ -798,9 +881,20 @@ val reactionWordsPlugin = plugin {
                             override fun beforeHookedMethod(param: MethodHookParam) {
                                 val v = param.thisObject as View
                                 if (!addViewClass.isInstance(v)) return
-                                val t = targetSize[v] ?: return
-                                param.args[0] = View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY)
-                                param.args[1] = View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY)
+                                val inW = param.args[0] as Int
+                                val inH = param.args[1] as Int
+                                val t = targetSize[v]
+                                if (t != null) {
+                                    param.args[0] = View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY)
+                                    param.args[1] = View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY)
+                                }
+                                param.setObjectExtra("in", "${specStr(inW)} x ${specStr(inH)}")
+                            }
+
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                trace(v, "measure: parent asked ${param.getObjectExtra("in")}, target=${targetSize[v]}, result=${v.measuredWidth}x${v.measuredHeight}")
                             }
                         },
                     ),
@@ -822,12 +916,20 @@ val reactionWordsPlugin = plugin {
                             override fun beforeHookedMethod(param: MethodHookParam) {
                                 val v = param.thisObject as View
                                 if (!addViewClass.isInstance(v)) return
-                                val t = targetSize[v] ?: return
                                 val l = param.args[0] as Int
                                 val top = param.args[1] as Int
                                 val r = param.args[2] as Int
                                 val b = param.args[3] as Int
-                                if (r - l == t.first && b - top == t.second) return
+                                val t = targetSize[v]
+                                if (t == null) {
+                                    trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), no target")
+                                    return
+                                }
+                                if (r - l == t.first && b - top == t.second) {
+                                    trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), matches target")
+                                    return
+                                }
+                                trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), clamped to ${t.first}x${t.second}")
                                 val nt = top + ((b - top) - t.second) / 2
                                 param.args[1] = nt
                                 param.args[2] = l + t.first
@@ -893,6 +995,44 @@ val reactionWordsPlugin = plugin {
             true
         }
         registerNativeMethod("${manifest.id}.ping") { "pong" }
+        /** 지금 알고 있는 반응 추가 버튼 전부의 자세한 상태 (화면에 붙은 것부터) */
+        registerNativeMethod("${manifest.id}.dump") {
+            val sb = StringBuilder()
+            val list = seenButtons.keys.toList().sortedByDescending { it.isAttachedToWindow }
+            sb.append("buttons known: ${list.size}, attached: ${list.count { it.isAttachedToWindow }}\n")
+            for ((n, v) in list.withIndex()) {
+                if (n >= 16) {
+                    sb.append("... ${list.size - n} more\n")
+                    break
+                }
+                try {
+                    sb.append("\n=== button ${n + 1} [${bid(v)}] ${if (v.isAttachedToWindow) "ON SCREEN" else "detached"} ${if (inChatRow(v)) "chat row" else "LOOSE (not chat row)"} ===\n")
+                    sb.append("self: ${viewStr(v)}\n")
+                    sb.append("  alpha=${v.alpha} ty=${v.translationY} pad=${v.paddingLeft},${v.paddingTop},${v.paddingRight},${v.paddingBottom} gravity=${(v as? android.widget.LinearLayout)?.gravity} bg=${v.background?.javaClass?.simpleName} target=${targetSize[v]} skipped=${skipped[v] == true} orig=${origLook[v]?.let { "${it.w}x${it.h}" }}\n")
+                    (v as? android.view.ViewGroup)?.let { g -> for (i in 0 until g.childCount) sb.append("  child $i: ${viewStr(g.getChildAt(i))}\n") }
+                    var p: Any? = v.parent
+                    var d = 1
+                    var self: View = v
+                    while (p is View && d <= 5) {
+                        sb.append("parent $d: ${viewStr(p)}\n")
+                        if (d <= 2 && p is android.view.ViewGroup) {
+                            for (i in 0 until minOf(p.childCount, 12)) {
+                                val c = p.getChildAt(i)
+                                sb.append("    ${if (c === self) "*" else " "}[$i] ${viewStr(c)}\n")
+                            }
+                        }
+                        self = p
+                        p = p.parent
+                        d++
+                    }
+                    sb.append("trace:\n")
+                    traces[v]?.let { q -> synchronized(q) { for (line in q) sb.append("  $line\n") } }
+                } catch (e: Throwable) {
+                    sb.append("dump error: $e\n")
+                }
+            }
+            sb.toString()
+        }
         registerNativeMethod("${manifest.id}.status") {
             mapOf(
                 "rowHook" to rowHook,
