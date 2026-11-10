@@ -17,7 +17,7 @@ import { Dimensions, PanResponder, Platform, Pressable, ScrollView, Text as RNTe
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -510,6 +510,15 @@ function patchToastHost(cleanup: (...f: any[]) => void) {
 }
 
 // ── 채널 꾹 누르기 창에 "Open in Mini Chat" ─────────────────────
+/** 아이콘 하나 (없는 이름이면 오류 대신 undefined) */
+function icon(name: string): any {
+    try {
+        return lookupGeneratedIconComponent(name as any) ?? undefined
+    } catch {
+        return undefined
+    }
+}
+
 const nameOf = (t: any): string => t?.name || t?.displayName || t?.type?.name || t?.type?.displayName || t?.render?.name || ''
 function isGroup(n: any) {
     if (!n || typeof n !== 'object' || Array.isArray(n)) return false
@@ -536,7 +545,7 @@ function addRow(node: any, channel: any, close: () => void, depth = 0): any {
         if (!ActionSheetRow?.Group) return node
         const kids = Array.isArray(props.children) ? props.children : [props.children]
         if (kids.some((k: any) => k?.key === 'mini-chat')) return node
-        const Icon: any = lookupGeneratedIconComponent('WindowLaunchIcon' as any) ?? lookupGeneratedIconComponent('ChatIcon' as any)
+        const Icon: any = icon('WindowLaunchIcon') ?? icon('ChatIcon') ?? icon('ChatSmileIcon')
         status.sheetRows++
         const group = (
             <ActionSheetRow.Group key="mini-chat" hasIcons={!!Icon}>
@@ -567,8 +576,11 @@ function wrapInner(type: any, channel: any, close: () => void) {
         w = function MiniChatSheet(props: any) {
             const out = render(props)
             try {
-                return addRow(out, props?.channel ?? channel, typeof props?.onClose === 'function' ? () => props.onClose() : close)
-            } catch {
+                const r = addRow(out, props?.channel ?? channel, typeof props?.onClose === 'function' ? () => props.onClose() : close)
+                if (r === out) note('sheet: inner had no row group')
+                return r
+            } catch (e: any) {
+                note(`sheet inner error: ${e?.message ?? e}`)
                 return out
             }
         }
@@ -597,7 +609,10 @@ function patchSheet(cleanup: (...f: any[]) => void) {
                 const w = wrapInner(out.type, channel, close)
                 if (w) return { ...out, type: w }
             }
-        } catch {}
+            note(`sheet: no place for the row (${describe(out)})`)
+        } catch (e: any) {
+            note(`sheet error: ${e?.message ?? e}`)
+        }
         return out
     }
     const patchMod = (mod: any) => {
@@ -620,7 +635,10 @@ function patchSheet(cleanup: (...f: any[]) => void) {
             instead(ActionSheetActionCreators as any, 'openLazy', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                 try {
                     const [sheet, key] = args
-                    if (typeof key === 'string' && /ChannelLongPress/i.test(key) && typeof sheet?.then === 'function') args[0] = sheet.then((m: any) => patchMod(m))
+                    if (typeof key === 'string' && /ChannelLongPress/i.test(key) && typeof sheet?.then === 'function') {
+                        note(`sheet opened: ${key}`)
+                        args[0] = sheet.then((m: any) => patchMod(m))
+                    }
                 } catch {}
                 return orig.apply(this, args)
             }),
