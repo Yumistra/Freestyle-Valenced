@@ -451,7 +451,8 @@ val reactionWordsPlugin = plugin {
                 val c = g.getChildAt(i)
                 if (c === v || c.visibility != View.VISIBLE || c.width <= 0) continue
                 val overlapsRow = c.top < bottom && c.bottom > top
-                if (overlapsRow && c.left >= left + 1) limit = minOf(limit, c.left)
+                // 오른쪽에 있거나 버튼 위를 덮는 칸(팔로우 버튼 등)
+                if (overlapsRow && c.right > left + 1) limit = minOf(limit, maxOf(c.left, left))
             }
             val ok = need <= limit
             trace(v, "room for Aa: $ok (left=$left need=$need limit=$limit)")
@@ -757,6 +758,19 @@ val reactionWordsPlugin = plugin {
                     tries[v] = n
                     if (n <= 6) {
                         trace(v, "retry $n: still hidden, now=${v.width}x${v.height} target=${targetSize[v]}")
+                        // 줄이 다시 배치해 주길 기다리지 않고 버튼 크기를 직접 맞춘다 (포럼 글 머리 줄은 다시 배치를 안 해 줘서 늘어난 채 남았다)
+                        val t = targetSize[v]
+                        if (t != null && v.isAttachedToWindow && (v.width != t.first || v.height != t.second)) {
+                            try {
+                                v.measure(View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY))
+                                val top = v.top + (v.height - t.second) / 2
+                                v.layout(v.left, top, v.left + t.first, top + t.second)
+                                trace(v, "forced size: now=${v.width}x${v.height}")
+                                ensure(v)
+                            } catch (e: Throwable) {
+                                trace(v, "forced size failed: $e")
+                            }
+                        }
                         v.requestLayout()
                         v.postDelayed({ schedule(v) }, 16L)
                     } else {
