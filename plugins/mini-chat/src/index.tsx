@@ -9,7 +9,7 @@ import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Component, createElement, memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Dimensions, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
+import { Dimensions, Image, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 
@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.14'
+const VERSION = '1.1.0'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -83,6 +83,13 @@ interface Win {
     h: number
     minimized: boolean
     docked: boolean
+    /** 화면 가득 */
+    maximized?: boolean
+    /** 반투명 */
+    transparent?: boolean
+    /** 방울 위치 (작게 줄였을 때) */
+    bx?: number
+    by?: number
     /** 겹침 순서 (클수록 앞) */
     z: number
 }
@@ -512,127 +519,192 @@ function insetsContext() {
 }
 const ZERO = { top: 0, bottom: 0, left: 0, right: 0 }
 
+// ── 삼성 팝업 모양 ──────────────────────────────────────────────
+const HANDLE_H = 22
+const BUBBLE = 54
+const OPACITY_ICON = ['EyeIcon', 'EyeSlashIcon']
+const SPLIT_ICON = ['WindowMaximizeIcon', 'ScreenIcon', 'ScreenArrowIcon']
+const MAX_ICON = ['FullscreenEnterIcon', 'MaximizeIcon', 'ArrowsOutwardIcon']
+const RESTORE_ICON = ['FullscreenExitIcon', 'MinimizeIcon', 'WindowLaunchIcon']
+
+/** 작게 줄였을 때 방울에 넣을 그림 (서버 아이콘 또는 DM 상대 프로필 사진) */
+function bubbleImage(channelId: string): string | undefined {
+    try {
+        const ch = S().ChannelStore?.getChannel?.(channelId)
+        if (!ch) return
+        if (ch.guild_id) {
+            const g = S().GuildStore?.getGuild?.(ch.guild_id)
+            if (g?.icon) return `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png?size=96`
+            return
+        }
+        if (ch.icon) return `https://cdn.discordapp.com/channel-icons/${ch.id}/${ch.icon}.png?size=96`
+        const rid = ch.recipients?.[0] ?? ch.rawRecipients?.[0]?.id
+        const u = rid ? S().UserStore?.getUser?.(rid) : undefined
+        if (u?.avatar) return `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=96`
+    } catch {}
+}
+
 function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex: number; dockCount: number; kb: number; front: boolean }) {
     const { width, height } = Dimensions.get('window')
-    const [drag, setDrag] = useState<{ dx: number; dy: number; dw: number; dh: number }>({ dx: 0, dy: 0, dw: 0, dh: 0 })
+    const [drag, setDrag] = useState<{ dx: number; dy: number; dw: number; dh: number; left?: boolean }>({ dx: 0, dy: 0, dw: 0, dh: 0 })
+    const [bar, setBar] = useState(false)
+    const barTimer = useRef<any>()
     const winRef = useRef(win)
     winRef.current = win
+    useEffect(() => () => clearTimeout(barTimer.current), [])
+    const showBar = (on: boolean) => {
+        clearTimeout(barTimer.current)
+        setBar(on)
+        // 삼성처럼 잠시 뒤 저절로 숨긴다
+        if (on) barTimer.current = setTimeout(() => setBar(false), 4000)
+    }
+    const barRef = useRef(showBar)
+    barRef.current = showBar
+    const barOn = useRef(bar)
+    barOn.current = bar
 
+    // 위 손잡이: 끌면 옮기고, 톡 누르면 버튼 줄을 연다
     const move = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) + Math.abs(g.dy) > 4,
+            // 방울 안의 누르기 버튼이 터치를 먼저 가져가도, 끌기 시작하면 가져온다
+            onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) + Math.abs(g.dy) > 6,
             onPanResponderGrant: () => bringToFront(winRef.current.id),
-            onPanResponderMove: (_e, g) => setDrag({ dx: g.dx, dy: g.dy, dw: 0, dh: 0 }),
+            onPanResponderMove: (_e, g) => {
+                const w = winRef.current
+                if (!w.minimized && (w.docked || w.maximized)) return
+                setDrag({ dx: g.dx, dy: g.dy, dw: 0, dh: 0 })
+            },
             onPanResponderRelease: (_e, g) => {
                 const w = winRef.current
-                const { width: W, height: H } = Dimensions.get('window')
                 setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 })
+                if (Math.abs(g.dx) + Math.abs(g.dy) < 6) {
+                    barRef.current(!barOn.current)
+                    return
+                }
+                const { width: W, height: H } = Dimensions.get('window')
+                if (w.minimized) {
+                    // 방울은 가까운 화면 가장자리에 붙인다
+                    const cx = (w.bx ?? W - BUBBLE - 6) + g.dx + BUBBLE / 2
+                    setWin(w.id, { bx: cx < W / 2 ? 6 : W - BUBBLE - 6, by: Math.min(Math.max((w.by ?? w.y) + g.dy, StatusBar.currentHeight ?? 0), H - BUBBLE - 8) })
+                    return
+                }
+                if (w.docked || w.maximized) return
                 setWin(w.id, {
                     x: Math.min(Math.max(w.x + g.dx, -w.w + 80), W - 80),
-                    y: Math.min(Math.max(w.y + g.dy, 0), H - TITLE_H),
+                    y: Math.min(Math.max(w.y + g.dy, StatusBar.currentHeight ?? 0), H - HANDLE_H - 40),
                 })
             },
             onPanResponderTerminate: () => setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 }),
         }),
     ).current
 
-    const resize = useRef(
+    // 아래 양쪽 모서리: 끌어서 크기 바꾸기
+    const makeResize = (left: boolean) =>
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onMoveShouldSetPanResponder: () => true,
             onPanResponderGrant: () => bringToFront(winRef.current.id),
-            onPanResponderMove: (_e, g) => setDrag({ dx: 0, dy: 0, dw: g.dx, dh: g.dy }),
+            onPanResponderMove: (_e, g) => setDrag({ dx: 0, dy: 0, dw: left ? -g.dx : g.dx, dh: g.dy, left }),
             onPanResponderRelease: (_e, g) => {
                 const w = winRef.current
                 setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 })
-                setWin(w.id, { w: Math.max(MIN_W, w.w + g.dx), h: Math.max(MIN_H, w.h + g.dy) })
+                const nw = Math.max(MIN_W, w.w + (left ? -g.dx : g.dx))
+                setWin(w.id, { w: nw, h: Math.max(MIN_H, w.h + g.dy), x: left ? w.x + (w.w - nw) : w.x })
             },
             onPanResponderTerminate: () => setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 }),
-        }),
-    ).current
+        })
+    const resizeR = useRef(makeResize(false)).current
+    const resizeL = useRef(makeResize(true)).current
 
     const bg = color('BACKGROUND_BASE_LOWER', '#1e1f22')
-    const bar = color('BACKGROUND_BASE_LOWEST', '#111214')
-    const border = color('BORDER_SUBTLE', '#ffffff22')
-    const text = color('TEXT_DEFAULT', '#f2f3f5')
+    const strip = color('BACKGROUND_BASE_LOWEST', '#111214')
+    const subtle = color('BORDER_SUBTLE', '#ffffff22')
+    const accent = color('TEXT_BRAND', '#5865f2')
+    const muted = color('INTERACTIVE_MUTED', '#888')
 
+    // 작게 줄인 창: 동그란 방울 (누르면 다시 펴고, 꾹 누르면 닫는다)
     if (win.minimized) {
+        const img = bubbleImage(win.channelId)
         return (
             <View
                 {...move.panHandlers}
                 style={{
                     position: 'absolute',
-                    left: win.x + drag.dx,
-                    top: win.y + drag.dy,
-                    height: TITLE_H,
-                    maxWidth: width * 0.6,
-                    flexDirection: 'row',
+                    left: (win.bx ?? width - BUBBLE - 6) + drag.dx,
+                    top: (win.by ?? win.y) + drag.dy,
+                    width: BUBBLE,
+                    height: BUBBLE,
+                    borderRadius: BUBBLE / 2,
+                    backgroundColor: strip,
+                    borderWidth: 2,
+                    borderColor: accent,
+                    overflow: 'hidden',
                     alignItems: 'center',
-                    borderRadius: TITLE_H / 2,
-                    backgroundColor: bar,
-                    borderWidth: 1,
-                    borderColor: border,
-                    paddingLeft: 14,
+                    justifyContent: 'center',
                     elevation: 16,
                     zIndex: 1000000,
                 }}
             >
-                <Pressable onPress={() => setWin(win.id, { minimized: false })} style={{ flexShrink: 1, flexDirection: 'row' }}>
-                    <Title win={win} text={text} />
+                <Pressable onPress={() => setWin(win.id, { minimized: false })} onLongPress={() => closeWin(win.id)} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                    {img ? <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} /> : <DIcon names={channelIconNames(win.channelId)} fallback="#" c={color('INTERACTIVE_NORMAL', '#ddd')} size={26} />}
                 </Pressable>
-                <IconButton names={CLOSE_ICON} fallback="×" onPress={() => closeWin(win.id)} />
             </View>
         )
     }
 
-    // 분할: 화면 아래 절반을 도킹한 창끼리 나눠 쓴다
-    let frame = win.docked
-        ? (() => {
-              const top = height * 0.5
-              const each = (height - top) / Math.max(1, dockCount)
-              return { left: 0, top: top + each * dockIndex, width, height: each }
-          })()
-        : { left: win.x + drag.dx, top: win.y + drag.dy, width: Math.max(MIN_W, win.w + drag.dw), height: Math.max(MIN_H, win.h + drag.dh) }
+    const minTop = StatusBar.currentHeight ?? 24
+    let frame = win.maximized
+        ? { left: 0, top: minTop, width, height: height - minTop }
+        : win.docked
+          ? (() => {
+                // 분할: 화면 아래 절반을 도킹한 창끼리 나눠 쓴다
+                const top = height * 0.5
+                const each = (height - top) / Math.max(1, dockCount)
+                return { left: 0, top: top + each * dockIndex, width, height: each }
+            })()
+          : {
+                left: win.x + drag.dx - (drag.left ? drag.dw : 0),
+                top: win.y + drag.dy,
+                width: Math.max(MIN_W, win.w + drag.dw),
+                height: Math.max(MIN_H, win.h + drag.dh),
+            }
     // 키보드가 열리면 채널 화면은 키보드 높이만큼 아래를 비운다 (화면 맨 아래까지 닿는다고 생각한다).
     // 그래서 맨 앞 창은 아래쪽을 화면 끝까지 늘리고, 키보드 위로 원래 높이만큼 보이게 올린다
     if (kb > 0 && front) {
-        const minTop = StatusBar.currentHeight ?? 24
         const top = Math.max(minTop, height - kb - frame.height)
         frame = { ...frame, top, height: height - top }
     } else if (kb > 0) {
         // 뒤의 창도 채널 화면이 키보드 높이만큼 아래를 비운다: 그만큼 아래로 늘려 (키보드 뒤로) 내용은 그대로 보이게
         frame = { ...frame, height: frame.height + kb }
     }
+    const free = !win.docked && !win.maximized
+    const act = (f: () => void) => () => {
+        showBar(false)
+        f()
+    }
 
     return (
         <View
-            onTouchStart={() => {
-                if (!front) bringToFront(win.id)
-            }}
-            // 안쪽(채팅 목록 등)이 터치를 가져가도 누른 순간 알 수 있게
-            onStartShouldSetResponderCapture={() => {
-                if (!front) bringToFront(win.id)
-                return false
-            }}
             style={{
                 position: 'absolute',
                 ...frame,
                 backgroundColor: bg,
-                borderRadius: win.docked ? 0 : 14,
-                borderWidth: 1,
-                borderColor: border,
+                borderRadius: free ? 16 : 0,
+                // 앞에 있는 창은 테두리 색으로 표시한다
+                borderWidth: free ? (front ? 2 : 1) : 0,
+                borderColor: front ? accent : subtle,
                 overflow: 'hidden',
+                opacity: win.transparent ? 0.55 : 1,
                 // 겹침 순서는 zIndex 로만 (안드로이드는 그림자 높이가 다르면 그게 순서를 정해 버린다)
                 zIndex: win.z,
                 elevation: 16,
             }}
         >
-            <View {...(win.docked ? {} : move.panHandlers)} style={{ height: TITLE_H, flexDirection: 'row', alignItems: 'center', backgroundColor: bar, paddingLeft: 12 }}>
-                <Title win={win} text={text} />
-                <IconButton names={MIN_ICON} fallback="–" onPress={() => setWin(win.id, { minimized: true })} />
-                <IconButton names={win.docked ? UNDOCK_ICON : DOCK_ICON} fallback={win.docked ? '⧉' : '▭'} onPress={() => setWin(win.id, { docked: !win.docked })} />
-                <IconButton names={CLOSE_ICON} fallback="×" onPress={() => closeWin(win.id)} />
+            {/* 위 손잡이 */}
+            <View {...move.panHandlers} style={{ height: HANDLE_H, alignItems: 'center', justifyContent: 'center', backgroundColor: strip }}>
+                <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: muted }} />
             </View>
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
@@ -648,15 +720,46 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
                 />
             </View>
-            {win.docked ? null : (
+            {/* 버튼 줄: 손잡이를 누르면 위에 뜬다 */}
+            {bar ? (
                 <View
-                    {...resize.panHandlers}
-                    style={{ position: 'absolute', right: 0, bottom: 0, width: 28, height: 28, alignItems: 'flex-end', justifyContent: 'flex-end', padding: 5 }}
+                    style={{
+                        position: 'absolute',
+                        top: 2,
+                        alignSelf: 'center',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 6,
+                        height: 38,
+                        borderRadius: 19,
+                        backgroundColor: strip,
+                        borderWidth: 1,
+                        borderColor: subtle,
+                        elevation: 4,
+                    }}
                 >
-                    <View style={{ width: 12, height: 12, borderRightWidth: 3, borderBottomWidth: 3, borderColor: color('INTERACTIVE_MUTED', '#888'), borderBottomRightRadius: 4 }} />
+                    <BarButton names={OPACITY_ICON} fallback="◐" on={win.transparent} accent={accent} onPress={act(() => setWin(win.id, { transparent: !win.transparent }))} />
+                    <BarButton names={MIN_ICON} fallback="–" accent={accent} onPress={act(() => setWin(win.id, { minimized: true }))} />
+                    <BarButton names={SPLIT_ICON} fallback="▤" on={win.docked} accent={accent} onPress={act(() => setWin(win.id, { docked: !win.docked, maximized: false }))} />
+                    <BarButton names={win.maximized ? RESTORE_ICON : MAX_ICON} fallback="⤢" on={win.maximized} accent={accent} onPress={act(() => setWin(win.id, { maximized: !win.maximized, docked: false }))} />
+                    <BarButton names={CLOSE_ICON} fallback="×" accent={accent} onPress={act(() => closeWin(win.id))} />
                 </View>
-            )}
+            ) : null}
+            {free ? (
+                <>
+                    <View {...resizeR.panHandlers} style={{ position: 'absolute', right: 0, bottom: 0, width: 30, height: 30 }} />
+                    <View {...resizeL.panHandlers} style={{ position: 'absolute', left: 0, bottom: 0, width: 30, height: 30 }} />
+                </>
+            ) : null}
         </View>
+    )
+}
+
+function BarButton({ names, fallback, onPress, on, accent }: { names: string[]; fallback: string; onPress: () => void; on?: boolean; accent: string }) {
+    return (
+        <Pressable onPress={onPress} hitSlop={4} style={{ width: 36, height: 34, alignItems: 'center', justifyContent: 'center' }}>
+            <DIcon names={names} fallback={fallback} c={on ? accent : color('INTERACTIVE_NORMAL', '#ddd')} size={18} />
+        </Pressable>
     )
 }
 
