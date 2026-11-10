@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.13'
+const VERSION = '1.0.14'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -640,6 +640,13 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                         <ChannelView id={win.id} channelId={win.channelId} ready={!!Screen} />
                     </NoInsets>
                 </Boundary>
+                {/* 뒤에 있는 창: 안의 채팅 목록은 터치를 디스코드가 직접 받아서 눌린 걸 알 수 없다.
+                    그래서 뒤의 창 위에는 투명한 판을 덮어, 처음 누르면 앞으로만 올린다 */}
+                <Pressable
+                    pointerEvents={front ? 'none' : 'auto'}
+                    onPressIn={() => bringToFront(win.id)}
+                    style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+                />
             </View>
             {win.docked ? null : (
                 <View
