@@ -2,6 +2,8 @@ import { ActionSheetActionCreators, ToastActionCreators } from '@valenced/discor
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
+import { Dispatcher } from '@valenced/discord/common/flux'
+import { RootNavigationRef } from '@valenced/discord/modules/main_tabs_v2'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
@@ -19,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.4'
+const VERSION = '1.0.5'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -120,6 +122,8 @@ function bringToFront(id: number) {
 }
 export function openChannel(channelId: string) {
     if (!channelId) return
+    // 채널 꾹 누르기 창에서 열었으면 그 창은 닫혔다
+    sheetOpen = false
     const existing = wins.find(w => w.channelId === channelId)
     if (existing) {
         setWin(existing.id, { minimized: false })
@@ -144,6 +148,7 @@ export function openChannel(channelId: string) {
     wins = [...wins, win]
     note(`open window ${win.id} channel=${channelId} (${channelName(channelId)}) host=${settings().host} propsCaptured=${!!lastProps} hostRenders=${status.toastHostRenders}/${status.screenHostRenders}`)
     emit()
+    ack(channelId, 'opened')
     // 창을 그리는 자리(토스트 자리)는 플러그인이 켜지기 전에 이미 그려져 있어서, 다시 그려질 때까지 창이 안 나온다.
     // 토스트를 하나 띄우면 그 자리가 다시 그려진다 (그 뒤로는 창들이 알아서 다시 그린다)
     if (settings().host === 'global' && !hostMounted) toast(`Opening ${channelName(channelId)}`)
@@ -563,9 +568,9 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
 /** 창 안의 채널 화면이 상태 바, 아래 바 자리만큼 비우지 않게 한다 */
 function NoInsets({ children }: { children: any }) {
     const Ctx = insetsContext()
-    if (Ctx?.Provider) return <Ctx.Provider value={ZERO}>{children}</Ctx.Provider>
-    // 못 찾으면 위로 상태 바 높이만큼 끌어올린다
-    return <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0) }}>{children}</View>
+    // 위 여백은 디스코드가 기기 값을 직접 읽어서 비워서(알려 줘도 그대로였다), 상태 바 높이만큼 끌어올려 가린다
+    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0) }}>{children}</View>
+    return Ctx?.Provider ? <Ctx.Provider value={ZERO}>{inner}</Ctx.Provider> : inner
 }
 
 function ChannelView({ win }: { win: Win }) {
@@ -604,6 +609,22 @@ function Windows({ host }: { host: Host }) {
     // 훅은 언제나 같은 순서로 (일찍 돌려주기 전에)
     const kb = useKeyboard()
     if (settings().host !== host || !wins.length) return null
+    if (host === 'global' && hiddenByOverlay()) {
+        // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
+        return (
+            <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
+                <Pressable
+                    onPress={() => {
+                        forceShow = true
+                        emit()
+                    }}
+                    style={{ position: 'absolute', right: 8, top: (StatusBar.currentHeight ?? 24) + 4, paddingHorizontal: 10, height: 26, borderRadius: 13, justifyContent: 'center', backgroundColor: color('BACKGROUND_BASE_LOWEST', '#111214'), opacity: 0.85 }}
+                >
+                    <RNText style={{ color: color('TEXT_MUTED', '#aaa'), fontSize: 12, fontWeight: '700' }}>{`Mini Chat ${wins.length}`}</RNText>
+                </Pressable>
+            </View>
+        )
+    }
     const docked = wins.filter(w => w.docked && !w.minimized)
     const open = wins.filter(w => !w.minimized)
     const frontId = open.reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)?.id
@@ -614,6 +635,120 @@ function Windows({ host }: { host: Host }) {
             ))}
         </View>
     )
+}
+
+// ── 읽음 처리 ───────────────────────────────────────────────────
+/** 창으로 보고 있는 채널을 읽음으로 (디스코드는 메인 화면에서 보는 채널만 읽음 처리한다) */
+const ackTimers = new Map<string, any>()
+function ack(channelId: string, why: string) {
+    clearTimeout(ackTimers.get(channelId))
+    ackTimers.set(
+        channelId,
+        setTimeout(() => {
+            ackTimers.delete(channelId)
+            try {
+                const rs = S().ReadStateStore
+                const last = rs?.lastMessageId?.(channelId) ?? S().ChannelStore?.getChannel?.(channelId)?.lastMessageId ?? S().ChannelStore?.getChannel?.(channelId)?.last_message_id
+                const unread = rs?.hasUnread?.(channelId)
+                if (!last) return
+                ;(Dispatcher as any).dispatch({ type: 'BULK_ACK', context: 'APP', channels: [{ channelId, messageId: last, readStateType: 0 }] })
+                note(`ack ${channelName(channelId)} (${why}) unreadBefore=${unread} after=${rs?.hasUnread?.(channelId)}`)
+            } catch (e: any) {
+                note(`ack failed: ${e?.message ?? e}`)
+            }
+        }, 600),
+    )
+}
+function patchAck(cleanup: (...f: any[]) => void) {
+    const onMessage = (e: any) => {
+        const id = e?.channelId ?? e?.message?.channel_id
+        if (!id) return
+        if (wins.some(w => w.channelId === id && !w.minimized && !hiddenByOverlay())) ack(id, 'new message')
+    }
+    try {
+        ;(Dispatcher as any).subscribe('MESSAGE_CREATE', onMessage)
+        cleanup(() => (Dispatcher as any).unsubscribe('MESSAGE_CREATE', onMessage))
+    } catch (e: any) {
+        note(`message subscribe failed: ${e?.message ?? e}`)
+    }
+}
+
+// ── 다른 창(시트, 모달)이 열리면 창을 숨긴다 ──────────────────
+// 창은 앱 전체 위(토스트 자리)에 그려서 디스코드의 시트, 모달보다 위에 온다. 그런 게 열려 있는 동안은 숨긴다
+let sheetOpen = false
+let navCovered = false
+let forceShow = false
+const hiddenByOverlay = () => !forceShow && (sheetOpen || navCovered)
+function setSheet(open: boolean, why: string) {
+    if (sheetOpen === open) return
+    sheetOpen = open
+    if (!open) forceShow = false
+    note(`sheet ${open ? 'open' : 'closed'} (${why})`)
+    emit()
+}
+function patchOverlays(cleanup: (...f: any[]) => void) {
+    const A: any = ActionSheetActionCreators
+    try {
+        note(`sheet creators: ${Object.keys(A ?? {}).join(',')}`)
+    } catch {}
+    for (const k of ['open', 'openLazy']) {
+        if (typeof A?.[k] !== 'function') continue
+        cleanup(
+            instead(A, k, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                setSheet(true, `${k} ${typeof args[1] === 'string' ? args[1] : ''}`)
+                return orig.apply(this, args)
+            }),
+        )
+    }
+    if (typeof A?.hideActionSheet === 'function')
+        cleanup(
+            instead(A, 'hideActionSheet', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                setSheet(false, 'hide')
+                return orig.apply(this, args)
+            }),
+        )
+    // 화면 위에 쌓이는 화면(프로필, 사진 보기 등): 루트 내비게이션 상태를 본다
+    let base: string | undefined
+    const check = () => {
+        try {
+            const ref = (RootNavigationRef as any).getRootNavigationRef?.()
+            const st = ref?.getRootState?.() ?? ref?.getState?.()
+            const routes: any[] = st?.routes ?? []
+            const names = routes.map(r => r?.name).join(' > ')
+            base ??= routes[0]?.name
+            const top = routes[routes.length - 1]?.name
+            const covered = routes.length > 1 && top !== base && !/channel/i.test(String(top))
+            if (covered !== navCovered || names !== lastNav) note(`navigation: ${names}${covered ? ' (hide windows)' : ''}`)
+            lastNav = names
+            if (covered !== navCovered) {
+                navCovered = covered
+                if (!covered) forceShow = false
+                emit()
+            }
+        } catch {}
+    }
+    let lastNav = ''
+    let sub: any
+    const attach = () => {
+        try {
+            const ref = (RootNavigationRef as any).getRootNavigationRef?.()
+            if (!ref?.addListener) return false
+            sub = ref.addListener('state', check)
+            check()
+            return true
+        } catch {
+            return false
+        }
+    }
+    if (!attach()) {
+        const t = setInterval(() => attach() && clearInterval(t), 1000)
+        cleanup(() => clearInterval(t))
+    }
+    cleanup(() => {
+        try {
+            sub?.()
+        } catch {}
+    })
 }
 
 // ── 앱 전체 위에 그리기 (토스트 자리) ───────────────────────────
@@ -879,6 +1014,12 @@ export default plugin({
             patchSheet(cleanup)
         } catch (e: any) {
             note(`sheet failed: ${e?.message ?? e}`)
+        }
+        try {
+            patchAck(cleanup)
+            patchOverlays(cleanup)
+        } catch (e: any) {
+            note(`overlay/ack failed: ${e?.message ?? e}`)
         }
         cleanup(() => {
             wins = []
