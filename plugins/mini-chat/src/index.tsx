@@ -12,7 +12,7 @@ import { Component, createElement, memo, useEffect, useMemo, useRef, useState } 
 import { Animated, Dimensions, Image, Keyboard, LayoutAnimation, UIManager, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
 import { getModules, lookupModule } from '@valenced/modules/finders'
 import { beforeJSX } from '@valenced/react/jsx-runtime'
-import { withName, withProps } from '@valenced/modules/finders/filters'
+import { withProps } from '@valenced/modules/finders/filters'
 
 /**
  * Mini Chat: 채널을 디스코드 안의 떠 있는 창(팝업)이나 아래쪽 분할 창으로 열어, 여러 채널을 한 번에 본다.
@@ -22,7 +22,7 @@ import { withName, withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.0'
+const VERSION = '1.2.1'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -858,22 +858,18 @@ function Windows({ host }: { host: Place }) {
     useEffect(() => {
         if (host === 'screen') return
         hostMounted = true
-        if (host === 'root') rootActive = true
         note(`${host} host mounted`)
         emit()
         return () => {
             hostMounted = false
-            if (host === 'root') rootActive = false
         }
     }, [])
     // 훅은 언제나 같은 순서로 (일찍 돌려주기 전에)
     const kb = useKeyboard()
     if (settings().host !== (host === 'root' ? 'global' : host) || !wins.length) return null
-    // 앱 맨 바깥 자리가 있으면 토스트 자리에는 그리지 않는다
-    if (host === 'global' && rootActive) return null
     const hidden = host !== 'screen' && hiddenByOverlay()
     // 분할 중에는 디스코드의 시트, 화면이 아래 절반 안에서만 열려서 위의 분할 창은 가리지 않는다: 그대로 둔다
-    const keep = hidden && host === 'root' ? wins.filter(w => w.docked && !w.minimized) : []
+    const keep = hidden && rootActive ? wins.filter(w => w.docked && !w.minimized) : []
     if (hidden) {
         const docked0 = keep
         // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
@@ -1025,46 +1021,56 @@ let rootActive = false
 const splitLine = () => Math.round(Dimensions.get('window').height * 0.5)
 const anyDocked = () => wins.some(w => w.docked && !w.minimized)
 
-/** 디스코드 앱 전체(AppFreezer)를 감싼다: 분할 중이면 아래 절반으로 밀고, 창들은 그 바깥 맨 위에 그린다 */
-function SplitRoot(props: any) {
+const WRAP = '__miniChatInner'
+const SKIP = '__miniChatSkip'
+const stackKeysSeen = new Set<string>()
+
+/** 루트 화면 스택인지 (그 안에 "main" 화면이 있다) */
+function isRootStack(props: any): boolean {
+    let found = false
+    const keys: string[] = []
+    const visit = (c: any) => {
+        if (Array.isArray(c)) return c.forEach(visit)
+        const k = c?.key != null ? String(c.key) : ''
+        if (k) keys.push(k)
+        if (/^main(-|$)/.test(k) || c?.props?.route?.name === 'main' || c?.props?.descriptor?.route?.name === 'main') found = true
+    }
+    visit(props?.children)
+    const sig = keys.slice(0, 6).join(',')
+    if (sig && !stackKeysSeen.has(sig) && stackKeysSeen.size < 12) {
+        stackKeysSeen.add(sig)
+        note(`screen stack: ${sig}${found ? ' (root)' : ''}`)
+    }
+    return found
+}
+
+/**
+ * 루트 화면 스택(메인, 설정 등 디스코드 화면 전부)을 감싼다: 분할 중이면 그 스택을 아래 절반으로 민다.
+ * 스택은 안드로이드 쪽 화면이라 위치만 바꾸면 디스코드가 그 크기에 맞춰 다시 그린다
+ */
+function SplitStack(props: any) {
     useStore()
     const { [WRAP]: Inner, ...rest } = props
     const split = settings().host === 'global' && anyDocked()
     const top = split ? splitLine() - (StatusBar.currentHeight ?? 0) : 0
-    return (
-        <View style={{ flex: 1 }}>
-            <View style={{ flex: 1, marginTop: top, overflow: 'hidden' }}>{createElement(Inner, { ...rest, [SKIP]: true })}</View>
-            {split ? <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: splitLine() - 2, height: 4, alignItems: 'center' }}>
-                <View style={{ width: 48, height: 4, borderRadius: 2, backgroundColor: color('INTERACTIVE_MUTED', '#888') }} />
-            </View> : null}
-            <Windows host="root" />
-        </View>
-    )
+    return createElement(Inner, { ...rest, [SKIP]: true, style: [rest.style, top ? { marginTop: top } : null] })
 }
-const WRAP = '__miniChatInner'
-const SKIP = '__miniChatSkip'
 
 function patchRoot(cleanup: (...f: any[]) => void) {
     cleanup(
-        getModules(withName('AppFreezer') as any, (Freezer: any) => {
-            const fn = typeof Freezer === 'function' ? Freezer : Freezer?.default
-            if (typeof fn !== 'function') {
-                note(`app root not usable: ${describe(Freezer)}`)
-                return
+        beforeJSX('RNSScreenStack' as any, (args: any[]) => {
+            try {
+                const props = args[1]
+                if (!props || props[SKIP] || !isRootStack(props)) return args as any
+                if (!rootActive) {
+                    rootActive = true
+                    note('root screen stack wrapped (split screen ready)')
+                }
+                return [SplitStack, { ...props, [WRAP]: args[0] }, ...args.slice(2)] as any
+            } catch {
+                return args as any
             }
-            note('app root found (AppFreezer)')
-            cleanup(
-                beforeJSX(fn, (args: any[]) => {
-                    try {
-                        const props = args[1] ?? {}
-                        if (props[SKIP]) return args as any
-                        return [SplitRoot, { ...props, [WRAP]: fn }, ...args.slice(2)] as any
-                    } catch {
-                        return args as any
-                    }
-                }),
-            )
-        }) as any,
+        }),
     )
 }
 
