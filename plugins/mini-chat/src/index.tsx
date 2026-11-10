@@ -17,7 +17,7 @@ import { Dimensions, PanResponder, Platform, Pressable, ScrollView, Text as RNTe
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.1'
+const VERSION = '1.0.2'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -79,6 +79,8 @@ interface Win {
     docked: boolean
 }
 let wins: Win[] = []
+/** 창들을 그리는 컴포넌트가 화면에 붙어 있는지 */
+let hostMounted = false
 let nextId = 1
 const listeners = new Set<() => void>()
 function emit() {
@@ -134,8 +136,11 @@ export function openChannel(channelId: string) {
         docked: false,
     }
     wins = [...wins, win]
-    note(`open window ${win.id} channel=${channelId} (${channelName(channelId)}) host=${settings().host} propsCaptured=${!!lastProps}`)
+    note(`open window ${win.id} channel=${channelId} (${channelName(channelId)}) host=${settings().host} propsCaptured=${!!lastProps} hostRenders=${status.toastHostRenders}/${status.screenHostRenders}`)
     emit()
+    // 창을 그리는 자리(토스트 자리)는 플러그인이 켜지기 전에 이미 그려져 있어서, 다시 그려질 때까지 창이 안 나온다.
+    // 토스트를 하나 띄우면 그 자리가 다시 그려진다 (그 뒤로는 창들이 알아서 다시 그린다)
+    if (settings().host === 'global' && !hostMounted) toast(`Opening ${channelName(channelId)}`)
 }
 
 // ── 채널 정보 ───────────────────────────────────────────────────
@@ -255,7 +260,7 @@ function patchScreen(exports: any, cleanup: (...f: any[]) => void) {
             }
             const out = orig.apply(this, args)
             // 채팅 화면 안에 그리는 설정이면 맨 아래 채팅 화면(screenIndex 0)에 창들을 얹는다
-            if (settings().host === 'screen' && (props?.screenIndex ?? 0) === 0 && wins.length) {
+            if (settings().host === 'screen' && (props?.screenIndex ?? 0) === 0) {
                 status.screenHostRenders++
                 return (
                     <View style={{ flex: 1 }}>
@@ -473,6 +478,14 @@ function ChannelView({ win }: { win: Win }) {
 
 function Windows({ host }: { host: Host }) {
     useStore()
+    useEffect(() => {
+        if (host !== 'global') return
+        hostMounted = true
+        note('global host mounted')
+        return () => {
+            hostMounted = false
+        }
+    }, [])
     if (settings().host !== host || !wins.length) return null
     const docked = wins.filter(w => w.docked && !w.minimized)
     return (
