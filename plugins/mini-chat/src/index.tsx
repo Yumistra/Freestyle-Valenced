@@ -19,7 +19,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.3'
+const VERSION = '1.0.4'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -601,8 +601,9 @@ function Windows({ host }: { host: Host }) {
             hostMounted = false
         }
     }, [])
-    if (settings().host !== host || !wins.length) return null
+    // 훅은 언제나 같은 순서로 (일찍 돌려주기 전에)
     const kb = useKeyboard()
+    if (settings().host !== host || !wins.length) return null
     const docked = wins.filter(w => w.docked && !w.minimized)
     const open = wins.filter(w => !w.minimized)
     const frontId = open.reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)?.id
