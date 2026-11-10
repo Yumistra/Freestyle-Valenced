@@ -419,11 +419,25 @@ function wrapperFor(type: any) {
     if (w) return w
     const MEMO = Symbol.for('react.memo')
     const FORWARD = Symbol.for('react.forward_ref')
-    const inner = type?.$$typeof === MEMO ? type.type : type
+    // 원래 컴포넌트는 그릴 때마다 다시 읽는다. 다른 플러그인(Better Typing Indicators 등)이 나중에
+    // 원래 컴포넌트를 패치해도 그게 그대로 적용되게
+    const innerOf = () => (type?.$$typeof === MEMO ? type.type : type)
+    const inner0 = innerOf()
     // forwardRef 컴포넌트는 ref 를 그대로 넘긴다
-    const isForward = inner?.$$typeof === FORWARD
-    const render = isForward ? inner.render : inner
-    if (typeof render !== 'function') return
+    const isForward = inner0?.$$typeof === FORWARD
+    const renderOf = () => {
+        const i = innerOf()
+        return i?.$$typeof === FORWARD ? i.render : i
+    }
+    if (typeof renderOf() !== 'function') return
+    // 다른 플러그인이 이 줄을 원래 컴포넌트처럼 찾아 패치할 수 있게 .type 으로 그리는 함수를 열어 둔다
+    // (memo 컴포넌트처럼 보인다: element.type.type 이 함수)
+    const holder: any = {
+        type: function ChannelRowRender(props: any, ref?: any) {
+            const r = renderOf()
+            return isForward ? r(props, ref) : r(props)
+        },
+    }
     const body = function BetterChannelRow(props: any, ref?: any) {
         // 마지막 메시지가 바뀌면 이 줄만 바로 다시 그린다 (디스코드 목록이 다시 그려지길 기다리지 않는다)
         const ch = props?.channel
@@ -435,7 +449,7 @@ function wrapperFor(type: any) {
             if (pv) props = { ...props, subtitle: { type: 'voice', text: pv.node, key: pv.key, split: pv.split, bcl: true } }
             else if (props.subtitle?.bcl) props = { ...props, subtitle: undefined }
         }
-        let out = isForward ? render(props, ref) : render(props)
+        let out = (w as any).type(props, ref)
         const sub = props?.subtitle
         if (sub?.split)
             try {
@@ -454,6 +468,8 @@ function wrapperFor(type: any) {
         return out
     }
     w = isForward ? forwardRef(body as any) : body
+    // forwardRef 객체의 .type 은 React 가 쓰지 않는다. 함수 컴포넌트의 .type 도 마찬가지
+    ;(w as any).type = holder.type
     wrappers.set(type, w)
     return w
 }
