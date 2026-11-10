@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.11'
+const VERSION = '1.0.12'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -574,7 +574,8 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     borderWidth: 1,
                     borderColor: border,
                     paddingLeft: 14,
-                    elevation: 12,
+                    elevation: 16,
+                    zIndex: 1000000,
                 }}
             >
                 <Pressable onPress={() => setWin(win.id, { minimized: false })} style={{ flexShrink: 1, flexDirection: 'row' }}>
@@ -609,6 +610,11 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             onTouchStart={() => {
                 if (!front) bringToFront(win.id)
             }}
+            // 안쪽(채팅 목록 등)이 터치를 가져가도 누른 순간 알 수 있게
+            onStartShouldSetResponderCapture={() => {
+                if (!front) bringToFront(win.id)
+                return false
+            }}
             style={{
                 position: 'absolute',
                 ...frame,
@@ -617,8 +623,9 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                 borderWidth: 1,
                 borderColor: border,
                 overflow: 'hidden',
+                // 겹침 순서는 zIndex 로만 (안드로이드는 그림자 높이가 다르면 그게 순서를 정해 버린다)
                 zIndex: win.z,
-                elevation: 16 + Math.min(win.z, 30),
+                elevation: 16,
             }}
         >
             <View {...(win.docked ? {} : move.panHandlers)} style={{ height: TITLE_H, flexDirection: 'row', alignItems: 'center', backgroundColor: bar, paddingLeft: 12 }}>
