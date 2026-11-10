@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.9'
+const VERSION = '1.0.10'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -35,6 +35,8 @@ type Host = 'global' | 'screen'
 interface Settings {
     /** 창을 어디에 그릴지: global = 앱 전체 위 (토스트 자리), screen = 채팅 화면 안 */
     host: Host
+    /** 채팅 화면 모듈 번호 (한 번 불린 걸 본 뒤 기억해 두고, 다음에 앱을 켰을 때 채널을 안 열어도 직접 부른다) */
+    screenModuleId?: number
 }
 const DEFAULTS: Settings = { host: 'global' }
 let storage: any
@@ -253,6 +255,17 @@ let treeLogged = false
 let startCleanup: ((...f: any[]) => void) | undefined
 let loadTried = false
 /** 화면 모듈을 직접 불러온다 (채널을 아직 하나도 안 열었을 때) */
+function rememberScreenId() {
+    try {
+        const m: any = lookupModuleWithImportedPath(SCREEN_PATH)
+        const id = Array.isArray(m) ? m[1] : undefined
+        if (typeof id === 'number' && settings().screenModuleId !== id) {
+            void save({ screenModuleId: id })
+            note(`remembered screen module #${id}`)
+        }
+    } catch {}
+}
+
 function loadScreen(why: string) {
     if (Screen || loadTried || !startCleanup) return
     loadTried = true
@@ -265,10 +278,24 @@ function loadScreen(why: string) {
             exports = r(m[1])
             note(`required screen module #${m[1]}`)
         }
+        // 이 경로가 아직 안 불렸으면 경로로는 번호를 모른다: 전에 기억해 둔 번호로 부르고, 그게 정말 채팅 화면인지 확인한다
+        const saved = settings().screenModuleId
+        if (!exports && typeof saved === 'number' && typeof r === 'function') {
+            try {
+                r(saved)
+                const again: any = lookupModuleWithImportedPath(SCREEN_PATH)
+                const ok = Array.isArray(again) && again[1] === saved ? again[0] : undefined
+                note(`required saved screen module #${saved}: ${ok ? 'matches' : 'not the screen (Discord updated?)'}`)
+                if (ok) exports = ok
+            } catch (e: any) {
+                note(`saved module #${saved} failed: ${e?.message ?? e}`)
+            }
+        }
         note(`load screen (${why}): ${exports ? 'ok' : 'not available'}`)
         if (exports && !Screen) {
             patchScreen(exports, startCleanup)
             setTimeout(emit, 0)
+            rememberScreenId()
         }
     } catch (e: any) {
         note(`load screen failed: ${e?.message ?? e}`)
@@ -1074,6 +1101,7 @@ export default plugin({
                 note(`screen module ${how}`)
                 patchScreen(exports, cleanup)
                 emit()
+                rememberScreenId()
             } catch (e: any) {
                 note(`screen patch failed: ${e?.message ?? e}`)
             }
