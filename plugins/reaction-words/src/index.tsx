@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Platform, ScrollView, Switch as RNSwitch, Text as RNText, View } from 'react-native'
 
 /**
- * Reaction Words
+ * Reaction+ (예전 이름 Reaction Words)
  *  - 메시지를 꾹 누르면 나오는 창에 "React with a word" 줄을 넣는다. 단어를 쓰면 글자 이모지(🇵🇱🇺🇬🇮🇳)로 반응한다.
  *    같은 글자가 또 나오면 🅰️ ⭕ 같은 다른 모양을 쓴다.
  *  - 반응 옆 "반응 추가" 버튼을 꾹 누르면 그 메시지에 달린 이모지 전부로 반응한다.
@@ -436,7 +436,7 @@ function patchHandlers(cleanup: (...f: any[]) => void) {
 
 // ── 로그 ────────────────────────────────────────────────────────
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 /** 최근 일 (로그 복사용) */
 const jlog: string[] = []
 function note(msg: string) {
@@ -449,7 +449,7 @@ function note(msg: string) {
 async function buildLog(): Promise<string> {
     const lines: string[] = []
     const add = (k: string, v: unknown) => lines.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-    lines.push('Reaction Words log')
+    lines.push('Reaction+ log')
     add('Time', new Date().toISOString())
     add('Plugin', VERSION)
     try {
@@ -484,6 +484,16 @@ async function buildLog(): Promise<string> {
     lines.push('')
     lines.push('JS recent:')
     lines.push(jlog.length ? jlog.join('\n') : '(nothing yet)')
+    // 반응 추가 버튼마다 자세한 상태와 지금까지 일어난 일
+    try {
+        const dump = await (callNativeMethod as any)(`${NATIVE}.dump`, [])
+        lines.push('')
+        lines.push('Buttons (detailed):')
+        lines.push(String(dump ?? '(empty)'))
+    } catch (e: any) {
+        lines.push('')
+        lines.push(`Buttons (detailed): not reachable (${String(e?.message ?? e).slice(0, 300)})`)
+    }
     return lines.join('\n')
 }
 

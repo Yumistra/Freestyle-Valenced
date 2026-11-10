@@ -21,7 +21,7 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 
 /**
- * Reaction Words 의 네이티브 부분: 반응 줄 끝의 "반응 추가" 버튼에 꾹 누르기를 붙인다.
+ * Reaction+ (예전 이름 Reaction Words) 의 네이티브 부분: 반응 줄 끝의 "반응 추가" 버튼에 꾹 누르기를 붙인다.
  *
  * 디스코드는 이 버튼에 누르기만 있고 꾹 누르기가 없어서 JS 로는 알 수 없다.
  * 디스코드의 터치 처리(스크롤과 겹치지 않게 하는 리스너)에 기대지 않으려고, 버튼으로 들어오는 터치
@@ -112,8 +112,77 @@ val reactionWordsPlugin = plugin {
             val t = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
             synchronized(nlog) {
                 nlog.addLast("$t $msg")
-                while (nlog.size > 40) nlog.removeFirst()
+                while (nlog.size > 120) nlog.removeFirst()
             }
+        }
+
+        // ── 자세한 로그: 버튼마다 일어난 일을 따로 쌓는다 (설정의 Copy log 로 복사) ──
+        val t0 = SystemClock.uptimeMillis()
+        val seenButtons = WeakHashMap<View, Boolean>()
+        val traces = WeakHashMap<View, ArrayList<String>>()
+        fun bid(v: View) = Integer.toHexString(System.identityHashCode(v))
+        val repRe = Regex(" \\(x(\\d+)\\)$")
+        fun trace(v: View, msg: String) {
+            seenButtons[v] = true
+            val q = traces.getOrPut(v) { ArrayList() }
+            val ms = SystemClock.uptimeMillis() - t0
+            synchronized(q) {
+                // 같은 일이 이어지면 횟수만 늘린다
+                val last = q.lastOrNull()
+                if (last != null) {
+                    val body = last.substringAfter(' ').replace(repRe, "")
+                    if (body == msg) {
+                        val n = repRe.find(last)?.groupValues?.get(1)?.toInt() ?: 1
+                        q[q.size - 1] = "+$ms $msg (x${n + 1})"
+                        return
+                    }
+                }
+                q.add("+$ms $msg")
+                // 처음 12줄(처음 붙을 때)은 남기고 중간을 버린다
+                while (q.size > 90) q.removeAt(12)
+            }
+        }
+        fun specStr(s: Int): String {
+            val m = when (View.MeasureSpec.getMode(s)) {
+                View.MeasureSpec.EXACTLY -> "E"
+                View.MeasureSpec.AT_MOST -> "A"
+                else -> "U"
+            }
+            return "$m${View.MeasureSpec.getSize(s)}"
+        }
+        fun lpStr(lp: android.view.ViewGroup.LayoutParams?): String {
+            if (lp == null) return "lp=null"
+            fun d(x: Int) = when (x) {
+                -1 -> "MATCH"
+                -2 -> "WRAP"
+                else -> x.toString()
+            }
+            val sb = StringBuilder("lp=${lp.javaClass.simpleName}(${d(lp.width)}x${d(lp.height)}")
+            (lp as? android.view.ViewGroup.MarginLayoutParams)?.let { sb.append(" m=${it.leftMargin},${it.topMargin},${it.rightMargin},${it.bottomMargin}") }
+            (lp as? android.widget.LinearLayout.LayoutParams)?.let { if (it.weight != 0f) sb.append(" weight=${it.weight}") }
+            for (f in listOf("FlexGrow", "FlexShrink", "FlexBasisPercent", "AlignSelf")) {
+                try {
+                    val x = lp.javaClass.getMethod("get$f").invoke(lp)
+                    sb.append(" $f=$x")
+                } catch (e: Throwable) {
+                }
+            }
+            sb.append(")")
+            return sb.toString()
+        }
+        fun viewStr(c: View): String {
+            val a = IntArray(2)
+            try {
+                c.getLocationOnScreen(a)
+            } catch (e: Throwable) {
+            }
+            val vis = when (c.visibility) {
+                View.VISIBLE -> ""
+                View.INVISIBLE -> " INVISIBLE"
+                else -> " GONE"
+            }
+            val kids = (c as? android.view.ViewGroup)?.let { " kids=${it.childCount}" } ?: ""
+            return "${c.javaClass.name}@${bid(c)} ${c.width}x${c.height} at(${a[0]},${a[1]}) frame(${c.left},${c.top},${c.right},${c.bottom}) measured=${c.measuredWidth}x${c.measuredHeight}$vis$kids ${lpStr(c.layoutParams)}"
         }
 
         val addViewClass: Class<*>? = try {
@@ -172,7 +241,9 @@ val reactionWordsPlugin = plugin {
             while (p is android.view.ViewGroup && depth < 3) {
                 for (i in 0 until p.childCount) {
                     val c = p.getChildAt(i)
-                    if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && addViewClass?.isInstance(c) != true) return c
+                    // 반응 칸만 (가는 구분선 같은 건 빼고): 어느 정도 높고, 옆으로 넓은 칸
+                    val minH = 16 * c.resources.displayMetrics.density
+                    if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && c.height >= minH && c.width >= c.height * 0.8f && addViewClass?.isInstance(c) != true) return c
                 }
                 self = p
                 p = p.parent
@@ -324,40 +395,232 @@ val reactionWordsPlugin = plugin {
         var knownIconW = 0
         var knownT = Float.NaN
 
+        /** 처음 본 모양 (채팅 반응 줄이 아니면 이걸로 되돌린다) */
+        class Orig(val w: Int, val h: Int, val pl: Int, val pt: Int, val pr: Int, val pb: Int, val gravity: Int)
+        val origLook = WeakHashMap<View, Orig>()
+
+        /** 크기가 맞지 않고 늘어나 버리는 곳(포럼 글 머리 등)의 버튼. 이런 곳은 원래대로 둔다 */
+        val skipped = WeakHashMap<View, Boolean>()
+        val stretchCount = WeakHashMap<View, Int>()
+        /** 버튼이 잴 때 써야 하는 크기 (폭, 높이) */
+        val targetSize = WeakHashMap<View, Pair<Int, Int>>()
+        val flexboxClass: Class<*>? = try {
+            cl.loadClass(FLEXBOX)
+        } catch (e: Throwable) {
+            null
+        }
+        fun inChatRow(v: View): Boolean {
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is View && depth < 3) {
+                if (flexboxClass?.isInstance(p) == true) return true
+                p = p.parent
+                depth++
+            }
+            return flexboxClass == null
+        }
+
+        /** 줄 폭이 모자라도 줄이지 말고(다음 줄로 넘어가게), 남는다고 늘리지도 않게 */
+        fun noFlex(x: View?) {
+            val lp = x?.layoutParams ?: return
+            try {
+                val shrink = lp.javaClass.getMethod("getFlexShrink").invoke(lp) as? Float
+                val grow = lp.javaClass.getMethod("getFlexGrow").invoke(lp) as? Float
+                if (shrink != 0f || grow != 0f) {
+                    lp.javaClass.getMethod("setFlexShrink", Float::class.javaPrimitiveType).invoke(lp, 0f)
+                    lp.javaClass.getMethod("setFlexGrow", Float::class.javaPrimitiveType).invoke(lp, 0f)
+                    x.layoutParams = lp
+                }
+            } catch (e: Throwable) {
+            }
+        }
+
+        /**
+         * 반응 추가 버튼 오른쪽에 Aa 한 칸이 들어갈 자리가 있는지 (오른쪽에 붙은 다른 버튼과 겹치지 않게).
+         * 화면 위치가 아니라 같은 칸 안의 위치로 잰다 (화면이 옆으로 밀려 들어오는 중에는 화면 위치가 화면 밖이라 늘 "자리 없음"이 됐다)
+         */
+        fun roomForAa(v: View, size: Int, gap: Int): Boolean {
+            val g = v.parent as? android.view.ViewGroup ?: return false
+            if (size <= 0 || !v.isLaidOut) return false
+            val left = v.left
+            val top = v.top
+            val bottom = v.top + maxOf(v.height, size)
+            val need = left + size * 2 + gap
+            var limit = g.width - g.paddingRight
+            for (i in 0 until g.childCount) {
+                val c = g.getChildAt(i)
+                if (c === v || c.visibility != View.VISIBLE || c.width <= 0) continue
+                val overlapsRow = c.top < bottom && c.bottom > top
+                // 오른쪽에 있거나 버튼 위를 덮는 칸(팔로우 버튼 등)
+                if (overlapsRow && c.right > left + 1) limit = minOf(limit, maxOf(c.left, left))
+            }
+            val ok = need <= limit
+            trace(v, "room for Aa: $ok (left=$left need=$need limit=$limit)")
+            return ok
+        }
+
+        /** 버튼 안쪽에 반응 추가 버튼이 들어 있는지 (반응 줄 끝의 버튼 칸) */
+        fun holdsAdd(c: View): Boolean {
+            if (addViewClass?.isInstance(c) == true) return true
+            val g = c as? android.view.ViewGroup ?: return false
+            for (i in 0 until g.childCount) if (addViewClass?.isInstance(g.getChildAt(i)) == true) return true
+            return false
+        }
+
+        /**
+         * 크기를 맞출 기준이 되는 반응.
+         * 채팅 반응 줄(ShortcutsFlexbox) 안이면 그 줄의 첫 반응, 아니면(포럼 글 머리) 바로 옆의 반응 줄.
+         * 그 밖으로는 올라가지 않는다 (예전에는 메시지 본문을 반응으로 잘못 잡아 버튼이 커다랗게 됐다)
+         */
+        fun reactionRef(v: View): View? {
+            val minH = 16 * v.resources.displayMetrics.density
+            var self: View = v
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is android.view.ViewGroup && depth < 3) {
+                if (flexboxClass?.isInstance(p) == true) {
+                    for (i in 0 until p.childCount) {
+                        val c = p.getChildAt(i)
+                        if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && c.height >= minH && !holdsAdd(c)) return c
+                    }
+                    return null
+                }
+                self = p
+                p = p.parent
+                depth++
+            }
+            val g = v.parent as? android.view.ViewGroup ?: return null
+            for (i in 0 until g.childCount) {
+                val row = g.getChildAt(i) as? android.view.ViewGroup ?: continue
+                if (flexboxClass?.isInstance(row) != true || row.visibility != View.VISIBLE || row.height < minH) continue
+                for (k in 0 until row.childCount) {
+                    val c = row.getChildAt(k)
+                    if (c.visibility == View.VISIBLE && c.width > 0 && !holdsAdd(c)) return row
+                }
+            }
+            return null
+        }
+
+        /** 반응이 안 보이는 곳의 버튼은 접어 둔다 (크기 0, 투명) */
+        val collapsed = WeakHashMap<View, Boolean>()
+
+        fun parents(v: View): String {
+            val out = ArrayList<String>()
+            var p: Any? = v.parent
+            while (p is View && out.size < 3) {
+                out.add(p.javaClass.name)
+                p = p.parent
+            }
+            return out.joinToString(" < ")
+        }
+
+        fun restore(v: android.widget.LinearLayout) {
+            trace(v, "restore: target=${targetSize[v]} now=${v.width}x${v.height}")
+            if (targetSize.remove(v) != null) v.requestLayout()
+            collapsed.remove(v)
+            (wordButtons[v] as? View)?.let { v.removeView(it) }
+            (v.background as? Twin)?.let { v.background = it.orig }
+            origLook[v]?.let { o ->
+                v.layoutParams?.let { lp ->
+                    if (lp.width != o.w || lp.height != o.h) {
+                        lp.width = o.w
+                        lp.height = o.h
+                        v.layoutParams = lp
+                    }
+                }
+                if (v.paddingLeft != o.pl || v.paddingTop != o.pt || v.paddingRight != o.pr || v.paddingBottom != o.pb) v.setPadding(o.pl, o.pt, o.pr, o.pb)
+                if (v.gravity != o.gravity) v.gravity = o.gravity
+            }
+            if (v.alpha != 1f) v.alpha = 1f
+            if (v.translationY != 0f) v.translationY = 0f
+        }
+
         fun ensure(v: View) {
             if (!v.isAttachedToWindow || v !is android.widget.LinearLayout) return
-            val sib = firstSibling(v)
+            if (!origLook.containsKey(v)) {
+                val lp = v.layoutParams
+                origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
+            }
+            // 채팅 반응 줄(ShortcutsFlexbox) 안인지, 아니면 포럼 글 머리 같은 다른 곳인지
+            val loose = !inChatRow(v)
+            if (skipped[v] == true) {
+                trace(v, "ensure: skipped earlier, restore")
+                restore(v)
+                return
+            }
+            val sib = reactionRef(v)
             var aa = wordButtons[v] as? TextView
             // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
             val cur = v.background
             val orig = if (cur is Twin) cur.orig else cur
-            if (!fitSize && !showWord) {
+            // 포럼 글 머리에서 옆에 보이는 반응이 없으면 버튼도 접어 둔다 (반응이 생기면 다시 편다)
+            if (loose && sib == null) {
+                if (collapsed[v] != true) trace(v, "ensure: LOOSE, no reaction shown next to it, collapse (now ${v.width}x${v.height})")
+                collapsed[v] = true
                 aa?.let { v.removeView(it) }
                 if (cur is Twin) v.background = cur.orig
+                if (targetSize[v] != Pair(0, 0)) {
+                    targetSize[v] = Pair(0, 0)
+                    v.requestLayout()
+                }
+                if (v.alpha != 0f) v.alpha = 0f
                 return
             }
+            if (collapsed.remove(v) == true) trace(v, "ensure: reaction shown again, expand")
             val size = if (sib != null && sib.height > 0) {
                 if (fitSize) (sib.height * SIZE_RATIO).toInt() else sib.height
             } else if (knownSize > 0) {
                 knownSize
             } else {
-                v.height.takeIf { it > 0 } ?: return
+                v.height.takeIf { it > 0 } ?: run {
+                    trace(v, "ensure: no size yet (no sib, no known size, h=0)")
+                    return
+                }
             }
             var gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
-            if (sib != null) {
+            if (sib != null && !loose) {
                 val sp = sib.parent as? android.view.ViewGroup
                 val i = sp?.indexOfChild(sib) ?: -1
                 val next = if (sp != null && i >= 0 && i + 1 < sp.childCount) sp.getChildAt(i + 1) else null
                 if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
             }
+            // 포럼 글 머리는 줄이 넘어가지 않는다: 오른쪽 버튼(팔로우 등)까지 자리가 있을 때만 Aa
+            val wantWord = showWord && (!loose || roomForAa(v, size, gap))
+            if (!fitSize && !wantWord) {
+                trace(v, "ensure: fit and Aa both off")
+                if (targetSize.remove(v) != null) v.requestLayout()
+                aa?.let { v.removeView(it) }
+                if (cur is Twin) v.background = cur.orig
+                if (v.alpha != 1f) v.alpha = 1f
+                return
+            }
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
-            val width = if (showWord) size * 2 + gap else size
+            val width = if (wantWord) size * 2 + gap else size
             // 크기가 맞기 전(첫 순간)에는 숨겨서 뭉개진 모양이 보이지 않게
+            // 줄이 버튼을 늘리거나 줄이지 못하게 (포럼 글 머리에서는 남는 폭만큼 커다랗게 늘어났다).
+            // 감싼 칸까지 손대는 건 채팅 반응 줄에서만
+            noFlex(v)
+            if (!loose) noFlex(v.parent as? View)
+            // 줄이 우리가 정한 크기를 무시하고 늘릴 때만 포기한다. 우리가 전에 넣은 크기(Aa 가 있던 폭)를
+            // 늘어난 걸로 착각해 원래대로 두면, Aa 만 빠지고 긴 버튼이 남았다
+            val cl0 = v.layoutParams
+            val ourW = cl0 != null && cl0.width > 0
+            val ourH = cl0 != null && cl0.height > 0
+            if (loose && v.height > 0 && v.width > 0 && ((ourW && v.width > cl0!!.width * 1.6f) || (ourH && v.height > cl0!!.height * 1.6f))) {
+                val n = (stretchCount[v] ?: 0) + 1
+                stretchCount[v] = n
+                // 원래대로 돌리면 디스코드도 똑같이 크게 늘려 버린다. 자리 잡는 단계에서 크기를 고정하니 기록만
+                if (n == 3) note("still stretched outside the chat row: w=${v.width} h=${v.height} set=${cl0!!.width}x${cl0.height} in ${parents(v)}")
+                v.requestLayout()
+            } else {
+                stretchCount.remove(v)
+            }
             val ready = abs(v.width - width) <= 1 && abs(v.height - size) <= 1
+            trace(v, "ensure: ${if (loose) "LOOSE" else "chat"} want=${width}x$size now=${v.width}x${v.height} ready=$ready word=$wantWord gap=$gap sib=${sib?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }} alpha=${v.alpha} ty=${v.translationY} ${lpStr(v.layoutParams)}")
             val alpha = if (ready) 1f else 0f
             if (v.alpha != alpha) v.alpha = alpha
             // 버튼을 감싼 칸이 폭을 고정해 두면 늘어나지 못한다: 내용만큼으로
-            (v.parent as? View)?.takeIf { it !== sib?.parent }?.layoutParams?.let { plp ->
+            (v.parent as? View)?.takeIf { !loose && it !== sib?.parent }?.layoutParams?.let { plp ->
                 if (plp.width >= 0 && plp.width < width) {
                     plp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
                     (v.parent as View).layoutParams = plp
@@ -367,6 +630,11 @@ val reactionWordsPlugin = plugin {
                     (v.parent as View).layoutParams = plp
                 }
             }
+            val tgt = Pair(width, size)
+            if (targetSize[v] != tgt) {
+                targetSize[v] = tgt
+                v.requestLayout()
+            }
             v.layoutParams?.let { lp ->
                 if (lp.width != width || lp.height != size) {
                     lp.width = width
@@ -375,7 +643,7 @@ val reactionWordsPlugin = plugin {
                 }
             }
             // 배경
-            if (showWord) {
+            if (wantWord) {
                 if (orig != null && (cur !is Twin || cur.gap != gap)) v.background = Twin(orig, gap)
             } else if (cur is Twin) {
                 v.background = cur.orig
@@ -389,16 +657,17 @@ val reactionWordsPlugin = plugin {
                 iconW += c.measuredWidth + (m?.leftMargin ?: 0) + (m?.rightMargin ?: 0)
             }
             if (iconW <= 0 && knownIconW > 0) iconW = knownIconW
-            if (sib != null && sib.height > 0) {
+            // 기억해 두는 값은 채팅 반응 줄에서만 (포럼 글 머리의 큰 값이 채팅 버튼 크기를 망쳤다)
+            if (!loose && sib != null && sib.height > 0) {
                 knownSize = size
                 knownGap = gap
             }
-            if (iconW > 0) knownIconW = iconW
+            if (!loose && iconW > 0) knownIconW = iconW
             val padL = ((size - iconW) / 2).coerceAtLeast(0)
             if (v.gravity != (Gravity.START or Gravity.CENTER_VERTICAL)) v.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             if (v.paddingLeft != padL || v.paddingRight != 0 || v.paddingTop != 0 || v.paddingBottom != 0) v.setPadding(padL, 0, 0, 0)
             // Aa: 오른쪽 정사각형
-            if (showWord) {
+            if (wantWord) {
                 if (aa == null) {
                     aa = makeButton(v)
                     wordButtons[v] = aa
@@ -426,7 +695,15 @@ val reactionWordsPlugin = plugin {
             val lastReaction = lastReactionBefore(v)
             val vlp = v.layoutParams as? android.view.ViewGroup.MarginLayoutParams
             if (vlp != null && !baseMargin.containsKey(v)) baseMargin[v] = vlp.marginStart
-            if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
+            if (loose && vlp != null) {
+                // 포럼 글 머리는 칸 배치(ConstraintLayout)가 위치를 정한다: 간격을 손대지 않는다 (손대면 계속 벌어졌다)
+                val base = baseMargin[v] ?: vlp.marginStart
+                if (vlp.marginStart != base) {
+                    vlp.marginStart = base
+                    vlp.leftMargin = base
+                    v.layoutParams = vlp
+                }
+            } else if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
                 // 같은 줄일 때만 (반응이 두 줄이 되어 버튼이 다음 줄 맨 앞으로 가면 앞 반응은 윗줄 끝이다)
                 val a = IntArray(2)
                 val b = IntArray(2)
@@ -460,7 +737,7 @@ val reactionWordsPlugin = plugin {
                 val want = refCenter - vCenterNoShift
                 val t = if (abs(want) < ref.height) want else 0f
                 if (abs(v.translationY - t) > 1f) v.translationY = t
-                if (t != 0f) knownT = t
+                if (!loose && t != 0f) knownT = t
             }
         }
 
@@ -475,18 +752,33 @@ val reactionWordsPlugin = plugin {
                 } catch (e: Throwable) {
                     lastError = "button: $e"
                 }
-                if (v.alpha == 0f) {
+                if (v.alpha == 0f && collapsed[v] != true) {
                     // 아직 크기가 안 맞으면 다시 재게 하고 몇 번 더 맞춰 본다
                     val n = (tries[v] ?: 0) + 1
                     tries[v] = n
                     if (n <= 6) {
+                        trace(v, "retry $n: still hidden, now=${v.width}x${v.height} target=${targetSize[v]}")
+                        // 줄이 다시 배치해 주길 기다리지 않고 버튼 크기를 직접 맞춘다 (포럼 글 머리 줄은 다시 배치를 안 해 줘서 늘어난 채 남았다)
+                        val t = targetSize[v]
+                        if (t != null && v.isAttachedToWindow && (v.width != t.first || v.height != t.second)) {
+                            try {
+                                v.measure(View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY))
+                                val top = v.top + (v.height - t.second) / 2
+                                v.layout(v.left, top, v.left + t.first, top + t.second)
+                                trace(v, "forced size: now=${v.width}x${v.height}")
+                                ensure(v)
+                            } catch (e: Throwable) {
+                                trace(v, "forced size failed: $e")
+                            }
+                        }
                         v.requestLayout()
-                        v.postDelayed({ schedule(v) }, 32L)
+                        v.postDelayed({ schedule(v) }, 16L)
                     } else {
                         // 끝내 안 맞으면 보여는 준다 (배경은 Twin 이 알아서 원래 모양으로 그린다)
                         v.alpha = 1f
                         lastError = "button size did not apply (w=${v.width}, h=${v.height})"
-                        note(lastError)
+                        note("$lastError [${bid(v)}]")
+                        trace(v, "gave up after retries: now=${v.width}x${v.height} target=${targetSize[v]} ${lpStr(v.layoutParams)} parent=${(v.parent as? View)?.let { viewStr(it) }}")
                     }
                 } else {
                     tries.remove(v)
@@ -617,10 +909,12 @@ val reactionWordsPlugin = plugin {
                             override fun afterHookedMethod(param: MethodHookParam) {
                                 val v = param.thisObject as View
                                 if (!addViewClass.isInstance(v)) return
+                                trace(v, "attach: in ${parents(v)}")
                                 try {
                                     ensure(v)
                                 } catch (e: Throwable) {
                                     lastError = "attach: $e"
+                                    trace(v, "attach error: $e")
                                 }
                             }
                         },
@@ -628,6 +922,78 @@ val reactionWordsPlugin = plugin {
                 )
             } catch (e: Throwable) {
                 lastError = "attach hook: $e"
+            }
+            // 줄(포럼 글 머리 등)이 크기 지정을 무시하고 남는 폭만큼 늘리므로, 잴 때 아예 정한 크기로 재게 한다
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        android.widget.LinearLayout::class.java,
+                        "onMeasure",
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                val inW = param.args[0] as Int
+                                val inH = param.args[1] as Int
+                                val t = targetSize[v]
+                                if (t != null) {
+                                    param.args[0] = View.MeasureSpec.makeMeasureSpec(t.first, View.MeasureSpec.EXACTLY)
+                                    param.args[1] = View.MeasureSpec.makeMeasureSpec(t.second, View.MeasureSpec.EXACTLY)
+                                }
+                                param.setObjectExtra("in", "${specStr(inW)} x ${specStr(inH)}")
+                            }
+
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                trace(v, "measure: parent asked ${param.getObjectExtra("in")}, target=${targetSize[v]}, result=${v.measuredWidth}x${v.measuredHeight}")
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "measure hook: $e"
+            }
+            // 포럼 글 머리 줄은 잰 크기도 무시하고 자리를 크게 준다: 받은 자리 안에서 정한 크기로 (세로는 가운데)
+            try {
+                hooks.add(
+                    XposedHelpers.findAndHookMethod(
+                        View::class.java,
+                        "layout",
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val v = param.thisObject as View
+                                if (!addViewClass.isInstance(v)) return
+                                val l = param.args[0] as Int
+                                val top = param.args[1] as Int
+                                val r = param.args[2] as Int
+                                val b = param.args[3] as Int
+                                val t = targetSize[v]
+                                if (t == null) {
+                                    trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), no target")
+                                    return
+                                }
+                                if (r - l == t.first && b - top == t.second) {
+                                    trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), matches target")
+                                    return
+                                }
+                                trace(v, "layout: given ${r - l}x${b - top} at ($l,$top), clamped to ${t.first}x${t.second}")
+                                val nt = top + ((b - top) - t.second) / 2
+                                param.args[1] = nt
+                                param.args[2] = l + t.first
+                                param.args[3] = nt + t.second
+                            }
+                        },
+                    ),
+                )
+            } catch (e: Throwable) {
+                lastError = "frame hook: $e"
             }
             try {
                 hooks.add(
@@ -683,6 +1049,44 @@ val reactionWordsPlugin = plugin {
             true
         }
         registerNativeMethod("${manifest.id}.ping") { "pong" }
+        /** 지금 알고 있는 반응 추가 버튼 전부의 자세한 상태 (화면에 붙은 것부터) */
+        registerNativeMethod("${manifest.id}.dump") {
+            val sb = StringBuilder()
+            val list = seenButtons.keys.toList().sortedByDescending { it.isAttachedToWindow }
+            sb.append("buttons known: ${list.size}, attached: ${list.count { it.isAttachedToWindow }}\n")
+            for ((n, v) in list.withIndex()) {
+                if (n >= 16) {
+                    sb.append("... ${list.size - n} more\n")
+                    break
+                }
+                try {
+                    sb.append("\n=== button ${n + 1} [${bid(v)}] ${if (v.isAttachedToWindow) "ON SCREEN" else "detached"} ${if (inChatRow(v)) "chat row" else "LOOSE (not chat row)"} ===\n")
+                    sb.append("self: ${viewStr(v)}\n")
+                    sb.append("  alpha=${v.alpha} ty=${v.translationY} pad=${v.paddingLeft},${v.paddingTop},${v.paddingRight},${v.paddingBottom} gravity=${(v as? android.widget.LinearLayout)?.gravity} bg=${v.background?.javaClass?.simpleName} target=${targetSize[v]} skipped=${skipped[v] == true} orig=${origLook[v]?.let { "${it.w}x${it.h}" }}\n")
+                    (v as? android.view.ViewGroup)?.let { g -> for (i in 0 until g.childCount) sb.append("  child $i: ${viewStr(g.getChildAt(i))}\n") }
+                    var p: Any? = v.parent
+                    var d = 1
+                    var self: View = v
+                    while (p is View && d <= 5) {
+                        sb.append("parent $d: ${viewStr(p)}\n")
+                        if (d <= 2 && p is android.view.ViewGroup) {
+                            for (i in 0 until minOf(p.childCount, 12)) {
+                                val c = p.getChildAt(i)
+                                sb.append("    ${if (c === self) "*" else " "}[$i] ${viewStr(c)}\n")
+                            }
+                        }
+                        self = p
+                        p = p.parent
+                        d++
+                    }
+                    sb.append("trace:\n")
+                    traces[v]?.let { q -> synchronized(q) { for (line in q) sb.append("  $line\n") } }
+                } catch (e: Throwable) {
+                    sb.append("dump error: $e\n")
+                }
+            }
+            sb.toString()
+        }
         registerNativeMethod("${manifest.id}.status") {
             mapOf(
                 "rowHook" to rowHook,
