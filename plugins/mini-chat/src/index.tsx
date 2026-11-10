@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.8'
+const VERSION = '1.0.9'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -235,7 +235,8 @@ function swap(v: any, channelId: string, guildId: string | null, depth: number):
 const BASE_PROPS = { isActive: true, isNavigationTTIVisible: true, showCreateThread: false, isNavigationScreen: false, frame: null, screenIndex: 0 }
 
 function makeProps(win: Win) {
-    const guildId = guildOf(win.channelId)
+    // DM 은 서버 ID 대신 "@me" 를 쓴다 (없으면 "채팅 채널 없음" 화면이 나온다)
+    const guildId = guildOf(win.channelId) ?? '@me'
     const p = lastProps ? swap(lastProps, win.channelId, guildId, 0) : { ...BASE_PROPS }
     p.channelId = win.channelId
     p.guildId = guildId
@@ -257,7 +258,13 @@ function loadScreen(why: string) {
     loadTried = true
     try {
         const m: any = lookupModuleWithImportedPath(SCREEN_PATH)
-        const exports = Array.isArray(m) ? m[0] : m
+        let exports = Array.isArray(m) ? m[0] : m
+        // 아직 한 번도 안 불린 모듈이면 번호로 직접 부른다
+        const r = (globalThis as any).__r
+        if (!exports && Array.isArray(m) && m[1] != null && typeof r === 'function') {
+            exports = r(m[1])
+            note(`required screen module #${m[1]}`)
+        }
         note(`load screen (${why}): ${exports ? 'ok' : 'not available'}`)
         if (exports && !Screen) {
             patchScreen(exports, startCleanup)
