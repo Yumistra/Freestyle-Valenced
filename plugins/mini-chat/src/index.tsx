@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.1'
+const VERSION = '1.2.2'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -34,7 +34,7 @@ const D = () => Design as any
 // ── 설정 ────────────────────────────────────────────────────────
 type Host = 'global' | 'screen'
 /** 창을 그리는 실제 자리: 앱 맨 바깥(root, 분할 화면이 되는 곳), 토스트 자리(global), 채팅 화면 안(screen) */
-type Place = Host | 'root'
+type Place = Host | 'root' | 'stack'
 interface Settings {
     /** 창을 어디에 그릴지: global = 앱 전체 위 (토스트 자리), screen = 채팅 화면 안 */
     host: Host
@@ -857,16 +857,20 @@ function Windows({ host }: { host: Place }) {
     useStore()
     useEffect(() => {
         if (host === 'screen') return
+        if (host === 'stack') stackHost = true
         hostMounted = true
         note(`${host} host mounted`)
         emit()
         return () => {
+            if (host === 'stack') stackHost = false
             hostMounted = false
         }
     }, [])
     // 훅은 언제나 같은 순서로 (일찍 돌려주기 전에)
     const kb = useKeyboard()
-    if (settings().host !== (host === 'root' ? 'global' : host) || !wins.length) return null
+    if (settings().host !== (host === 'root' || host === 'stack' ? 'global' : host) || !wins.length) return null
+    // 화면 묶음 자리가 있으면 토스트 자리에는 그리지 않는다
+    if (host === 'global' && stackHost) return null
     const hidden = host !== 'screen' && hiddenByOverlay()
     // 분할 중에는 디스코드의 시트, 화면이 아래 절반 안에서만 열려서 위의 분할 창은 가리지 않는다: 그대로 둔다
     const keep = hidden && rootActive ? wins.filter(w => w.docked && !w.minimized) : []
@@ -1018,6 +1022,7 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
 
 // ── 분할 화면: 디스코드 전체를 아래 절반으로 ────────────────────
 let rootActive = false
+let stackHost = false
 const splitLine = () => Math.round(Dimensions.get('window').height * 0.5)
 const anyDocked = () => wins.some(w => w.docked && !w.minimized)
 
@@ -1053,7 +1058,13 @@ function SplitStack(props: any) {
     const { [WRAP]: Inner, ...rest } = props
     const split = settings().host === 'global' && anyDocked()
     const top = split ? splitLine() - (StatusBar.currentHeight ?? 0) : 0
-    return createElement(Inner, { ...rest, [SKIP]: true, style: [rest.style, top ? { marginTop: top } : null] })
+    // 창들도 여기(화면 묶음 바로 옆, 맨 위)에 그린다. 토스트 자리는 다시 그려지지 않으면 창이 안 나왔다
+    return (
+        <>
+            {createElement(Inner, { ...rest, [SKIP]: true, style: [rest.style, top ? { marginTop: top } : null] })}
+            <Windows host="stack" />
+        </>
+    )
 }
 
 function patchRoot(cleanup: (...f: any[]) => void) {
