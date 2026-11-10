@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.5'
+const VERSION = '1.0.6'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -238,8 +238,23 @@ function makeProps(win: Win) {
     p.isNavigationTTIVisible = true
     // 보고 있는 화면으로 다뤄야 읽음 처리가 된다
     p.isActive = true
+    // 내비게이션 화면으로 다루면 맨 위에 (창에서는 작동하지 않는) 뒤로 가기 화살표가 붙는다
+    p.isNavigationScreen = false
     p[MARK] = win.id
     return p
+}
+
+let treeLogged = false
+/** 그린 결과의 모양 (컴포넌트 이름과 props 이름) */
+function tree(n: any, depth: number): string {
+    if (n == null || typeof n !== 'object') return ''
+    if (Array.isArray(n)) return n.map(x => tree(x, depth)).filter(Boolean).join(', ')
+    if (!n.props) return ''
+    const t = n.type
+    const name = typeof t === 'string' ? t : t?.displayName || t?.name || t?.type?.displayName || t?.type?.name || t?.render?.name || (t?.$$typeof ? String(t.$$typeof.description ?? '?') : '?')
+    const keys = Object.keys(n.props).filter(k => k !== 'children').slice(0, 12).join(',')
+    const kids = depth < 7 ? tree(n.props.children, depth + 1) : ''
+    return `${name}(${keys})${kids ? `[${kids}]` : ''}`
 }
 
 function patchScreen(exports: any, cleanup: (...f: any[]) => void) {
@@ -256,7 +271,14 @@ function patchScreen(exports: any, cleanup: (...f: any[]) => void) {
             const props = args[0]
             if (props?.[MARK]) {
                 status.ourRenders++
-                return orig.apply(this, args)
+                const out = orig.apply(this, args)
+                if (!treeLogged) {
+                    treeLogged = true
+                    try {
+                        note(`window screen tree: ${tree(out, 0)}`)
+                    } catch {}
+                }
+                return out
             }
             status.screenRenders++
             try {
@@ -548,7 +570,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             </View>
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
-                    <NoInsets>
+                    <NoInsets kb={kb > 0 && front ? kb : 0}>
                         <ChannelView win={win} />
                     </NoInsets>
                 </Boundary>
@@ -566,10 +588,23 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
 }
 
 /** 창 안의 채널 화면이 상태 바, 아래 바 자리만큼 비우지 않게 한다 */
-function NoInsets({ children }: { children: any }) {
+/** 아래 내비게이션 바 높이 (채팅 화면이 그만큼 아래를 비운다) */
+function navBarHeight() {
+    try {
+        const scr = Dimensions.get('screen').height
+        const win = Dimensions.get('window').height
+        const h = scr - win - (StatusBar.currentHeight ?? 0)
+        return h > 4 && h < 120 ? h : 32
+    } catch {
+        return 32
+    }
+}
+
+function NoInsets({ children, kb }: { children: any; kb: number }) {
     const Ctx = insetsContext()
     // 위 여백은 디스코드가 기기 값을 직접 읽어서 비워서(알려 줘도 그대로였다), 상태 바 높이만큼 끌어올려 가린다
-    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0) }}>{children}</View>
+    // 아래 내비게이션 바 자리도 (키보드가 없을 때만) 아래로 내려 가린다
+    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0), marginBottom: kb > 0 ? 0 : -navBarHeight() }}>{children}</View>
     return Ctx?.Provider ? <Ctx.Provider value={ZERO}>{inner}</Ctx.Provider> : inner
 }
 
