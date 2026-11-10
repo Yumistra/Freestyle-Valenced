@@ -5,7 +5,7 @@
 	"description": "Open channels in floating or split windows inside Discord, and watch several at once.",
 	"author": "Yumistra",
 	"icon": "ChatIcon",
-	"version": "1.1.1",
+	"version": "1.2.0",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

@@ -10,8 +10,9 @@ import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Component, createElement, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, Dimensions, Image, Keyboard, LayoutAnimation, UIManager, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
-import { lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
+import { getModules, lookupModule } from '@valenced/modules/finders'
+import { beforeJSX } from '@valenced/react/jsx-runtime'
+import { withName, withProps } from '@valenced/modules/finders/filters'
 
 /**
  * Mini Chat: 채널을 디스코드 안의 떠 있는 창(팝업)이나 아래쪽 분할 창으로 열어, 여러 채널을 한 번에 본다.
@@ -21,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.1.1'
+const VERSION = '1.2.0'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -32,6 +33,8 @@ const D = () => Design as any
 
 // ── 설정 ────────────────────────────────────────────────────────
 type Host = 'global' | 'screen'
+/** 창을 그리는 실제 자리: 앱 맨 바깥(root, 분할 화면이 되는 곳), 토스트 자리(global), 채팅 화면 안(screen) */
+type Place = Host | 'root'
 interface Settings {
     /** 창을 어디에 그릴지: global = 앱 전체 위 (토스트 자리), screen = 채팅 화면 안 */
     host: Host
@@ -680,9 +683,10 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
         : win.docked
           ? (() => {
                 // 분할: 화면 아래 절반을 도킹한 창끼리 나눠 쓴다
-                const top = height * 0.5
-                const each = (height - top) / Math.max(1, dockCount)
-                return { left: 0, top: top + each * dockIndex, width, height: each }
+                // 분할: 위 절반은 창(들), 아래 절반은 디스코드 (앱 바깥 자리가 있으면 디스코드를 아래로 줄인다)
+                const bottom = splitLine()
+                const each = (bottom - minTop) / Math.max(1, dockCount)
+                return { left: 0, top: minTop + each * dockIndex, width, height: each }
             })()
           : {
                 left: win.x + drag.dx - (drag.left ? drag.dw : 0),
@@ -692,7 +696,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             }
     // 키보드가 열리면 채널 화면은 키보드 높이만큼 아래를 비운다 (화면 맨 아래까지 닿는다고 생각한다).
     // 그래서 맨 앞 창은 아래쪽을 화면 끝까지 늘리고, 키보드 위로 원래 높이만큼 보이게 올린다
-    if (kb > 0 && front) {
+    if (kb > 0 && front && !win.docked) {
         const top = Math.max(minTop, height - kb - frame.height)
         frame = { ...frame, top, height: height - top }
     } else if (kb > 0) {
@@ -849,32 +853,44 @@ function ChannelBody({ id, channelId, props }: { id: number; channelId: string; 
     return createElement(Screen, { key: `mini-${id}-${channelId}`, ...props })
 }
 
-function Windows({ host }: { host: Host }) {
+function Windows({ host }: { host: Place }) {
     useStore()
     useEffect(() => {
-        if (host !== 'global') return
+        if (host === 'screen') return
         hostMounted = true
-        note('global host mounted')
+        if (host === 'root') rootActive = true
+        note(`${host} host mounted`)
+        emit()
         return () => {
             hostMounted = false
+            if (host === 'root') rootActive = false
         }
     }, [])
     // 훅은 언제나 같은 순서로 (일찍 돌려주기 전에)
     const kb = useKeyboard()
-    if (settings().host !== host || !wins.length) return null
-    if (host === 'global' && hiddenByOverlay()) {
+    if (settings().host !== (host === 'root' ? 'global' : host) || !wins.length) return null
+    // 앱 맨 바깥 자리가 있으면 토스트 자리에는 그리지 않는다
+    if (host === 'global' && rootActive) return null
+    const hidden = host !== 'screen' && hiddenByOverlay()
+    // 분할 중에는 디스코드의 시트, 화면이 아래 절반 안에서만 열려서 위의 분할 창은 가리지 않는다: 그대로 둔다
+    const keep = hidden && host === 'root' ? wins.filter(w => w.docked && !w.minimized) : []
+    if (hidden) {
+        const docked0 = keep
         // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
         return (
             <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
-                <Pressable
+                {keep.map(w => (
+                    <Window key={w.id} win={w} dockIndex={docked0.indexOf(w)} dockCount={docked0.length} kb={kb} front={false} />
+                ))}
+                {keep.length === wins.length ? null : <Pressable
                     onPress={() => {
                         forceShow = true
                         emit()
                     }}
                     style={{ position: 'absolute', right: 8, top: (StatusBar.currentHeight ?? 24) + 4, paddingHorizontal: 10, height: 26, borderRadius: 13, justifyContent: 'center', backgroundColor: color('BACKGROUND_BASE_LOWEST', '#111214'), opacity: 0.85 }}
                 >
-                    <RNText style={{ color: color('TEXT_MUTED', '#aaa'), fontSize: 12, fontWeight: '700' }}>{`Mini Chat ${wins.length}`}</RNText>
-                </Pressable>
+                    <RNText style={{ color: color('TEXT_MUTED', '#aaa'), fontSize: 12, fontWeight: '700' }}>{`Mini Chat ${wins.length - keep.length}`}</RNText>
+                </Pressable>}
             </View>
         )
     }
@@ -1002,6 +1018,54 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
             sub?.()
         } catch {}
     })
+}
+
+// ── 분할 화면: 디스코드 전체를 아래 절반으로 ────────────────────
+let rootActive = false
+const splitLine = () => Math.round(Dimensions.get('window').height * 0.5)
+const anyDocked = () => wins.some(w => w.docked && !w.minimized)
+
+/** 디스코드 앱 전체(AppFreezer)를 감싼다: 분할 중이면 아래 절반으로 밀고, 창들은 그 바깥 맨 위에 그린다 */
+function SplitRoot(props: any) {
+    useStore()
+    const { [WRAP]: Inner, ...rest } = props
+    const split = settings().host === 'global' && anyDocked()
+    const top = split ? splitLine() - (StatusBar.currentHeight ?? 0) : 0
+    return (
+        <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, marginTop: top, overflow: 'hidden' }}>{createElement(Inner, { ...rest, [SKIP]: true })}</View>
+            {split ? <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: splitLine() - 2, height: 4, alignItems: 'center' }}>
+                <View style={{ width: 48, height: 4, borderRadius: 2, backgroundColor: color('INTERACTIVE_MUTED', '#888') }} />
+            </View> : null}
+            <Windows host="root" />
+        </View>
+    )
+}
+const WRAP = '__miniChatInner'
+const SKIP = '__miniChatSkip'
+
+function patchRoot(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModules(withName('AppFreezer') as any, (Freezer: any) => {
+            const fn = typeof Freezer === 'function' ? Freezer : Freezer?.default
+            if (typeof fn !== 'function') {
+                note(`app root not usable: ${describe(Freezer)}`)
+                return
+            }
+            note('app root found (AppFreezer)')
+            cleanup(
+                beforeJSX(fn, (args: any[]) => {
+                    try {
+                        const props = args[1] ?? {}
+                        if (props[SKIP]) return args as any
+                        return [SplitRoot, { ...props, [WRAP]: fn }, ...args.slice(2)] as any
+                    } catch {
+                        return args as any
+                    }
+                }),
+            )
+        }) as any,
+    )
 }
 
 // ── 앱 전체 위에 그리기 (토스트 자리) ───────────────────────────
@@ -1283,6 +1347,11 @@ export default plugin({
                 else cleanup(waitForModuleWithImportedPath(SCREEN_PATH, (x: any) => bind(x, 'loaded later')) as any)
             }) as any,
         )
+        try {
+            patchRoot(cleanup)
+        } catch (e: any) {
+            note(`app root failed: ${e?.message ?? e}`)
+        }
         try {
             patchToastHost(cleanup)
         } catch (e: any) {
