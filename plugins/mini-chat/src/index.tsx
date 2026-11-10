@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.6'
+const VERSION = '1.0.7'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -868,6 +868,21 @@ function addRow(node: any, channel: any, close: () => void, depth = 0): any {
     return kids === props.children ? node : { ...node, props: { ...props, children: kids } }
 }
 
+/** 채널, DM, 그룹 DM, 포럼 글, 사람을 꾹 누른 창 */
+const SHEET_KEY = /(Channel|DM|PrivateChannel|Group|ForumPost|Thread|User)\w*LongPress|LongPress\w*(Channel|DM|Thread|User)/i
+
+/** 꾹 누른 창이 가리키는 채널 (사람이면 그 사람과의 DM) */
+function sheetChannel(p: any): any {
+    try {
+        const CS = S().ChannelStore
+        const get = (id: any) => (typeof id === 'string' ? CS?.getChannel?.(id) : undefined)
+        const direct = p?.channel ?? p?.thread ?? p?.privateChannel ?? get(p?.channelId) ?? get(p?.threadId) ?? get(p?.privateChannelId)
+        if (direct?.id) return direct
+        const userId = p?.userId ?? p?.user?.id
+        if (userId) return get(CS?.getDMFromUserId?.(userId))
+    } catch {}
+}
+
 const wrapped = new WeakMap<any, any>()
 function wrapInner(type: any, channel: any, close: () => void) {
     const MEMO = Symbol.for('react.memo')
@@ -896,7 +911,7 @@ function patchSheet(cleanup: (...f: any[]) => void) {
     const render = (args: any[], orig: (...a: any[]) => any, self: unknown) => {
         const out = orig.apply(self, args)
         const p = args[0]
-        const channel = p?.channel ?? (p?.channelId ? S().ChannelStore?.getChannel?.(p.channelId) : undefined)
+        const channel = sheetChannel(p)
         if (!channel) return out
         const close = () => {
             try {
@@ -937,7 +952,7 @@ function patchSheet(cleanup: (...f: any[]) => void) {
             instead(ActionSheetActionCreators as any, 'openLazy', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                 try {
                     const [sheet, key] = args
-                    if (typeof key === 'string' && /ChannelLongPress/i.test(key) && typeof sheet?.then === 'function') {
+                    if (typeof key === 'string' && SHEET_KEY.test(key) && !/Message/i.test(key) && typeof sheet?.then === 'function') {
                         note(`sheet opened: ${key}`)
                         args[0] = sheet.then((m: any) => patchMod(m))
                     }
