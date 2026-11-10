@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.2'
+const VERSION = '1.2.3'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -873,35 +873,31 @@ function Windows({ host }: { host: Place }) {
     if (host === 'global' && stackHost) return null
     const hidden = host !== 'screen' && hiddenByOverlay()
     // 분할 중에는 디스코드의 시트, 화면이 아래 절반 안에서만 열려서 위의 분할 창은 가리지 않는다: 그대로 둔다
-    const keep = hidden && rootActive ? wins.filter(w => w.docked && !w.minimized) : []
-    if (hidden) {
-        const docked0 = keep
-        // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
-        return (
-            <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
-                {keep.map(w => (
-                    <Window key={w.id} win={w} dockIndex={docked0.indexOf(w)} dockCount={docked0.length} kb={kb} front={false} />
-                ))}
-                {keep.length === wins.length ? null : <Pressable
+    const shown = (w: Win) => !hidden || (rootActive && w.docked && !w.minimized)
+    const hiddenCount = wins.filter(w => !shown(w)).length
+    const docked = wins.filter(w => w.docked && !w.minimized)
+    const open = wins.filter(w => !w.minimized && shown(w))
+    const frontId = open.reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)?.id
+    // 숨길 때도 창을 빼지 않고 투명하게만 한다 (빼면 채널 화면을 처음부터 다시 불러와 깜빡인다)
+    return (
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
+            {wins.map(w => (
+                <View key={w.id} pointerEvents={shown(w) ? 'box-none' : 'none'} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, opacity: shown(w) ? 1 : 0, zIndex: w.z }}>
+                    <Window win={w} dockIndex={docked.indexOf(w)} dockCount={docked.length} kb={kb} front={w.id === frontId} />
+                </View>
+            ))}
+            {hiddenCount ? (
+                // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
+                <Pressable
                     onPress={() => {
                         forceShow = true
                         emit()
                     }}
-                    style={{ position: 'absolute', right: 8, top: (StatusBar.currentHeight ?? 24) + 4, paddingHorizontal: 10, height: 26, borderRadius: 13, justifyContent: 'center', backgroundColor: color('BACKGROUND_BASE_LOWEST', '#111214'), opacity: 0.85 }}
+                    style={{ position: 'absolute', right: 8, top: (StatusBar.currentHeight ?? 24) + 4, paddingHorizontal: 10, height: 26, borderRadius: 13, justifyContent: 'center', backgroundColor: color('BACKGROUND_BASE_LOWEST', '#111214'), opacity: 0.85, zIndex: 2000000 }}
                 >
-                    <RNText style={{ color: color('TEXT_MUTED', '#aaa'), fontSize: 12, fontWeight: '700' }}>{`Mini Chat ${wins.length - keep.length}`}</RNText>
-                </Pressable>}
-            </View>
-        )
-    }
-    const docked = wins.filter(w => w.docked && !w.minimized)
-    const open = wins.filter(w => !w.minimized)
-    const frontId = open.reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)?.id
-    return (
-        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
-            {wins.map(w => (
-                <Window key={w.id} win={w} dockIndex={docked.indexOf(w)} dockCount={docked.length} kb={kb} front={w.id === frontId} />
-            ))}
+                    <RNText style={{ color: color('TEXT_MUTED', '#aaa'), fontSize: 12, fontWeight: '700' }}>{`Mini Chat ${hiddenCount}`}</RNText>
+                </Pressable>
+            ) : null}
         </View>
     )
 }
