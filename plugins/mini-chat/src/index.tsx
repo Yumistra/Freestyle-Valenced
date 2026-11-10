@@ -9,7 +9,7 @@ import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Component, createElement, memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Dimensions, Image, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
+import { Animated, Dimensions, Image, Keyboard, LayoutAnimation, UIManager, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 
@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.1.0'
+const VERSION = '1.1.1'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -551,12 +551,29 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
     const barTimer = useRef<any>()
     const winRef = useRef(win)
     winRef.current = win
+    // 나타나기, 사라지기 (창과 방울 모두)
+    const appear = useRef(new Animated.Value(0)).current
+    useEffect(() => {
+        appear.setValue(0)
+        Animated.spring(appear, { toValue: 1, useNativeDriver: true, stiffness: 320, damping: 26, mass: 0.8 }).start()
+    }, [win.minimized])
+    const animateOut = (then: () => void) => {
+        Animated.timing(appear, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => then())
+    }
+    // 버튼 줄
+    const barAnim = useRef(new Animated.Value(0)).current
     useEffect(() => () => clearTimeout(barTimer.current), [])
     const showBar = (on: boolean) => {
         clearTimeout(barTimer.current)
-        setBar(on)
-        // 삼성처럼 잠시 뒤 저절로 숨긴다
-        if (on) barTimer.current = setTimeout(() => setBar(false), 4000)
+        if (on) {
+            setBar(true)
+            barAnim.setValue(0)
+            Animated.spring(barAnim, { toValue: 1, useNativeDriver: true, stiffness: 420, damping: 24, mass: 0.6 }).start()
+            // 삼성처럼 잠시 뒤 저절로 숨긴다
+            barTimer.current = setTimeout(() => barRef.current(false), 4000)
+        } else {
+            Animated.timing(barAnim, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setBar(false))
+        }
     }
     const barRef = useRef(showBar)
     barRef.current = showBar
@@ -587,6 +604,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                 if (w.minimized) {
                     // 방울은 가까운 화면 가장자리에 붙인다
                     const cx = (w.bx ?? W - BUBBLE - 6) + g.dx + BUBBLE / 2
+                    smooth()
                     setWin(w.id, { bx: cx < W / 2 ? 6 : W - BUBBLE - 6, by: Math.min(Math.max((w.by ?? w.y) + g.dy, StatusBar.currentHeight ?? 0), H - BUBBLE - 8) })
                     return
                 }
@@ -628,9 +646,11 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
     if (win.minimized) {
         const img = bubbleImage(win.channelId)
         return (
-            <View
+            <Animated.View
                 {...move.panHandlers}
                 style={{
+                    opacity: appear,
+                    transform: [{ scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
                     position: 'absolute',
                     left: (win.bx ?? width - BUBBLE - 6) + drag.dx,
                     top: (win.by ?? win.y) + drag.dy,
@@ -647,10 +667,10 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     zIndex: 1000000,
                 }}
             >
-                <Pressable onPress={() => setWin(win.id, { minimized: false })} onLongPress={() => closeWin(win.id)} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                <Pressable onPress={() => animateOut(() => setWin(win.id, { minimized: false }))} onLongPress={() => animateOut(() => closeWin(win.id))} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
                     {img ? <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} /> : <DIcon names={channelIconNames(win.channelId)} fallback="#" c={color('INTERACTIVE_NORMAL', '#ddd')} size={26} />}
                 </Pressable>
-            </View>
+            </Animated.View>
         )
     }
 
@@ -686,17 +706,18 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
     }
 
     return (
-        <View
+        <Animated.View
             style={{
                 position: 'absolute',
                 ...frame,
+                transform: [{ scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }) }],
                 backgroundColor: bg,
                 borderRadius: free ? 16 : 0,
                 // 앞에 있는 창은 테두리 색으로 표시한다
                 borderWidth: free ? (front ? 2 : 1) : 0,
                 borderColor: front ? accent : subtle,
                 overflow: 'hidden',
-                opacity: win.transparent ? 0.55 : 1,
+                opacity: win.transparent ? Animated.multiply(appear, 0.55) : appear,
                 // 겹침 순서는 zIndex 로만 (안드로이드는 그림자 높이가 다르면 그게 순서를 정해 버린다)
                 zIndex: win.z,
                 elevation: 16,
@@ -722,8 +743,10 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             </View>
             {/* 버튼 줄: 손잡이를 누르면 위에 뜬다 */}
             {bar ? (
-                <View
+                <Animated.View
                     style={{
+                        opacity: barAnim,
+                        transform: [{ translateY: barAnim.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) }, { scale: barAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
                         position: 'absolute',
                         top: 2,
                         alignSelf: 'center',
@@ -739,11 +762,17 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     }}
                 >
                     <BarButton names={OPACITY_ICON} fallback="◐" on={win.transparent} accent={accent} onPress={act(() => setWin(win.id, { transparent: !win.transparent }))} />
-                    <BarButton names={MIN_ICON} fallback="–" accent={accent} onPress={act(() => setWin(win.id, { minimized: true }))} />
-                    <BarButton names={SPLIT_ICON} fallback="▤" on={win.docked} accent={accent} onPress={act(() => setWin(win.id, { docked: !win.docked, maximized: false }))} />
-                    <BarButton names={win.maximized ? RESTORE_ICON : MAX_ICON} fallback="⤢" on={win.maximized} accent={accent} onPress={act(() => setWin(win.id, { maximized: !win.maximized, docked: false }))} />
-                    <BarButton names={CLOSE_ICON} fallback="×" accent={accent} onPress={act(() => closeWin(win.id))} />
-                </View>
+                    <BarButton names={MIN_ICON} fallback="–" accent={accent} onPress={act(() => animateOut(() => setWin(win.id, { minimized: true })))} />
+                    <BarButton names={SPLIT_ICON} fallback="▤" on={win.docked} accent={accent} onPress={act(() => {
+                            smooth()
+                            setWin(win.id, { docked: !win.docked, maximized: false })
+                        })} />
+                    <BarButton names={win.maximized ? RESTORE_ICON : MAX_ICON} fallback="⤢" on={win.maximized} accent={accent} onPress={act(() => {
+                            smooth()
+                            setWin(win.id, { maximized: !win.maximized, docked: false })
+                        })} />
+                    <BarButton names={CLOSE_ICON} fallback="×" accent={accent} onPress={act(() => animateOut(() => closeWin(win.id)))} />
+                </Animated.View>
             ) : null}
             {free ? (
                 <>
@@ -751,8 +780,20 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     <View {...resizeL.panHandlers} style={{ position: 'absolute', left: 0, bottom: 0, width: 30, height: 30 }} />
                 </>
             ) : null}
-        </View>
+        </Animated.View>
     )
+}
+
+/** 다음 한 번의 배치 변화(전체 화면, 분할, 방울 붙이기)를 부드럽게 */
+let layoutAnimReady = false
+function smooth() {
+    try {
+        if (!layoutAnimReady) {
+            layoutAnimReady = true
+            ;(UIManager as any).setLayoutAnimationEnabledExperimental?.(true)
+        }
+        LayoutAnimation.configureNext({ duration: 220, update: { type: 'easeInEaseOut' }, create: { type: 'easeInEaseOut', property: 'opacity' }, delete: { type: 'easeInEaseOut', property: 'opacity' } })
+    } catch {}
 }
 
 function BarButton({ names, fallback, onPress, on, accent }: { names: string[]; fallback: string; onPress: () => void; on?: boolean; accent: string }) {
