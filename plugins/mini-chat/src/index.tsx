@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.10'
+const VERSION = '1.0.11'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -599,6 +599,9 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
         const minTop = StatusBar.currentHeight ?? 24
         const top = Math.max(minTop, height - kb - frame.height)
         frame = { ...frame, top, height: height - top }
+    } else if (kb > 0) {
+        // 뒤의 창도 채널 화면이 키보드 높이만큼 아래를 비운다: 그만큼 아래로 늘려 (키보드 뒤로) 내용은 그대로 보이게
+        frame = { ...frame, height: frame.height + kb }
     }
 
     return (
@@ -626,7 +629,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             </View>
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
-                    <NoInsets kb={kb > 0 && front ? kb : 0}>
+                    <NoInsets kb={kb}>
                         <ChannelView win={win} />
                     </NoInsets>
                 </Boundary>
