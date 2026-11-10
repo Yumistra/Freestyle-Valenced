@@ -4,7 +4,7 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { RootNavigationRef } from '@valenced/discord/modules/main_tabs_v2'
-import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { getModuleWithImportedPath, lookupModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
@@ -21,7 +21,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.7'
+const VERSION = '1.0.8'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -231,10 +231,14 @@ function swap(v: any, channelId: string, guildId: string | null, depth: number):
     return out
 }
 
+/** 디스코드가 채널 화면에 주는 props 모양 (기억한 게 없을 때) */
+const BASE_PROPS = { isActive: true, isNavigationTTIVisible: true, showCreateThread: false, isNavigationScreen: false, frame: null, screenIndex: 0 }
+
 function makeProps(win: Win) {
-    const base = lastProps ?? {}
-    const p = swap(base, win.channelId, guildOf(win.channelId), 0)
-    if (!lastProps || !findChannelId(p)) p.channelId = win.channelId
+    const guildId = guildOf(win.channelId)
+    const p = lastProps ? swap(lastProps, win.channelId, guildId, 0) : { ...BASE_PROPS }
+    p.channelId = win.channelId
+    p.guildId = guildId
     p.isNavigationTTIVisible = true
     // 보고 있는 화면으로 다뤄야 읽음 처리가 된다
     p.isActive = true
@@ -245,6 +249,24 @@ function makeProps(win: Win) {
 }
 
 let treeLogged = false
+let startCleanup: ((...f: any[]) => void) | undefined
+let loadTried = false
+/** 화면 모듈을 직접 불러온다 (채널을 아직 하나도 안 열었을 때) */
+function loadScreen(why: string) {
+    if (Screen || loadTried || !startCleanup) return
+    loadTried = true
+    try {
+        const m: any = lookupModuleWithImportedPath(SCREEN_PATH)
+        const exports = Array.isArray(m) ? m[0] : m
+        note(`load screen (${why}): ${exports ? 'ok' : 'not available'}`)
+        if (exports && !Screen) {
+            patchScreen(exports, startCleanup)
+            setTimeout(emit, 0)
+        }
+    } catch (e: any) {
+        note(`load screen failed: ${e?.message ?? e}`)
+    }
+}
 /** 그린 결과의 모양 (컴포넌트 이름과 props 이름) */
 function tree(n: any, depth: number): string {
     if (n == null || typeof n !== 'object') return ''
@@ -611,19 +633,11 @@ function NoInsets({ children, kb }: { children: any; kb: number }) {
 function ChannelView({ win }: { win: Win }) {
     const { Text } = D()
     if (!Screen) {
+        loadScreen('window')
         return (
-            <View style={{ flex: 1, padding: 12 }}>
+            <View style={{ flex: 1, padding: 12, paddingTop: 12 + (StatusBar.currentHeight ?? 0) }}>
                 <Text variant="text-sm/normal" color="text-muted">
-                    Discord's channel screen was not found. Copy the log from the settings.
-                </Text>
-            </View>
-        )
-    }
-    if (!lastProps) {
-        return (
-            <View style={{ flex: 1, padding: 12 }}>
-                <Text variant="text-sm/normal" color="text-muted">
-                    Open any channel once, so Mini Chat can learn how Discord opens a channel screen. Then open this window again.
+                    Loading Discord's channel screen. If this stays, copy the log from the settings.
                 </Text>
             </View>
         )
@@ -1046,13 +1060,22 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         note(`start ${VERSION}`)
+        startCleanup = cleanup
+        const bind = (exports: any, how: string) => {
+            if (!exports || Screen) return
+            try {
+                note(`screen module ${how}`)
+                patchScreen(exports, cleanup)
+                emit()
+            } catch (e: any) {
+                note(`screen patch failed: ${e?.message ?? e}`)
+            }
+        }
         cleanup(
             getModuleWithImportedPath(SCREEN_PATH, (exports: any) => {
-                try {
-                    patchScreen(exports, cleanup)
-                } catch (e: any) {
-                    note(`screen patch failed: ${e?.message ?? e}`)
-                }
+                if (exports) bind(exports, 'loaded')
+                // 채널을 아직 하나도 안 열었으면 화면 모듈이 안 불러와져 있다: 불러와질 때까지 기다린다
+                else cleanup(waitForModuleWithImportedPath(SCREEN_PATH, (x: any) => bind(x, 'loaded later')) as any)
             }) as any,
         )
         try {
