@@ -7,7 +7,9 @@ import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Component, createElement, useEffect, useRef, useState } from 'react'
-import { Dimensions, PanResponder, Platform, Pressable, ScrollView, Text as RNText, View } from 'react-native'
+import { Dimensions, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, Text as RNText, View } from 'react-native'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 
 /**
  * Mini Chat: 채널을 디스코드 안의 떠 있는 창(팝업)이나 아래쪽 분할 창으로 열어, 여러 채널을 한 번에 본다.
@@ -17,7 +19,7 @@ import { Dimensions, PanResponder, Platform, Pressable, ScrollView, Text as RNTe
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.2'
+const VERSION = '1.0.3'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -77,6 +79,8 @@ interface Win {
     h: number
     minimized: boolean
     docked: boolean
+    /** 겹침 순서 (클수록 앞) */
+    z: number
 }
 let wins: Win[] = []
 /** 창들을 그리는 컴포넌트가 화면에 붙어 있는지 */
@@ -107,11 +111,12 @@ function closeWin(id: number) {
     note(`close window ${id}`)
     emit()
 }
+/** 맨 앞으로 (순서를 바꾸면 창이 다시 붙으며 입력창 포커스가 풀려서, 겹침 순서 값만 올린다) */
+let zTop = 1
 function bringToFront(id: number) {
     const w = wins.find(x => x.id === id)
-    if (!w || wins[wins.length - 1] === w) return
-    wins = [...wins.filter(x => x.id !== id), w]
-    emit()
+    if (!w || w.z === zTop) return
+    setWin(id, { z: ++zTop })
 }
 export function openChannel(channelId: string) {
     if (!channelId) return
@@ -134,6 +139,7 @@ export function openChannel(channelId: string) {
         h,
         minimized: false,
         docked: false,
+        z: ++zTop,
     }
     wins = [...wins, win]
     note(`open window ${win.id} channel=${channelId} (${channelName(channelId)}) host=${settings().host} propsCaptured=${!!lastProps} hostRenders=${status.toastHostRenders}/${status.screenHostRenders}`)
@@ -144,14 +150,15 @@ export function openChannel(channelId: string) {
 }
 
 // ── 채널 정보 ───────────────────────────────────────────────────
-function channelName(id: string): string {
+function channelName(id: string, plain = false): string {
     try {
         const ch = S().ChannelStore?.getChannel?.(id)
         if (!ch) return id
-        if (ch.name) return `#${ch.name}`
+        if (ch.name) return plain ? ch.name : `#${ch.name}`
         const rid = ch.recipients?.[0] ?? ch.rawRecipients?.[0]?.id
         const u = rid ? S().UserStore?.getUser?.(rid) : undefined
-        return u ? `@${u.globalName ?? u.global_name ?? u.username}` : 'Direct message'
+        const n = u ? `${u.globalName ?? u.global_name ?? u.username}` : 'Direct message'
+        return plain ? n : `@${n}`
     } catch {
         return id
     }
@@ -224,6 +231,8 @@ function makeProps(win: Win) {
     const p = swap(base, win.channelId, guildOf(win.channelId), 0)
     if (!lastProps || !findChannelId(p)) p.channelId = win.channelId
     p.isNavigationTTIVisible = true
+    // 보고 있는 화면으로 다뤄야 읽음 처리가 된다
+    p.isActive = true
     p[MARK] = win.id
     return p
 }
@@ -323,15 +332,104 @@ const TITLE_H = 40
 const MIN_W = 200
 const MIN_H = 160
 
-function IconButton({ label, onPress }: { label: string; onPress: () => void }) {
+/** 디스코드 아이콘 (이름 여러 개 중 있는 것, 없으면 글자) */
+function DIcon({ names, fallback, c, size = 20 }: { names: string[]; fallback: string; c: string; size?: number }) {
+    let C: any
+    for (const n of names) C ??= icon(n)
+    if (C) return <C size="sm" color={c} style={{ width: size, height: size }} />
+    return <RNText style={{ color: c, fontSize: 18, fontWeight: '700' }}>{fallback}</RNText>
+}
+
+function IconButton({ names, fallback, onPress }: { names: string[]; fallback: string; onPress: () => void }) {
     return (
-        <Pressable onPress={onPress} hitSlop={6} style={{ width: 34, height: TITLE_H, alignItems: 'center', justifyContent: 'center' }}>
-            <RNText style={{ color: color('INTERACTIVE_NORMAL', '#ddd'), fontSize: 18, fontWeight: '700' }}>{label}</RNText>
+        <Pressable onPress={onPress} hitSlop={6} style={{ width: 36, height: TITLE_H, alignItems: 'center', justifyContent: 'center' }}>
+            <DIcon names={names} fallback={fallback} c={color('INTERACTIVE_NORMAL', '#ddd')} />
         </Pressable>
     )
 }
 
-function Window({ win, dockIndex, dockCount }: { win: Win; dockIndex: number; dockCount: number }) {
+const MIN_ICON = ['MinusIcon', 'WindowMinimizeIcon', 'MinimizeIcon']
+const DOCK_ICON = ['WindowMaximizeIcon', 'MaximizeIcon', 'ScreenIcon', 'FullscreenEnterIcon']
+const UNDOCK_ICON = ['WindowLaunchIcon', 'FullscreenExitIcon', 'MinimizeIcon']
+const CLOSE_ICON = ['XSmallIcon', 'XLargeIcon', 'CloseSmallIcon']
+
+/** 채널 종류 아이콘 */
+function channelIconNames(id: string): string[] {
+    try {
+        const t = S().ChannelStore?.getChannel?.(id)?.type
+        switch (t) {
+            case 1:
+                return ['AtIcon', 'UserIcon']
+            case 3:
+                return ['GroupIcon', 'UserIcon']
+            case 2:
+            case 13:
+                return ['VoiceNormalIcon']
+            case 5:
+                return ['AnnouncementsIcon', 'TextIcon']
+            case 10:
+            case 11:
+            case 12:
+                return ['ThreadIcon', 'TextIcon']
+            case 15:
+                return ['ForumIcon', 'TextIcon']
+            default:
+                return ['TextIcon']
+        }
+    } catch {
+        return ['TextIcon']
+    }
+}
+
+function Title({ win, text }: { win: Win; text: string }) {
+    return (
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <DIcon names={channelIconNames(win.channelId)} fallback="#" c={color('INTERACTIVE_MUTED', '#999')} size={18} />
+            <RNText numberOfLines={1} style={{ flexShrink: 1, color: text, fontWeight: '700' }}>
+                {channelName(win.channelId, true)}
+            </RNText>
+        </View>
+    )
+}
+
+// ── 키보드 ──────────────────────────────────────────────────────
+let keyboard = 0
+function useKeyboard() {
+    const [h, setH] = useState(keyboard)
+    useEffect(() => {
+        const a = Keyboard.addListener('keyboardDidShow', (e: any) => {
+            keyboard = e?.endCoordinates?.height ?? 0
+            setH(keyboard)
+        })
+        const b = Keyboard.addListener('keyboardDidHide', () => {
+            keyboard = 0
+            setH(0)
+        })
+        return () => {
+            a.remove()
+            b.remove()
+        }
+    }, [])
+    return h
+}
+
+// ── 화면 위아래 여백 (상태 바 자리) 없애기 ──────────────────────
+let insetsCtx: any
+let insetsLooked = false
+function insetsContext() {
+    if (insetsLooked) return insetsCtx
+    insetsLooked = true
+    try {
+        const r: any = lookupModule(withProps('SafeAreaInsetsContext') as any)
+        const m = Array.isArray(r) ? r[0] : r
+        insetsCtx = m?.SafeAreaInsetsContext
+    } catch {}
+    note(`safe area context: ${insetsCtx ? 'found' : 'missing'}`)
+    return insetsCtx
+}
+const ZERO = { top: 0, bottom: 0, left: 0, right: 0 }
+
+function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex: number; dockCount: number; kb: number; front: boolean }) {
     const { width, height } = Dimensions.get('window')
     const [drag, setDrag] = useState<{ dx: number; dy: number; dw: number; dh: number }>({ dx: 0, dy: 0, dw: 0, dh: 0 })
     const winRef = useRef(win)
@@ -396,27 +494,35 @@ function Window({ win, dockIndex, dockCount }: { win: Win; dockIndex: number; do
                     elevation: 12,
                 }}
             >
-                <Pressable onPress={() => setWin(win.id, { minimized: false })} style={{ flexShrink: 1 }}>
-                    <RNText numberOfLines={1} style={{ color: text, fontWeight: '600' }}>
-                        {channelName(win.channelId)}
-                    </RNText>
+                <Pressable onPress={() => setWin(win.id, { minimized: false })} style={{ flexShrink: 1, flexDirection: 'row' }}>
+                    <Title win={win} text={text} />
                 </Pressable>
-                <IconButton label="×" onPress={() => closeWin(win.id)} />
+                <IconButton names={CLOSE_ICON} fallback="×" onPress={() => closeWin(win.id)} />
             </View>
         )
     }
 
     // 분할: 화면 아래 절반을 도킹한 창끼리 나눠 쓴다
-    const frame = win.docked
+    let frame = win.docked
         ? (() => {
               const top = height * 0.5
               const each = (height - top) / Math.max(1, dockCount)
               return { left: 0, top: top + each * dockIndex, width, height: each }
           })()
         : { left: win.x + drag.dx, top: win.y + drag.dy, width: Math.max(MIN_W, win.w + drag.dw), height: Math.max(MIN_H, win.h + drag.dh) }
+    // 키보드가 열리면 채널 화면은 키보드 높이만큼 아래를 비운다 (화면 맨 아래까지 닿는다고 생각한다).
+    // 그래서 맨 앞 창은 아래쪽을 화면 끝까지 늘리고, 키보드 위로 원래 높이만큼 보이게 올린다
+    if (kb > 0 && front) {
+        const minTop = StatusBar.currentHeight ?? 24
+        const top = Math.max(minTop, height - kb - frame.height)
+        frame = { ...frame, top, height: height - top }
+    }
 
     return (
         <View
+            onTouchStart={() => {
+                if (!front) bringToFront(win.id)
+            }}
             style={{
                 position: 'absolute',
                 ...frame,
@@ -425,20 +531,21 @@ function Window({ win, dockIndex, dockCount }: { win: Win; dockIndex: number; do
                 borderWidth: 1,
                 borderColor: border,
                 overflow: 'hidden',
-                elevation: 16,
+                zIndex: win.z,
+                elevation: 16 + Math.min(win.z, 30),
             }}
         >
             <View {...(win.docked ? {} : move.panHandlers)} style={{ height: TITLE_H, flexDirection: 'row', alignItems: 'center', backgroundColor: bar, paddingLeft: 12 }}>
-                <RNText numberOfLines={1} style={{ flex: 1, color: text, fontWeight: '700' }}>
-                    {channelName(win.channelId)}
-                </RNText>
-                <IconButton label="–" onPress={() => setWin(win.id, { minimized: true })} />
-                <IconButton label={win.docked ? '⧉' : '▭'} onPress={() => setWin(win.id, { docked: !win.docked })} />
-                <IconButton label="×" onPress={() => closeWin(win.id)} />
+                <Title win={win} text={text} />
+                <IconButton names={MIN_ICON} fallback="–" onPress={() => setWin(win.id, { minimized: true })} />
+                <IconButton names={win.docked ? UNDOCK_ICON : DOCK_ICON} fallback={win.docked ? '⧉' : '▭'} onPress={() => setWin(win.id, { docked: !win.docked })} />
+                <IconButton names={CLOSE_ICON} fallback="×" onPress={() => closeWin(win.id)} />
             </View>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
-                    <ChannelView win={win} />
+                    <NoInsets>
+                        <ChannelView win={win} />
+                    </NoInsets>
                 </Boundary>
             </View>
             {win.docked ? null : (
@@ -451,6 +558,14 @@ function Window({ win, dockIndex, dockCount }: { win: Win; dockIndex: number; do
             )}
         </View>
     )
+}
+
+/** 창 안의 채널 화면이 상태 바, 아래 바 자리만큼 비우지 않게 한다 */
+function NoInsets({ children }: { children: any }) {
+    const Ctx = insetsContext()
+    if (Ctx?.Provider) return <Ctx.Provider value={ZERO}>{children}</Ctx.Provider>
+    // 못 찾으면 위로 상태 바 높이만큼 끌어올린다
+    return <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0) }}>{children}</View>
 }
 
 function ChannelView({ win }: { win: Win }) {
@@ -487,11 +602,14 @@ function Windows({ host }: { host: Host }) {
         }
     }, [])
     if (settings().host !== host || !wins.length) return null
+    const kb = useKeyboard()
     const docked = wins.filter(w => w.docked && !w.minimized)
+    const open = wins.filter(w => !w.minimized)
+    const frontId = open.reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)?.id
     return (
         <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
             {wins.map(w => (
-                <Window key={w.id} win={w} dockIndex={docked.indexOf(w)} dockCount={docked.length} />
+                <Window key={w.id} win={w} dockIndex={docked.indexOf(w)} dockCount={docked.length} kb={kb} front={w.id === frontId} />
             ))}
         </View>
     )
