@@ -435,52 +435,73 @@ val reactionWordsPlugin = plugin {
             }
         }
 
-        /** 반응 추가 버튼 오른쪽에 Aa 한 칸이 들어갈 자리가 있는지 (오른쪽에 붙은 다른 버튼과 겹치지 않게) */
-        fun roomForAa(v: View): Boolean {
-            val size = if (knownSize > 0) knownSize else v.height
-            val gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
+        /**
+         * 반응 추가 버튼 오른쪽에 Aa 한 칸이 들어갈 자리가 있는지 (오른쪽에 붙은 다른 버튼과 겹치지 않게).
+         * 화면 위치가 아니라 같은 칸 안의 위치로 잰다 (화면이 옆으로 밀려 들어오는 중에는 화면 위치가 화면 밖이라 늘 "자리 없음"이 됐다)
+         */
+        fun roomForAa(v: View, size: Int, gap: Int): Boolean {
+            val g = v.parent as? android.view.ViewGroup ?: return false
             if (size <= 0 || !v.isLaidOut) return false
-            val a = IntArray(2)
-            v.getLocationOnScreen(a)
-            val left = a[0]
-            val top = a[1] - v.translationY.toInt()
-            val bottom = top + v.height
-            // Aa 까지 들어간 오른쪽 끝
-            val need = left + size * 2 + gap * 2
-            var limit = Int.MAX_VALUE
-            fun scan(g: android.view.ViewGroup, depth: Int) {
-                for (i in 0 until g.childCount) {
-                    val c = g.getChildAt(i)
-                    if (c.visibility != View.VISIBLE || c === v || c.width <= 0) continue
-                    // 버튼을 품고 있는 칸은 건너뛰고 그 안을 본다
-                    var inside: Any? = v.parent
-                    var holds = false
-                    while (inside is View) {
-                        if (inside === c) {
-                            holds = true
-                            break
-                        }
-                        inside = inside.parent
-                    }
-                    if (holds) {
-                        if (c is android.view.ViewGroup && depth < 3) scan(c, depth + 1)
-                        continue
-                    }
-                    val b = IntArray(2)
-                    c.getLocationOnScreen(b)
-                    val overlapsRow = b[1] < bottom && b[1] + c.height > top
-                    if (overlapsRow && b[0] > left) limit = minOf(limit, b[0])
-                }
+            val left = v.left
+            val top = v.top
+            val bottom = v.top + maxOf(v.height, size)
+            val need = left + size * 2 + gap
+            var limit = g.width - g.paddingRight
+            for (i in 0 until g.childCount) {
+                val c = g.getChildAt(i)
+                if (c === v || c.visibility != View.VISIBLE || c.width <= 0) continue
+                val overlapsRow = c.top < bottom && c.bottom > top
+                if (overlapsRow && c.left >= left + 1) limit = minOf(limit, c.left)
             }
-            var root: Any? = v.parent
-            repeat(3) { if (root is View) root = (root as View).parent }
-            (root as? android.view.ViewGroup)?.let { scan(it, 0) }
-            // 화면 오른쪽 끝도 넘지 않게
-            val screenRight = v.resources.displayMetrics.widthPixels
-            val ok = need <= minOf(limit, screenRight)
-            trace(v, "room for Aa: $ok (left=$left need=$need nextOnRight=${if (limit == Int.MAX_VALUE) "none" else limit} screen=$screenRight)")
+            val ok = need <= limit
+            trace(v, "room for Aa: $ok (left=$left need=$need limit=$limit)")
             return ok
         }
+
+        /** 버튼 안쪽에 반응 추가 버튼이 들어 있는지 (반응 줄 끝의 버튼 칸) */
+        fun holdsAdd(c: View): Boolean {
+            if (addViewClass?.isInstance(c) == true) return true
+            val g = c as? android.view.ViewGroup ?: return false
+            for (i in 0 until g.childCount) if (addViewClass?.isInstance(g.getChildAt(i)) == true) return true
+            return false
+        }
+
+        /**
+         * 크기를 맞출 기준이 되는 반응.
+         * 채팅 반응 줄(ShortcutsFlexbox) 안이면 그 줄의 첫 반응, 아니면(포럼 글 머리) 바로 옆의 반응 줄.
+         * 그 밖으로는 올라가지 않는다 (예전에는 메시지 본문을 반응으로 잘못 잡아 버튼이 커다랗게 됐다)
+         */
+        fun reactionRef(v: View): View? {
+            val minH = 16 * v.resources.displayMetrics.density
+            var self: View = v
+            var p: Any? = v.parent
+            var depth = 0
+            while (p is android.view.ViewGroup && depth < 3) {
+                if (flexboxClass?.isInstance(p) == true) {
+                    for (i in 0 until p.childCount) {
+                        val c = p.getChildAt(i)
+                        if (c !== self && c.visibility == View.VISIBLE && c.width > 0 && c.height >= minH && !holdsAdd(c)) return c
+                    }
+                    return null
+                }
+                self = p
+                p = p.parent
+                depth++
+            }
+            val g = v.parent as? android.view.ViewGroup ?: return null
+            for (i in 0 until g.childCount) {
+                val row = g.getChildAt(i) as? android.view.ViewGroup ?: continue
+                if (flexboxClass?.isInstance(row) != true || row.visibility != View.VISIBLE || row.height < minH) continue
+                for (k in 0 until row.childCount) {
+                    val c = row.getChildAt(k)
+                    if (c.visibility == View.VISIBLE && c.width > 0 && !holdsAdd(c)) return row
+                }
+            }
+            return null
+        }
+
+        /** 반응이 안 보이는 곳의 버튼은 접어 둔다 (크기 0, 투명) */
+        val collapsed = WeakHashMap<View, Boolean>()
 
         fun parents(v: View): String {
             val out = ArrayList<String>()
@@ -495,6 +516,7 @@ val reactionWordsPlugin = plugin {
         fun restore(v: android.widget.LinearLayout) {
             trace(v, "restore: target=${targetSize[v]} now=${v.width}x${v.height}")
             if (targetSize.remove(v) != null) v.requestLayout()
+            collapsed.remove(v)
             (wordButtons[v] as? View)?.let { v.removeView(it) }
             (v.background as? Twin)?.let { v.background = it.orig }
             origLook[v]?.let { o ->
@@ -518,32 +540,32 @@ val reactionWordsPlugin = plugin {
                 val lp = v.layoutParams
                 origLook[v] = Orig(lp?.width ?: -2, lp?.height ?: -2, v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom, v.gravity)
             }
-            // 채팅 반응 줄(ShortcutsFlexbox)이 아니면(포럼 글 머리 등) 해 보되, 크기가 안 맞고 늘어나면 원래대로 둔다
+            // 채팅 반응 줄(ShortcutsFlexbox) 안인지, 아니면 포럼 글 머리 같은 다른 곳인지
             val loose = !inChatRow(v)
-            // 채팅 반응 줄이 아닌 곳(포럼 글 머리)은 줄이 넘어가지 않는다: 오른쪽 버튼(팔로우 등)까지 자리가 있을 때만 Aa
-            val wantWord = showWord && (!loose || roomForAa(v))
             if (skipped[v] == true) {
                 trace(v, "ensure: skipped earlier, restore")
                 restore(v)
                 return
             }
-            val sib = firstSibling(v)
-            if (loose && (sib == null || sib.height <= 0)) {
-                trace(v, "ensure: loose and no reaction next to it (sib=${sib?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }}), restore, now ${v.width}x${v.height}")
-                restore(v)
-                return
-            }
+            val sib = reactionRef(v)
             var aa = wordButtons[v] as? TextView
             // 원래 배경 (디스코드가 다시 넣으면 그게 새 원본)
             val cur = v.background
             val orig = if (cur is Twin) cur.orig else cur
-            if (!fitSize && !wantWord) {
-                trace(v, "ensure: fit and Aa both off")
-                if (targetSize.remove(v) != null) v.requestLayout()
+            // 포럼 글 머리에서 옆에 보이는 반응이 없으면 버튼도 접어 둔다 (반응이 생기면 다시 편다)
+            if (loose && sib == null) {
+                if (collapsed[v] != true) trace(v, "ensure: LOOSE, no reaction shown next to it, collapse (now ${v.width}x${v.height})")
+                collapsed[v] = true
                 aa?.let { v.removeView(it) }
                 if (cur is Twin) v.background = cur.orig
+                if (targetSize[v] != Pair(0, 0)) {
+                    targetSize[v] = Pair(0, 0)
+                    v.requestLayout()
+                }
+                if (v.alpha != 0f) v.alpha = 0f
                 return
             }
+            if (collapsed.remove(v) == true) trace(v, "ensure: reaction shown again, expand")
             val size = if (sib != null && sib.height > 0) {
                 if (fitSize) (sib.height * SIZE_RATIO).toInt() else sib.height
             } else if (knownSize > 0) {
@@ -555,11 +577,21 @@ val reactionWordsPlugin = plugin {
                 }
             }
             var gap = if (knownGap > 0) knownGap else (6 * v.resources.displayMetrics.density).toInt()
-            if (sib != null) {
+            if (sib != null && !loose) {
                 val sp = sib.parent as? android.view.ViewGroup
                 val i = sp?.indexOfChild(sib) ?: -1
                 val next = if (sp != null && i >= 0 && i + 1 < sp.childCount) sp.getChildAt(i + 1) else null
                 if (next != null && next.visibility == View.VISIBLE && next.left > sib.right) gap = next.left - sib.right
+            }
+            // 포럼 글 머리는 줄이 넘어가지 않는다: 오른쪽 버튼(팔로우 등)까지 자리가 있을 때만 Aa
+            val wantWord = showWord && (!loose || roomForAa(v, size, gap))
+            if (!fitSize && !wantWord) {
+                trace(v, "ensure: fit and Aa both off")
+                if (targetSize.remove(v) != null) v.requestLayout()
+                aa?.let { v.removeView(it) }
+                if (cur is Twin) v.background = cur.orig
+                if (v.alpha != 1f) v.alpha = 1f
+                return
             }
             // 버튼 크기: 정사각형 하나, Aa 가 있으면 둘 + 간격
             val width = if (wantWord) size * 2 + gap else size
@@ -662,7 +694,15 @@ val reactionWordsPlugin = plugin {
             val lastReaction = lastReactionBefore(v)
             val vlp = v.layoutParams as? android.view.ViewGroup.MarginLayoutParams
             if (vlp != null && !baseMargin.containsKey(v)) baseMargin[v] = vlp.marginStart
-            if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
+            if (loose && vlp != null) {
+                // 포럼 글 머리는 칸 배치(ConstraintLayout)가 위치를 정한다: 간격을 손대지 않는다 (손대면 계속 벌어졌다)
+                val base = baseMargin[v] ?: vlp.marginStart
+                if (vlp.marginStart != base) {
+                    vlp.marginStart = base
+                    vlp.leftMargin = base
+                    v.layoutParams = vlp
+                }
+            } else if (lastReaction != null && vlp != null && v.width > 0 && lastReaction.width > 0) {
                 // 같은 줄일 때만 (반응이 두 줄이 되어 버튼이 다음 줄 맨 앞으로 가면 앞 반응은 윗줄 끝이다)
                 val a = IntArray(2)
                 val b = IntArray(2)
@@ -711,7 +751,7 @@ val reactionWordsPlugin = plugin {
                 } catch (e: Throwable) {
                     lastError = "button: $e"
                 }
-                if (v.alpha == 0f) {
+                if (v.alpha == 0f && collapsed[v] != true) {
                     // 아직 크기가 안 맞으면 다시 재게 하고 몇 번 더 맞춰 본다
                     val n = (tries[v] ?: 0) + 1
                     tries[v] = n
