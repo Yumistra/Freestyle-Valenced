@@ -296,6 +296,8 @@ function signature(items: Activity[]) {
     )
 }
 let appliedSig: string | undefined
+/** 마지막으로 보낸 활동 순서 */
+let lastOrder: string | undefined
 
 async function apply() {
     if (!isOn()) return clearAll()
@@ -324,11 +326,24 @@ async function apply() {
             live.delete(sid)
         }
     rememberSent([...keep])
-    // 모두 한꺼번에 보낸다
+    // 우선순위(목록 순서)가 바뀌었으면 모두 내렸다가 순서대로 다시 올린다.
+    // 디스코드는 활동을 받은 순서대로 보여 주는데, 이미 있는 활동을 고치면 자리가 그대로라서
+    const order = built.map(b => b.socketId).join(',')
+    const prev = [...live.keys()].filter(k => keep.has(k)).join(',')
+    if (lastOrder !== undefined && order !== lastOrder && prev) {
+        for (const b of built) if (live.has(b.socketId)) send(b.socketId, b.pid, null)
+        for (const b of built) live.delete(b.socketId)
+        await new Promise(r => setTimeout(r, 400))
+        if (my !== runId) return
+    }
+    lastOrder = order
+    // 우선순위대로 하나씩 보낸다 (순서가 섞이지 않게 아주 잠깐씩 띄운다)
     for (let i = 0; i < built.length; i++) {
         const b = built[i]
         send(b.socketId, b.pid, b.activity)
         live.set(b.socketId, b.pid)
+        if (i < built.length - 1) await new Promise(r => setTimeout(r, 60))
+        if (my !== runId) return
     }
 }
 
@@ -460,7 +475,7 @@ function RefreshButton({ onRefresh }: { onRefresh: () => Promise<void> }) {
 
 const num = (v: any, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
-function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void }) {
+function Card({ a, why, blockOn, blockType, onChange, onRemove, rank, onMove }: { a: Activity; why: Why; blockOn: Why; blockType: (t: number) => Why; onChange: (a: Activity) => void; onRemove: () => void; rank: number; onMove: (dir: -1 | 1) => void }) {
     const { Stack, TableRowGroup, TableRow, TableSwitchRow, TextInput, Button, Text } = Design as any
     const [open, setOpen] = useState(false)
     const [adding, setAdding] = useState(false)
@@ -534,9 +549,16 @@ function Card({ a, why, blockOn, blockType, onChange, onRemove }: { a: Activity;
             <View style={{ borderRadius: radius, overflow: 'hidden' }}>
                 <TableRowGroup>
                     <TableRow
-                        label={a.name || 'Activity'}
+                        label={`${rank}. ${a.name || 'Activity'}`}
                         trailing={
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                {/* 우선순위: 위에 있을수록 프로필에서 먼저 나온다 */}
+                                <Pressable accessibilityRole="button" accessibilityLabel="Move up" hitSlop={6} onPress={() => onMove(-1)} style={{ padding: 4 }}>
+                                    <Icon name="ArrowSmallUpIcon" alt={['ChevronSmallUpIcon', 'ArrowUpIcon']} color={muted} />
+                                </Pressable>
+                                <Pressable accessibilityRole="button" accessibilityLabel="Move down" hitSlop={6} onPress={() => onMove(1)} style={{ padding: 4 }}>
+                                    <Icon name="ArrowSmallDownIcon" alt={['ChevronSmallDownIcon', 'ArrowDownIcon']} color={muted} />
+                                </Pressable>
                                 <DeleteButton onDelete={onRemove} />
                                 <Animated.View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }) }] }}>
                                     <TableRowAssetIcon name="ChevronSmallDownIcon" />
@@ -770,6 +792,18 @@ function Page({ items, setItems, on, setOnState }: { items: Activity[]; setItems
                         blockType={(t: number) => (a.enabled && !whys[i] ? blockedBy(items, whys, i, { type: t }) : undefined)}
                         onChange={n => setItems(x => x.map(y => (y.id === n.id ? n : y)))}
                         onRemove={() => setItems(x => x.filter(y => y.id !== a.id))}
+                        rank={i + 1}
+                        onMove={dir =>
+                            setItems(x => {
+                                const j = x.findIndex(y => y.id === a.id)
+                                const k = j + dir
+                                if (j < 0 || k < 0 || k >= x.length) return x
+                                animate()
+                                const next = [...x]
+                                ;[next[j], next[k]] = [next[k], next[j]]
+                                return next
+                            })
+                        }
                     />
                 ))}
             </Stack>
