@@ -314,11 +314,34 @@ function dropLocks(node: any, depth = 0): any {
 }
 
 /** 이 노드 안에 채널 이름 글이 있는지 */
+/** 이름 비교용: 이모지, 하이픈, 밑줄, 공백 차이를 없앤다 */
+function normName(s: string) {
+    let t = String(s)
+    try {
+        if (EMOJI_ALL) t = t.replace(EMOJI_ALL, '')
+    } catch {}
+    return t.replace(/[\uFE0F\u200D\u20E3]/g, '').replace(/[-_\s]+/g, ' ').trim().toLowerCase()
+}
+
+/**
+ * 이 글이 채널 이름인지. 새 디스코드는 이름의 "-" 를 띄어쓰기로 바꿔 보여 주고(help-support-here → help support here),
+ * 이름 속 이모지를 따로 그리기도 해서, 글자가 똑같지 않아도 같은 이름으로 본다. 맞으면 보이는 글을 돌려준다
+ */
+function nameText(c: any, name: string): string | undefined {
+    if (c === name) return name
+    let text: string | undefined
+    if (typeof c === 'string') text = c
+    else if (Array.isArray(c) && c.length && c.length <= 3 && c.some(x => typeof x === 'string')) text = c.filter(x => typeof x === 'string').join('')
+    if (text == null) return
+    const a = normName(text)
+    return a && a === normName(name) ? text : undefined
+}
+
 function hasName(node: any, name: string, depth = 0): boolean {
     if (!node || typeof node !== 'object' || depth > 10) return false
     if (Array.isArray(node)) return node.some(n => hasName(n, name, depth + 1))
     const c = node.props?.children
-    if (c === name || node.props?.[NAME_MARK]) return true
+    if (nameText(c, name) != null || node.props?.[NAME_MARK]) return true
     return c != null && typeof c === 'object' && hasName(c, name, depth + 1)
 }
 
@@ -391,14 +414,14 @@ export function redesignTree(out: any, channel: any, muted?: boolean, wrap?: (el
             }
             return cloneElement(node, patch)
         }
-        const textName = props.children === name || (Array.isArray(props.children) && props.children.length === 1 && props.children[0] === name)
-        if (!nameDone && textName) {
+        const shown = typeof props.children === 'object' || typeof props.children === 'string' ? nameText(props.children, name) : undefined
+        if (!nameDone && shown != null) {
             nameDone = true
             const nsfw = isNSFW(channel)
             // 설정: 채널 이름 속 이모지 빼기
             if (s.stripNameEmoji) {
-                const clean = cleanName(name)
-                if (clean !== name) node = cloneElement(node, { [NAME_MARK]: true }, clean)
+                const clean = cleanName(shown)
+                if (clean !== shown || Array.isArray(props.children)) node = cloneElement(node, { [NAME_MARK]: true }, clean)
             }
             if (!nsfw) return node
             status.nameIcons++
