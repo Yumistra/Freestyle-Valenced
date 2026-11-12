@@ -2,6 +2,8 @@ import { ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useState } from 'react'
 import { AppState, ScrollView, View } from 'react-native'
 
@@ -19,10 +21,12 @@ interface Settings {
     hideInDiscord: boolean
     scale: number
     opacity: number
+    /** 말하지 않는 사람의 투명도 */
+    idleAlpha: number
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1 }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45 }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -95,6 +99,94 @@ function push() {
     }, 60)
 }
 
+// ── 오버레이에서 온 일: 나가기, 간이 채팅 ─────────────────────────
+const find = (...props: string[]): any => {
+    try {
+        return (lookupModule(withProps(...props) as any) as any)?.[0]
+    } catch {}
+}
+const myId = () => {
+    try {
+        return S().UserStore?.getCurrentUser?.()?.id
+    } catch {}
+}
+let chatOn = false
+let chatChannel: string | undefined
+let chatTimer: any
+let lastChat = ''
+
+/** 간이 채팅에 보낼 최근 메시지 (음성 채널의 채팅) */
+function pushChat() {
+    clearTimeout(chatTimer)
+    chatTimer = setTimeout(() => {
+        if (!chatOn || !chatChannel) return
+        try {
+            const ch = S().ChannelStore?.getChannel?.(chatChannel)
+            const guildId = ch?.guild_id ?? null
+            const msgs = S().MessageStore?.getMessages?.(chatChannel)
+            const arr: any[] = msgs?.toArray?.() ?? msgs?._array ?? []
+            const me = myId()
+            const messages = arr.slice(-30).map(m => ({
+                author: nameOf(m.author?.id, guildId),
+                content: (m.content || (m.attachments?.length ? '[file]' : m.stickerItems?.length || m.sticker_items?.length ? '[sticker]' : m.embeds?.length ? '[embed]' : '')).slice(0, 500),
+                mine: m.author?.id === me,
+            }))
+            const json = JSON.stringify({ title: ch?.name ? `# ${ch.name}` : 'Voice chat', messages })
+            if (json === lastChat) return
+            lastChat = json
+            native('chat', [json]).catch(() => {})
+        } catch {}
+    }, 120)
+}
+
+function openChat() {
+    chatOn = true
+    chatChannel = S().SelectedChannelStore?.getVoiceChannelId?.()
+    lastChat = ''
+    // 아직 안 받은 채널이면 최근 메시지를 받아 온다
+    try {
+        const msgs = S().MessageStore?.getMessages?.(chatChannel)
+        if (chatChannel && !(msgs?.length ?? msgs?._array?.length)) find('fetchMessages', 'sendMessage')?.fetchMessages?.({ channelId: chatChannel, limit: 30 })
+    } catch {}
+    pushChat()
+}
+
+function send(text: string) {
+    const channelId = chatChannel ?? S().SelectedChannelStore?.getVoiceChannelId?.()
+    const actions = find('sendMessage', 'receiveMessage')
+    if (!channelId || !actions) return toast('Could not send the message')
+    try {
+        actions.sendMessage(channelId, { content: text, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, {})
+    } catch {
+        toast('Could not send the message')
+    }
+}
+
+function leave() {
+    try {
+        const v = find('selectVoiceChannel', 'disconnect') ?? find('selectVoiceChannel')
+        if (typeof v?.disconnect === 'function') v.disconnect()
+        else v?.selectVoiceChannel?.(null)
+    } catch {
+        toast('Could not leave the voice channel')
+    }
+}
+
+async function takeEvents() {
+    let list: any[] = []
+    try {
+        list = JSON.parse(String(await native('events')))
+    } catch {
+        return
+    }
+    for (const e of list) {
+        if (e?.type === 'leave') leave()
+        else if (e?.type === 'chatOpen') openChat()
+        else if (e?.type === 'chatClose') chatOn = false
+        else if (e?.type === 'send' && typeof e.text === 'string') send(e.text)
+    }
+}
+
 const toast = (text: string) => {
     try {
         ;(ToastActionCreators as any).open(`voice-overlay-${Date.now()}`, { text })
@@ -117,7 +209,7 @@ function SettingsPage() {
         const sub = AppState.addEventListener('change', st => st === 'active' && check())
         return () => sub.remove()
     }, [])
-    const pick = (label: string, value: number, key: 'scale' | 'opacity', options: Array<[number, string]>) => (
+    const pick = (label: string, value: number, key: 'scale' | 'opacity' | 'idleAlpha', options: Array<[number, string]>) => (
         <View>
             <Text variant="text-sm/semibold" color="text-muted" style={{ marginBottom: 8 }}>
                 {label}
@@ -153,6 +245,12 @@ function SettingsPage() {
                     [1, 'Normal'],
                     [1.3, 'Large'],
                 ])}
+                {pick('People not talking', s.idleAlpha, 'idleAlpha' as any, [
+                    [0.25, '25%'],
+                    [0.45, '45%'],
+                    [0.7, '70%'],
+                    [1, '100%'],
+                ])}
                 {pick('Opacity', s.opacity, 'opacity', [
                     [0.5, '50%'],
                     [0.75, '75%'],
@@ -177,6 +275,27 @@ export default plugin({
             cleanup(() => st.removeChangeListener?.(push))
         }
         push()
+        // 간이 채팅은 메시지가 바뀔 때마다
+        const ms = S().MessageStore
+        if (ms?.addChangeListener) {
+            ms.addChangeListener(pushChat)
+            cleanup(() => ms.removeChangeListener?.(pushChat))
+        }
+        // 오버레이에서 온 일 (음성 채널에 있을 때만 자주 본다)
+        const ev = setInterval(() => {
+            if (chatOn || S().SelectedChannelStore?.getVoiceChannelId?.()) takeEvents()
+        }, 250)
+        cleanup(() => clearInterval(ev))
+        // 음성 채널을 나가면 채팅 창도 닫는다
+        const sel = S().SelectedChannelStore
+        const onSel = () => {
+            if (chatOn && !sel?.getVoiceChannelId?.()) {
+                chatOn = false
+                native('closeChat').catch(() => {})
+            }
+        }
+        sel?.addChangeListener?.(onSel)
+        cleanup(() => sel?.removeChangeListener?.(onSel))
         // 끌어서 옮긴 위치를 저장해 둔다 (다음에 디스코드를 켜도 그 자리)
         const pos = setInterval(() => {
             native('position')
