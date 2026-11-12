@@ -25,10 +25,18 @@ interface Settings {
     opacity: number
     /** 말하지 않는 사람의 투명도 */
     idleAlpha: number
+    /** 끌어서 옮기지 못하게 */
+    locked: boolean
+    /** 터치가 오버레이를 지나 아래 앱(게임)으로 간다 */
+    passThrough: boolean
+    /** 오버레이를 길게 누르면 */
+    longPress: 'menu' | 'chat' | 'off'
+    /** 채팅 버튼: 톡, 길게 누르기, 숨기기 */
+    chatButton: 'tap' | 'long' | 'hidden'
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45 }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long' }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -321,7 +329,21 @@ function PercentInput({ label, description, value, min, max, onSave }: { label: 
 
 function SettingsPage() {
     storage?.use?.()
-    const { TableRowGroup, TableRow, TableSwitchRow, Button, Text } = Design as any
+    const { TableRowGroup, TableRow, TableSwitchRow, TableRadioGroup, TableRadioRow, Button, Text } = Design as any
+    const choose = <T extends string>(title: string, value: T, options: Array<[T, string, string?]>, onChange: (v: T) => void) =>
+        TableRadioGroup && TableRadioRow ? (
+            <TableRadioGroup title={title} defaultValue={value} onChange={onChange}>
+                {options.map(([v, label, sub]) => (
+                    <TableRadioRow key={v} label={label} subLabel={sub} value={v} />
+                ))}
+            </TableRadioGroup>
+        ) : (
+            <TableRowGroup title={title}>
+                {options.map(([v, label, sub]) => (
+                    <TableRow key={v} label={`${v === value ? '✓ ' : ''}${label}`} subLabel={sub} onPress={() => onChange(v)} />
+                ))}
+            </TableRowGroup>
+        )
     const s = settings()
     const [allowed, setAllowed] = useState<boolean | undefined>()
     useEffect(() => {
@@ -354,7 +376,7 @@ function SettingsPage() {
     return (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
             <Text variant="text-md/normal" color="text-muted">
-                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and tap the chat button to chat.
+                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and long press the chat button to chat. All of this can be changed under Touch.
             </Text>
 
             {heading('Permission')}
@@ -370,9 +392,30 @@ function SettingsPage() {
             {heading('Overlay')}
             <TableRowGroup>
                 <TableSwitchRow label="Show the overlay" subLabel="Only while you are in a voice channel." value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
-                <TableSwitchRow label="Only people talking" subLabel="The chat button always stays." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
+                <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
             </TableRowGroup>
+
+            {heading('Touch')}
+            <TableRowGroup>
+                <TableSwitchRow label="Lock position" subLabel="The overlay stays where it is and can't be dragged." value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
+                <TableSwitchRow
+                    label="Touches go through"
+                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. The overlay's buttons don't work while this is on, and Android keeps it at most 80% visible."
+                    value={s.passThrough}
+                    onValueChange={(v: boolean) => save({ passThrough: v })}
+                />
+            </TableRowGroup>
+            {choose('Chat button', s.chatButton, [
+                ['long', 'Long press to open', 'A quick tap does nothing, so it is hard to open by mistake.'],
+                ['tap', 'Tap to open'],
+                ['hidden', 'Hidden'],
+            ], v => save({ chatButton: v }))}
+            {choose('Long press the overlay', s.longPress, [
+                ['menu', 'Menu', 'Mute, deafen, Go Live and leave.'],
+                ['chat', 'Chat'],
+                ['off', 'Nothing'],
+            ], v => save({ longPress: v }))}
 
             {heading('Appearance')}
             <Text variant="text-md/normal" color="text-muted">

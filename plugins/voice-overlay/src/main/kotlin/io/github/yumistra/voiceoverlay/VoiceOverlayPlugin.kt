@@ -80,6 +80,15 @@ private val loading = ConcurrentHashMap.newKeySet<String>()
 @Volatile private var scale = 1f
 @Volatile private var opacity = 1f
 @Volatile private var idleAlpha = 0.45f
+/** 끌어서 옮기지 못하게 */
+@Volatile private var locked = false
+/** 터치가 오버레이를 지나 아래 앱으로 (FLAG_NOT_TOUCHABLE) */
+@Volatile private var passThrough = false
+/** 오버레이를 길게 누르면: menu, chat, off */
+@Volatile private var longAction = "menu"
+/** 채팅 버튼: tap, long, hidden */
+@Volatile private var chatMode = "long"
+private var builtChatMode = ""
 @Volatile private var posX = 24
 @Volatile private var posY = 200
 @Volatile private var lastError = ""
@@ -370,8 +379,16 @@ private fun ensureRoot(c: Context): LinearLayout {
     val long = Runnable {
         if (!moved) {
             longDone = true
-            l.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            showMenu()
+            when (longAction) {
+                "menu" -> {
+                    l.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    showMenu()
+                }
+                "chat" -> {
+                    l.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    toggleChat()
+                }
+            }
         }
     }
     l.setOnTouchListener { v, e ->
@@ -392,7 +409,7 @@ private fun ensureRoot(c: Context): LinearLayout {
                     moved = true
                     main.removeCallbacks(long)
                 }
-                if (moved) {
+                if (moved && !locked) {
                     lp.x = startX + (e.rawX - downX).toInt()
                     lp.y = startY + (e.rawY - downY).toInt()
                     try {
@@ -404,8 +421,10 @@ private fun ensureRoot(c: Context): LinearLayout {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 main.removeCallbacks(long)
-                posX = lp.x
-                posY = lp.y
+                if (!locked) {
+                    posX = lp.x
+                    posY = lp.y
+                }
                 true
             }
             else -> false
@@ -497,16 +516,17 @@ private fun render() {
         return
     }
     val r = ensureRoot(c)
-    if (builtScale != scale) {
+    if (builtScale != scale || builtChatMode != chatMode) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
         chatBtn = null
         builtScale = scale
+        builtChatMode = chatMode
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
-    if (chatBtn == null) {
+    if (chatBtn == null && chatMode != "hidden") {
         val b = LinearLayout(c)
         b.gravity = Gravity.CENTER
         val bg = GradientDrawable()
@@ -514,10 +534,19 @@ private fun render() {
         bg.setColor(Color.argb(215, 20, 21, 24))
         b.background = bg
         b.addView(iconView(c, "chat", 20f * scale, Color.WHITE, "#"))
-        b.setOnClickListener {
+        val press: (View) -> Unit = {
             it.animate().scaleX(0.85f).scaleY(0.85f).setDuration(70).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(120).start() }.start()
             toggleChat()
         }
+        if (chatMode == "long") {
+            // 톡 누르면 살짝 눌리는 것만 보이고 열리지 않는다 (게임 중 실수로 열리지 않게)
+            b.setOnClickListener { it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(60).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(100).start() }.start() }
+            b.setOnLongClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                press(it)
+                true
+            }
+        } else b.setOnClickListener(press)
         val lp = LinearLayout.LayoutParams(size, size)
         lp.bottomMargin = gap
         r.addView(b, 0, lp)
@@ -555,17 +584,21 @@ private fun render() {
         if (fresh) row.view.animate().alpha(to).translationX(0f).setDuration(200).setInterpolator(DecelerateInterpolator()).start()
         else if (row.view.alpha != to) row.view.animate().alpha(to).setDuration(if (p.speaking) 90 else 260).start()
     }
-    r.alpha = opacity
+    // 터치 통과일 때 투명도는 창 쪽(lp.alpha)에서 준다 (안드로이드 12+ 규칙, 아래)
+    r.alpha = if (passThrough && Build.VERSION.SDK_INT >= 31) 1f else opacity
     if (attachedTo !== wm || attachedSystem != system) {
         detach()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(system),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                (if (passThrough) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
             PixelFormat.TRANSLUCENT,
         )
         lp.gravity = Gravity.TOP or Gravity.START
+        // 안드로이드 12 부터는 다른 앱 위 창이 많이 불투명하면 터치 통과가 막힌다: 통과일 때는 창 자체 투명도를 낮춰 둔다
+        if (passThrough && Build.VERSION.SDK_INT >= 31) lp.alpha = minOf(opacity, 0.8f)
         lp.x = posX
         lp.y = posY
         try {
@@ -954,6 +987,10 @@ val voiceOverlayPlugin = plugin {
                 scale = o.optDouble("scale", scale.toDouble()).toFloat().coerceIn(0.5f, 2f)
                 opacity = o.optDouble("opacity", opacity.toDouble()).toFloat().coerceIn(0.2f, 1f)
                 idleAlpha = o.optDouble("idleAlpha", idleAlpha.toDouble()).toFloat().coerceIn(0.1f, 1f)
+                locked = o.optBoolean("locked", locked)
+                passThrough = o.optBoolean("passThrough", passThrough)
+                longAction = o.optString("longPress", longAction)
+                chatMode = o.optString("chatButton", chatMode)
                 if (o.has("x")) posX = o.optInt("x", posX)
                 if (o.has("y")) posY = o.optInt("y", posY)
                 main.post {
