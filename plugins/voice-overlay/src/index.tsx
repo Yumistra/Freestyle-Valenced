@@ -1,4 +1,5 @@
 import { ToastActionCreators } from '@valenced/discord/actions'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
@@ -110,6 +111,14 @@ const myId = () => {
         return S().UserStore?.getCurrentUser?.()?.id
     } catch {}
 }
+/** 오늘이면 시간만, 아니면 날짜도 */
+function timeText(t: number) {
+    const d = new Date(t)
+    const now = new Date()
+    const hm = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    return d.toDateString() === now.toDateString() ? hm : `${d.toLocaleDateString()} ${hm}`
+}
+
 let chatOn = false
 let chatChannel: string | undefined
 let chatTimer: any
@@ -125,13 +134,27 @@ function pushChat() {
             const guildId = ch?.guild_id ?? null
             const msgs = S().MessageStore?.getMessages?.(chatChannel)
             const arr: any[] = msgs?.toArray?.() ?? msgs?._array ?? []
-            const me = myId()
-            const messages = arr.slice(-30).map(m => ({
-                author: nameOf(m.author?.id, guildId),
-                content: (m.content || (m.attachments?.length ? '[file]' : m.stickerItems?.length || m.sticker_items?.length ? '[sticker]' : m.embeds?.length ? '[embed]' : '')).slice(0, 500),
-                mine: m.author?.id === me,
-            }))
-            const json = JSON.stringify({ title: ch?.name ? `# ${ch.name}` : 'Voice chat', messages })
+            const list = arr.slice(-40)
+            // 디스코드처럼: 같은 사람이 7분 안에 이어 쓰면 이름과 사진 없이 내용만
+            const messages = list.map((m, i) => {
+                const prev = list[i - 1]
+                const t = Number(m.timestamp?.valueOf?.() ?? Date.parse(m.timestamp)) || Date.now()
+                const pt = prev ? Number(prev.timestamp?.valueOf?.() ?? Date.parse(prev.timestamp)) || 0 : 0
+                const head = !prev || prev.author?.id !== m.author?.id || t - pt > 7 * 60000 || !!m.messageReference
+                let color = ''
+                try {
+                    color = (guildId && S().GuildMemberStore?.getMember?.(guildId, m.author?.id)?.colorString) || ''
+                } catch {}
+                return {
+                    author: nameOf(m.author?.id, guildId),
+                    color,
+                    avatar: avatarOf(m.author?.id, guildId),
+                    time: timeText(t),
+                    content: (m.content || (m.attachments?.length ? `[${m.attachments.map((a: any) => a.filename).join(', ')}]` : m.stickerItems?.length || m.sticker_items?.length ? '[Sticker]' : m.embeds?.length ? '[Embed]' : '')).slice(0, 800),
+                    head,
+                }
+            })
+            const json = JSON.stringify({ title: ch?.name ?? 'Voice chat', messages })
             if (json === lastChat) return
             lastChat = json
             native('chat', [json]).catch(() => {})
@@ -172,6 +195,50 @@ function leave() {
     }
 }
 
+/** 마이크, 헤드셋 끄기 */
+function toggle(kind: 'mute' | 'deafen') {
+    try {
+        const m = find('toggleSelfMute', 'toggleSelfDeaf')
+        if (kind === 'mute') m.toggleSelfMute()
+        else m.toggleSelfDeaf()
+    } catch {
+        toast(kind === 'mute' ? 'Could not change the microphone' : 'Could not change the headset')
+    }
+}
+
+/** 방송(화면 공유) 켜기, 끄기 */
+function stream() {
+    try {
+        const st = S().ApplicationStreamingStore
+        const mine = st?.getCurrentUserActiveStream?.()
+        const m = find('stopStream', 'startStream') ?? find('stopStream')
+        if (mine) {
+            const key = mine.streamKey ?? `${mine.streamType}:${mine.guildId}:${mine.channelId}:${mine.ownerId}`
+            if (typeof m?.stopStream === 'function') return m.stopStream(key)
+        } else {
+            const channelId = S().SelectedChannelStore?.getVoiceChannelId?.()
+            const guildId = S().ChannelStore?.getChannel?.(channelId)?.guild_id ?? null
+            if (typeof m?.startStream === 'function') return m.startStream(guildId, channelId, {})
+        }
+        toast('Go Live is not available here')
+    } catch (e: any) {
+        toast(`Go Live failed: ${e?.message ?? e}`)
+    }
+}
+
+/** 내 상태를 오버레이 메뉴에 알린다 */
+let lastSelf = ''
+function pushSelf() {
+    try {
+        const me = S().MediaEngineStore
+        const st = [!!me?.isSelfMute?.(), !!me?.isSelfDeaf?.(), !!S().ApplicationStreamingStore?.getCurrentUserActiveStream?.()]
+        const k = st.join()
+        if (k === lastSelf) return
+        lastSelf = k
+        native('self', st).catch(() => {})
+    } catch {}
+}
+
 async function takeEvents() {
     let list: any[] = []
     try {
@@ -180,7 +247,9 @@ async function takeEvents() {
         return
     }
     for (const e of list) {
-        if (e?.type === 'leave') leave()
+        if (e?.type === 'leave' || (e?.type === 'action' && e.name === 'leave')) leave()
+        else if (e?.type === 'action' && (e.name === 'mute' || e.name === 'deafen')) toggle(e.name)
+        else if (e?.type === 'action' && e.name === 'stream') stream()
         else if (e?.type === 'chatOpen') openChat()
         else if (e?.type === 'chatClose') chatOn = false
         else if (e?.type === 'send' && typeof e.text === 'string') send(e.text)
@@ -257,6 +326,23 @@ function SettingsPage() {
                     [1, '100%'],
                 ])}
                 <Button size="md" variant="secondary" text="Reset position" onPress={() => save({ x: 24, y: 200 })} />
+                <Button
+                    size="md"
+                    variant="secondary"
+                    text="Copy log"
+                    onPress={async () => {
+                        try {
+                            const st = await native('status')
+                            const words = ['microphone', 'mic', 'headphone', 'headset', 'deafen', 'screen', 'stream', 'hangup', 'disconnect', 'chat', 'send', 'close']
+                            const found: string[] = []
+                            for (const w of words) found.push(`${w}: ${await native('findIcons', [w])}`)
+                            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\n\nIcons:\n${found.join('\n')}`)
+                            toast('Copied')
+                        } catch (e: any) {
+                            toast(`Could not copy: ${e?.message ?? e}`)
+                        }
+                    }}
+                />
             </Stack>
         </ScrollView>
     )
@@ -267,6 +353,13 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         sendConfig()
+        for (const name of ['MediaEngineStore', 'ApplicationStreamingStore']) {
+            const st = S()[name]
+            if (!st?.addChangeListener) continue
+            st.addChangeListener(pushSelf)
+            cleanup(() => st.removeChangeListener?.(pushSelf))
+        }
+        pushSelf()
         const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore']
         for (const name of stores) {
             const st = S()[name]
