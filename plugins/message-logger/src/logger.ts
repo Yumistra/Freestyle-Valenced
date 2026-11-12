@@ -302,12 +302,24 @@ export function intercept() {
             if (!u?.id || bypassed.has(u.id) || !settings().logEdits) return p
             // 화면에 없는 채널의 메시지는 기억해 둔 것과 비교한다
             const record = getMessage(u.channel_id, u.id) ?? (seen()[u.id] && !seen()[u.id].p ? seen()[u.id].m : undefined) ?? pushedComparable(u)
-            if (!record || typeof u.content !== 'string' || !record.content || u.content === record.content || !shouldLog(record)) return p
+            if (!record || !shouldLog(record)) return p
+            const before = typeof record.content === 'string' ? record.content : ''
+            const textChanged = typeof u.content === 'string' && u.content !== before
+            // 첨부파일을 뺀 수정 (그림만 보낸 뒤 글로 바꿔 놓고 지우는 식으로 기록을 피한다): 뺀 파일은 남겨 둔다
+            const prevFiles: any[] = Array.isArray(record.attachments) ? record.attachments : []
+            const removed = Array.isArray(u.attachments) ? prevFiles.filter(a => a?.id && !u.attachments.some((b: any) => b?.id === a.id)) : []
+            if (!textChanged && !removed.length) return p
             const e = entryOf(record, p.guildId ?? u.guild_id)
-            ;(e.e ??= []).push({ t: record.content, at: Date.now() })
+            const files = removed.map(a => a.filename ?? 'file').join(', ')
+            const label = before || (files ? `[${files}]` : '[no text]')
+            ;(e.e ??= []).push({ t: removed.length && before ? `${before} [${files}]` : label, at: Date.now() })
             e.at = Date.now()
             changed.add(u.id)
             save()
+            if (removed.length) {
+                const plain = (a: any) => (typeof a?.toJS === 'function' ? a.toJS() : { ...a })
+                return { ...p, message: { ...u, attachments: [...u.attachments, ...removed.map(plain)] } }
+            }
             return p
         }),
         onFluxEventDispatched('MESSAGE_CREATE', (p: any) => {

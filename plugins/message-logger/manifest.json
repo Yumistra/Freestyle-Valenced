@@ -5,7 +5,7 @@
 	"description": "Keeps deleted and edited messages.",
 	"author": "Yumistra",
 	"icon": "ChatXIcon",
-	"version": "1.0.20",
+	"version": "1.0.21",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
