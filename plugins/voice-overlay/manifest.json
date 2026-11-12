@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.voice-overlay",
+	"name": "Voice Overlay",
+	"description": "Shows who is in your voice channel, and who is talking, over other apps like the PC overlay.",
+	"author": "Yumistra",
+	"icon": "VoiceNormalIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.voiceoverlay.VoiceOverlayPlugin"
+		}
+	}
+}
