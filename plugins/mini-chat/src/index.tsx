@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.3'
+const VERSION = '1.2.4'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -40,6 +40,10 @@ interface Settings {
     host: Host
     /** 채팅 화면 모듈 번호 (한 번 불린 걸 본 뒤 기억해 두고, 다음에 앱을 켰을 때 채널을 안 열어도 직접 부른다) */
     screenModuleId?: number
+    /** 분할선 위치 (위에서부터 비율) */
+    splitRatio?: number
+    /** 분할 화면에서 Mini Chat 을 아래로 */
+    splitSwap?: boolean
 }
 const DEFAULTS: Settings = { host: 'global' }
 let storage: any
@@ -582,6 +586,9 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
     barRef.current = showBar
     const barOn = useRef(bar)
     barOn.current = bar
+    const lastTap = useRef(0)
+    // 위로 끌어 올리는 중: 놓으면 분할 화면이 된다는 표시
+    const [snap, setSnap] = useState(false)
 
     // 위 손잡이: 끌면 옮기고, 톡 누르면 버튼 줄을 연다
     const move = useRef(
@@ -595,11 +602,23 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                 const w = winRef.current
                 if (!w.minimized && (w.docked || w.maximized)) return
                 setDrag({ dx: g.dx, dy: g.dy, dw: 0, dh: 0 })
+                if (!w.minimized) setSnap(g.moveY < (StatusBar.currentHeight ?? 24) + SNAP_ZONE)
             },
             onPanResponderRelease: (_e, g) => {
                 const w = winRef.current
                 setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 })
+                setSnap(false)
                 if (Math.abs(g.dx) + Math.abs(g.dy) < 6) {
+                    // 두 번 톡: 바로 화면 가득 펼치기 (다시 두 번 톡하면 원래대로)
+                    const now = Date.now()
+                    if (!w.minimized && now - lastTap.current < 320) {
+                        lastTap.current = 0
+                        barRef.current(false)
+                        smooth()
+                        setWin(w.id, { maximized: !w.maximized, docked: false })
+                        return
+                    }
+                    lastTap.current = now
                     barRef.current(!barOn.current)
                     return
                 }
@@ -612,12 +631,21 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     return
                 }
                 if (w.docked || w.maximized) return
+                // 화면 맨 위로 끌어 놓으면 분할 화면으로
+                if (g.moveY < (StatusBar.currentHeight ?? 24) + SNAP_ZONE) {
+                    smooth()
+                    setWin(w.id, { docked: true })
+                    return
+                }
                 setWin(w.id, {
                     x: Math.min(Math.max(w.x + g.dx, -w.w + 80), W - 80),
                     y: Math.min(Math.max(w.y + g.dy, StatusBar.currentHeight ?? 0), H - HANDLE_H - 40),
                 })
             },
-            onPanResponderTerminate: () => setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 }),
+            onPanResponderTerminate: () => {
+                setDrag({ dx: 0, dy: 0, dw: 0, dh: 0 })
+                setSnap(false)
+            },
         }),
     ).current
 
@@ -684,9 +712,9 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
           ? (() => {
                 // 분할: 화면 아래 절반을 도킹한 창끼리 나눠 쓴다
                 // 분할: 위 절반은 창(들), 아래 절반은 디스코드 (앱 바깥 자리가 있으면 디스코드를 아래로 줄인다)
-                const bottom = splitLine()
-                const each = (bottom - minTop) / Math.max(1, dockCount)
-                return { left: 0, top: minTop + each * dockIndex, width, height: each }
+                const g = splitGeom()
+                const each = (g.chatBottom - g.chatTop) / Math.max(1, dockCount)
+                return { left: 0, top: g.chatTop + each * dockIndex, width, height: each }
             })()
           : {
                 left: win.x + drag.dx - (drag.left ? drag.dw : 0),
@@ -696,7 +724,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             }
     // 키보드가 열리면 채널 화면은 키보드 높이만큼 아래를 비운다 (화면 맨 아래까지 닿는다고 생각한다).
     // 그래서 맨 앞 창은 아래쪽을 화면 끝까지 늘리고, 키보드 위로 원래 높이만큼 보이게 올린다
-    if (kb > 0 && front && !win.docked) {
+    if (kb > 0 && front && (!win.docked || splitGeom().swap)) {
         const top = Math.max(minTop, height - kb - frame.height)
         frame = { ...frame, top, height: height - top }
     } else if (kb > 0) {
@@ -710,6 +738,12 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
     }
 
     return (
+        <>
+        {snap ? (
+            <View pointerEvents="none" style={{ position: 'absolute', left: 6, right: 6, top: minTop + 4, height: splitGeom().chatBottom - minTop - 8, borderRadius: 16, borderWidth: 2, borderColor: accent, backgroundColor: accent + '33', alignItems: 'center', justifyContent: 'center' }}>
+                <RNText style={{ color: color('TEXT_NORMAL', '#fff'), fontSize: 14, fontWeight: '700' }}>Drop here for split screen</RNText>
+            </View>
+        ) : null}
         <Animated.View
             style={{
                 position: 'absolute',
@@ -785,6 +819,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                 </>
             ) : null}
         </Animated.View>
+        </>
     )
 }
 
@@ -886,6 +921,7 @@ function Windows({ host }: { host: Place }) {
                     <Window win={w} dockIndex={docked.indexOf(w)} dockCount={docked.length} kb={kb} front={w.id === frontId} />
                 </View>
             ))}
+            {host === 'stack' && rootActive && docked.length ? <Divider /> : null}
             {hiddenCount ? (
                 // 숨긴 동안은 작은 표시만 (혹시 숨긴 채로 남으면 눌러서 다시 보이게)
                 <Pressable
@@ -1019,7 +1055,29 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
 // ── 분할 화면: 디스코드 전체를 아래 절반으로 ────────────────────
 let rootActive = false
 let stackHost = false
-const splitLine = () => Math.round(Dimensions.get('window').height * 0.5)
+const DIV = 26
+const SNAP_ZONE = 40
+const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, a), b)
+/** 분할 화면 배치: 분할선 위치, Mini Chat 자리, 디스코드 자리 */
+function splitGeom() {
+    const H = Dimensions.get('window').height
+    const SB = StatusBar.currentHeight ?? 0
+    const st = settings()
+    const r = clamp(st.splitRatio ?? 0.5, 0.2, 0.8)
+    const L = Math.round(SB + (H - SB) * r)
+    const swap = !!st.splitSwap
+    return {
+        H,
+        SB,
+        L,
+        swap,
+        chatTop: swap ? L + DIV / 2 : SB,
+        chatBottom: swap ? H : L - DIV / 2,
+        discordTop: swap ? SB : L + DIV / 2,
+        discordBottom: swap ? L - DIV / 2 : H,
+    }
+}
+const splitLine = () => splitGeom().L
 const anyDocked = () => wins.some(w => w.docked && !w.minimized)
 
 const WRAP = '__miniChatInner'
@@ -1053,12 +1111,218 @@ function SplitStack(props: any) {
     useStore()
     const { [WRAP]: Inner, ...rest } = props
     const split = settings().host === 'global' && anyDocked()
-    const top = split ? splitLine() - (StatusBar.currentHeight ?? 0) : 0
+    const g = splitGeom()
+    // 디스코드 화면은 원래 상태 바 아래부터 그려진다: 위로 Mini Chat 이면 위를 비우고, 아래로 Mini Chat 이면 아래를 비운다
+    const top = split && !g.swap ? g.discordTop - g.SB : 0
+    const bottom = split && g.swap ? g.H - g.discordBottom : 0
     // 창들도 여기(화면 묶음 바로 옆, 맨 위)에 그린다. 토스트 자리는 다시 그려지지 않으면 창이 안 나왔다
     return (
         <>
-            {createElement(Inner, { ...rest, [SKIP]: true, style: [rest.style, top ? { marginTop: top } : null] })}
+            {createElement(Inner, { ...rest, [SKIP]: true, style: [rest.style, top || bottom ? { marginTop: top, marginBottom: bottom } : null] })}
             <Windows host="stack" />
+        </>
+    )
+}
+
+const SWAP_ICON = ['ArrowsUpDownIcon', 'ArrowsVerticalIcon', 'RefreshIcon']
+const POPUP_ICON = ['WindowLaunchIcon', 'ScreenArrowIcon', 'FullscreenExitIcon']
+
+/** 분할한 창 중 맨 앞 */
+const frontDocked = () => wins.filter(w => w.docked && !w.minimized).reduce<Win | undefined>((a, w) => (!a || w.z > a.z ? w : a), undefined)
+
+/** 분할 화면 동작 (분할선 버튼, 메뉴) */
+const splitActions = {
+    swap() {
+        const st = settings()
+        smooth()
+        // 자리를 바꿔도 각자 크기는 그대로
+        save({ splitSwap: !st.splitSwap, splitRatio: 1 - clamp(st.splitRatio ?? 0.5, 0.2, 0.8) })
+        note(`split swap -> chat ${!st.splitSwap ? 'bottom' : 'top'}`)
+    },
+    full() {
+        const w = frontDocked()
+        if (!w) return
+        smooth()
+        setWin(w.id, { docked: false, maximized: true })
+        bringToFront(w.id)
+        note(`split: window ${w.id} full screen`)
+    },
+    popup() {
+        smooth()
+        wins = wins.map(w => (w.docked ? { ...w, docked: false, maximized: false } : w))
+        note('split: back to pop-up')
+        emit()
+    },
+    minimize() {
+        smooth()
+        wins = wins.map(w => (w.docked && !w.minimized ? { ...w, docked: false, minimized: true } : w))
+        note('split: minimized to bubble')
+        emit()
+    },
+    close() {
+        const w = frontDocked()
+        if (w) closeWin(w.id)
+    },
+}
+
+/**
+ * 분할선: 가운데 버튼이 있는 띠.
+ * 끌면 비율이 바뀌고, 끝까지 끌면 한쪽을 닫거나(방울로) 펼친다. 톡 누르면 메뉴, 두 번 톡하면 바로 화면 가득.
+ */
+function Divider() {
+    const g = splitGeom()
+    const [dy, setDy] = useState(0)
+    const [menu, setMenu] = useState(false)
+    const menuAnim = useRef(new Animated.Value(0)).current
+    const press = useRef(new Animated.Value(0)).current
+    const menuTimer = useRef<any>()
+    const lastTap = useRef(0)
+    const menuOn = useRef(menu)
+    menuOn.current = menu
+    useEffect(() => () => clearTimeout(menuTimer.current), [])
+
+    const showMenu = (on: boolean) => {
+        clearTimeout(menuTimer.current)
+        if (on) {
+            setMenu(true)
+            menuAnim.setValue(0)
+            Animated.spring(menuAnim, { toValue: 1, useNativeDriver: true, stiffness: 420, damping: 24, mass: 0.6 }).start()
+            menuTimer.current = setTimeout(() => menuRef.current(false), 5000)
+        } else {
+            Animated.timing(menuAnim, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setMenu(false))
+        }
+    }
+    const menuRef = useRef(showMenu)
+    menuRef.current = showMenu
+
+    // 끄는 중 어느 쪽이 거의 없어지는지 (놓으면 그쪽을 닫는다)
+    const edgeOf = (d: number): 'chat' | 'discord' | null => {
+        const s = splitGeom()
+        const frac = (s.L + d - s.SB) / (s.H - s.SB)
+        const chatFrac = s.swap ? 1 - frac : frac
+        if (chatFrac < 0.12) return 'chat'
+        if (chatFrac > 0.88) return 'discord'
+        return null
+    }
+
+    const pan = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: () => true,
+            onPanResponderGrant: () => {
+                Animated.spring(press, { toValue: 1, useNativeDriver: true, stiffness: 500, damping: 26 }).start()
+            },
+            onPanResponderMove: (_e, s) => setDy(s.dy),
+            onPanResponderRelease: (_e, s) => {
+                Animated.spring(press, { toValue: 0, useNativeDriver: true, stiffness: 400, damping: 22 }).start()
+                setDy(0)
+                if (Math.abs(s.dy) < 6 && Math.abs(s.dx) < 10) {
+                    const now = Date.now()
+                    if (now - lastTap.current < 320) {
+                        lastTap.current = 0
+                        menuRef.current(false)
+                        splitActions.full()
+                        return
+                    }
+                    lastTap.current = now
+                    menuRef.current(!menuOn.current)
+                    return
+                }
+                menuRef.current(false)
+                const edge = edgeOf(s.dy)
+                if (edge === 'chat') return splitActions.minimize()
+                if (edge === 'discord') return splitActions.full()
+                const st = splitGeom()
+                const ratio = clamp((st.L + s.dy - st.SB) / (st.H - st.SB), 0.2, 0.8)
+                smooth()
+                save({ splitRatio: ratio })
+                note(`split ratio ${Math.round(ratio * 100)}%`)
+            },
+            onPanResponderTerminate: () => {
+                Animated.spring(press, { toValue: 0, useNativeDriver: true }).start()
+                setDy(0)
+            },
+        }),
+    ).current
+
+    const strip = color('BACKGROUND_BASE_LOWEST', '#111214')
+    const accent = color('TEXT_BRAND', '#5865f2')
+    const knob = color('INTERACTIVE_MUTED', '#888')
+    const subtle = color('BORDER_SUBTLE', '#ffffff22')
+    const danger = color('TEXT_FEEDBACK_CRITICAL', '#f23f43')
+    const edge = dy ? edgeOf(dy) : null
+    const top = clamp(g.L - DIV / 2 + dy, g.SB, g.H - DIV)
+    const act = (f: () => void) => () => {
+        showMenu(false)
+        f()
+    }
+    // 메뉴는 디스코드 쪽에 띄운다 (채팅을 가리지 않게)
+    const menuTop = g.swap ? g.L - DIV / 2 - 50 : g.L + DIV / 2 + 6
+
+    return (
+        <>
+            {dy ? (
+                // 끄는 중: 새 분할선 위치와, 닫힐 쪽 표시
+                <View
+                    pointerEvents="none"
+                    style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: edge === null ? 0 : (edge === 'chat') !== g.swap ? g.SB : top + DIV,
+                        height: edge === null ? 0 : (edge === 'chat') !== g.swap ? Math.max(0, top - g.SB) : Math.max(0, g.H - top - DIV),
+                        backgroundColor: (edge === 'chat' ? danger : accent) + '40',
+                        zIndex: 999998,
+                    }}
+                />
+            ) : null}
+            <View
+                {...pan.panHandlers}
+                style={{ position: 'absolute', left: 0, right: 0, top, height: DIV, backgroundColor: strip, alignItems: 'center', justifyContent: 'center', zIndex: 999999, elevation: 18 }}
+            >
+                <Animated.View
+                    style={{
+                        width: 56,
+                        height: 18,
+                        borderRadius: 9,
+                        backgroundColor: dy ? accent : color('BACKGROUND_MOD_STRONG', '#ffffff1f'),
+                        borderWidth: 1,
+                        borderColor: subtle,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transform: [{ scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }) }],
+                    }}
+                >
+                    <View style={{ width: 22, height: 4, borderRadius: 2, backgroundColor: dy ? '#fff' : knob }} />
+                </Animated.View>
+            </View>
+            {menu ? (
+                <Animated.View
+                    style={{
+                        opacity: menuAnim,
+                        transform: [{ scale: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
+                        position: 'absolute',
+                        top: menuTop,
+                        alignSelf: 'center',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 6,
+                        height: 44,
+                        borderRadius: 22,
+                        backgroundColor: strip,
+                        borderWidth: 1,
+                        borderColor: subtle,
+                        elevation: 20,
+                        zIndex: 1000001,
+                    }}
+                >
+                    <BarButton names={SWAP_ICON} fallback="⇅" accent={accent} onPress={act(splitActions.swap)} />
+                    <BarButton names={POPUP_ICON} fallback="❐" accent={accent} onPress={act(splitActions.popup)} />
+                    <BarButton names={MIN_ICON} fallback="–" accent={accent} onPress={act(splitActions.minimize)} />
+                    <BarButton names={MAX_ICON} fallback="⤢" accent={accent} onPress={act(splitActions.full)} />
+                    <BarButton names={CLOSE_ICON} fallback="×" accent={accent} onPress={act(splitActions.close)} />
+                </Animated.View>
+            ) : null}
         </>
     )
 }
@@ -1308,7 +1572,7 @@ function SettingsPage() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
             <Stack spacing={16}>
                 <Text variant="text-sm/normal" color="text-muted">
-                    Long press a channel and pick "Open in Mini Chat". Drag the title bar to move a window, drag the corner to resize it, "–" to shrink it into a bubble, "▭" to dock it into the bottom half.
+                    Long press a channel and pick "Open in Mini Chat". Drag the title bar to move a window, drag the corner to resize it, "–" to shrink it into a bubble. Double tap the title bar to fill the screen. Drag a window to the top edge (or use the split button) for split screen: drag the middle bar to change the size, drag it to an edge to close or fill a side, tap it for swap, pop-up, minimize, full screen and close, double tap it to fill the screen.
                 </Text>
                 <TableRowGroup title="Open">
                     <TableRow
