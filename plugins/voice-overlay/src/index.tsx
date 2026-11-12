@@ -33,10 +33,12 @@ interface Settings {
     longPress: 'menu' | 'chat' | 'off'
     /** 채팅 버튼: 톡, 길게 누르기, 숨기기 */
     chatButton: 'tap' | 'long' | 'hidden'
+    /** 디스코드가 직접 띄우는 오버레이를 막는다 */
+    hideDiscordOverlay: boolean
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long' }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -89,6 +91,7 @@ function snapshot() {
                 speaking: !!S().SpeakingStore?.isSpeaking?.(id),
                 muted: !!(v.selfMute || v.mute || v.self_mute),
                 deafened: !!(v.selfDeaf || v.deaf || v.self_deaf),
+                live: !!(v.selfStream || v.self_stream),
             }
         })
         .filter(Boolean)
@@ -376,7 +379,7 @@ function SettingsPage() {
     return (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
             <Text variant="text-md/normal" color="text-muted">
-                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and long press the chat button to chat. All of this can be changed under Touch.
+                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking and a red LIVE on whoever is streaming. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and long press the chat button to chat. All of this can be changed under Touch.
             </Text>
 
             {heading('Permission')}
@@ -394,6 +397,12 @@ function SettingsPage() {
                 <TableSwitchRow label="Show the overlay" subLabel="Only while you are in a voice channel." value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
                 <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+                <TableSwitchRow
+                    label="Remove Discord's own overlay"
+                    subLabel="Stops Discord's built-in voice overlay from showing over other apps, so only this one shows. Takes effect the next time Discord tries to show it."
+                    value={s.hideDiscordOverlay}
+                    onValueChange={(v: boolean) => save({ hideDiscordOverlay: v })}
+                />
             </TableRowGroup>
 
             {heading('Touch')}
@@ -448,7 +457,7 @@ export default plugin({
             cleanup(() => st.removeChangeListener?.(pushSelf))
         }
         pushSelf()
-        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore']
+        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore']
         for (const name of stores) {
             const st = S()[name]
             if (!st?.addChangeListener) continue

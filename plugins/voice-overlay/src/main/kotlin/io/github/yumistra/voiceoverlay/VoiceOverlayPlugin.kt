@@ -65,7 +65,7 @@ import java.util.concurrent.Executors
  * 다른 앱 위에 그리려면 "다른 앱 위에 표시" 권한이 필요하다. 없으면 디스코드 안에서만 보인다.
  */
 
-private data class Person(val id: String, val name: String, val avatar: String?, val speaking: Boolean, val muted: Boolean, val deafened: Boolean)
+private data class Person(val id: String, val name: String, val avatar: String?, val speaking: Boolean, val muted: Boolean, val deafened: Boolean, val live: Boolean = false)
 private class ChatLine(val author: String, val color: Int, val avatar: String?, val time: String, val content: String, val head: Boolean)
 
 private val main = Handler(Looper.getMainLooper())
@@ -89,6 +89,21 @@ private val loading = ConcurrentHashMap.newKeySet<String>()
 /** 채팅 버튼: tap, long, hidden */
 @Volatile private var chatMode = "long"
 private var builtChatMode = ""
+/** 디스코드가 직접 띄우는 오버레이 창을 막는다 */
+@Volatile private var hideDiscordOverlay = false
+/** 우리 창을 붙이는 중 (막지 않게) */
+private var addingOwn = false
+/** 본 다른 오버레이 창 (로그용) */
+private val foreignWindows = ConcurrentLinkedQueue<String>()
+private fun addOwn(wm: WindowManager, v: View, lp: WindowManager.LayoutParams) {
+    addingOwn = true
+    try {
+        wm.addView(v, lp)
+    } finally {
+        addingOwn = false
+    }
+}
+private fun isOverlayType(t: Int) = t == 2038 || t == 2002 || t == 2003 || t == 2006 || t == 2007 || t == 2010
 @Volatile private var posX = 24
 @Volatile private var posY = 200
 @Volatile private var lastError = ""
@@ -487,12 +502,25 @@ private fun makeRow(c: Context, p: Person): Row {
 private fun setStatus(c: Context, r: Row, p: Person) {
     r.status.removeAllViews()
     val red = Color.rgb(242, 63, 67)
+    if (p.live) {
+        // 방송 중: 디스코드처럼 빨간 LIVE 표시
+        val live = TextView(c)
+        live.text = "LIVE"
+        live.textSize = 10f * scale
+        live.typeface = Typeface.DEFAULT_BOLD
+        live.setTextColor(Color.WHITE)
+        live.background = pill(c, red, 4f * scale)
+        live.setPadding(dp(c, 5f * scale), dp(c, 1f * scale), dp(c, 5f * scale), dp(c, 1f * scale))
+        val llp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        llp.leftMargin = dp(c, 6f * scale)
+        r.status.addView(live, llp)
+    }
     val key = when {
         p.deafened -> "headsetOff"
         p.muted -> "micOff"
         else -> null
     } ?: return
-    val v = iconView(c, key, 15f * scale, red, if (key == "headsetOff") "D" else "M")
+    val v: View = iconView(c, key, 15f * scale, red, if (key == "headsetOff") "D" else "M")
     val lp = LinearLayout.LayoutParams(dp(c, 15f * scale), dp(c, 15f * scale))
     lp.leftMargin = dp(c, 6f * scale)
     r.status.addView(v, lp)
@@ -602,7 +630,7 @@ private fun render() {
         lp.x = posX
         lp.y = posY
         try {
-            wm.addView(r, lp)
+            addOwn(wm, r, lp)
             attachedTo = wm
             attachedSystem = system
             r.scaleX = 0.9f
@@ -698,7 +726,7 @@ private fun showMenu() {
         box.scaleY = 0.9f
         box.pivotX = 0f
         box.pivotY = 0f
-        wm.addView(box, lp)
+        addOwn(wm, box, lp)
         menu = box
         menuWm = wm
         box.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).setInterpolator(DecelerateInterpolator()).start()
@@ -851,7 +879,7 @@ private fun openChat() {
         box.scaleY = 0.92f
         box.pivotX = if (lp.x >= posX) 0f else w.toFloat()
         box.pivotY = 0f
-        wm.addView(box, lp)
+        addOwn(wm, box, lp)
         chatWm = wm
         chatOpen = true
         chatShown = 0
@@ -955,6 +983,30 @@ val voiceOverlayPlugin = plugin {
         } catch (e: Throwable) {
             lastError = "lifecycle hook: $e"
         }
+        // 디스코드 자체 오버레이 창 막기: 앱이 다른 앱 위 창을 붙일 때, 우리 것이 아니면 (설정이 켜져 있을 때) 붙이지 않는다
+        try {
+            hooks += XposedHelpers.findAndHookMethod(
+                "android.view.WindowManagerImpl",
+                null,
+                "addView",
+                View::class.java,
+                android.view.ViewGroup.LayoutParams::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (addingOwn) return
+                        val lp = param.args[1] as? WindowManager.LayoutParams ?: return
+                        if (!isOverlayType(lp.type)) return
+                        val v = param.args[0] as? View
+                        val what = "${v?.javaClass?.name} type=${lp.type}${if (hideDiscordOverlay) " (blocked)" else ""}"
+                        foreignWindows.add(what)
+                        while (foreignWindows.size > 8) foreignWindows.poll()
+                        if (hideDiscordOverlay) param.result = null
+                    }
+                },
+            )
+        } catch (e: Throwable) {
+            lastError = "window hook: $e"
+        }
         unhooks = hooks
 
         registerNativeMethod("${manifest.id}.update") { args ->
@@ -962,7 +1014,7 @@ val voiceOverlayPlugin = plugin {
                 val arr = JSONArray(args.getOrNull(0) as? String ?: "[]")
                 people = (0 until arr.length()).map {
                     val o = arr.getJSONObject(it)
-                    Person(o.optString("id"), o.optString("name"), o.optString("avatar").takeIf { s -> s.isNotBlank() }, o.optBoolean("speaking"), o.optBoolean("muted"), o.optBoolean("deafened"))
+                    Person(o.optString("id"), o.optString("name"), o.optString("avatar").takeIf { s -> s.isNotBlank() }, o.optBoolean("speaking"), o.optBoolean("muted"), o.optBoolean("deafened"), o.optBoolean("live"))
                 }
                 main.post { render() }
                 true
@@ -991,6 +1043,7 @@ val voiceOverlayPlugin = plugin {
                 passThrough = o.optBoolean("passThrough", passThrough)
                 longAction = o.optString("longPress", longAction)
                 chatMode = o.optString("chatButton", chatMode)
+                hideDiscordOverlay = o.optBoolean("hideDiscordOverlay", hideDiscordOverlay)
                 if (o.has("x")) posX = o.optInt("x", posX)
                 if (o.has("y")) posY = o.optInt("y", posY)
                 main.post {
@@ -1059,6 +1112,7 @@ val voiceOverlayPlugin = plugin {
                 "people" to people.size,
                 "enabled" to overlayOn,
                 "icons" to iconNames.entries.joinToString(", ") { "${it.key}=${it.value}" },
+                "foreignOverlays" to foreignWindows.joinToString(" | "),
                 "error" to lastError,
             )
         }
