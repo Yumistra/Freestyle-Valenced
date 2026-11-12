@@ -280,6 +280,24 @@ export function clearAll() {
     save(true)
 }
 
+/**
+ * "조용히 지우기"(SilentDelete 등) 막기: 새 메시지의 nonce 를 지울 메시지의 ID 로 보내면,
+ * 디스코드는 그 새 메시지를 "내가 보낸 메시지가 확인됐다"로 착각해 원래 메시지를 새 메시지로 갈아 끼운다.
+ * 그러면 원래 메시지가 화면, 저장소에서 사라져서, 나중에 원래 메시지가 지워져도 로거가 내용을 모른다.
+ * 이미 보내진(SENT) 다른 사람 메시지 ID 를 nonce 로 단 메시지가 오면 nonce 를 떼어 따로 넣는다.
+ * (내가 보내는 중인 메시지는 상태가 SENDING 이라 건드리지 않는다)
+ */
+function keepReplaced(p: any) {
+    const m = p?.message
+    const n = m?.nonce
+    if (!settings().logDeletes || !m?.id || typeof n !== 'string' || n === m.id || p.optimistic) return p
+    const old = getMessage(m.channel_id, n)
+    if (!old || old.id !== n || (old.state && old.state !== 'SENT')) return p
+    if (!shouldLog(old)) return p
+    // 원래 메시지는 그대로 두고 새 메시지는 따로 들어간다. 나중에 원래 메시지가 지워지면 평소처럼 기록된다
+    return { ...p, message: { ...m, nonce: undefined } }
+}
+
 export function intercept() {
     return [
         onFluxEventDispatched('MESSAGE_DELETE', (p: any) => {
@@ -325,6 +343,9 @@ export function intercept() {
         onFluxEventDispatched('MESSAGE_CREATE', (p: any) => {
             try {
                 if (settings().logDeletes || settings().logEdits) p = unsilence(p)
+            } catch {}
+            try {
+                p = keepReplaced(p)
             } catch {}
             try {
                 if (!p?.optimistic && p?.message && !p.isPushNotification) remember([{ ...p.message, guild_id: p.message.guild_id ?? p.guildId }], myId())
