@@ -56,7 +56,7 @@ private val bitmaps = ConcurrentHashMap<String, Bitmap>()
 private val loading = ConcurrentHashMap.newKeySet<String>()
 
 @Volatile private var people: List<Person> = emptyList()
-@Volatile private var enabled = false
+@Volatile private var overlayOn = false
 @Volatile private var onlySpeaking = false
 @Volatile private var hideInDiscord = true
 @Volatile private var scale = 1f
@@ -198,7 +198,7 @@ private fun render() {
     val inDiscord = resumed != null
     val shown = people.filter { !onlySpeaking || it.speaking }
     val system = canOverlay(c)
-    val want = enabled && shown.isNotEmpty() && (if (inDiscord) !hideInDiscord || !system else system)
+    val want = overlayOn && shown.isNotEmpty() && (if (inDiscord) !hideInDiscord || !system else system)
     if (!want) {
         detach()
         return
@@ -330,7 +330,7 @@ val voiceOverlayPlugin = plugin {
         registerNativeMethod("${manifest.id}.config") { args ->
             try {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
-                enabled = o.optBoolean("enabled", enabled)
+                overlayOn = o.optBoolean("enabled", overlayOn)
                 onlySpeaking = o.optBoolean("onlySpeaking", onlySpeaking)
                 hideInDiscord = o.optBoolean("hideInDiscord", hideInDiscord)
                 scale = o.optDouble("scale", scale.toDouble()).toFloat().coerceIn(0.5f, 2f)
@@ -372,7 +372,7 @@ val voiceOverlayPlugin = plugin {
                 "overOtherApps" to attachedSystem,
                 "inDiscord" to (resumed != null),
                 "people" to people.size,
-                "enabled" to enabled,
+                "enabled" to overlayOn,
                 "error" to lastError,
             )
         }
@@ -384,7 +384,7 @@ val voiceOverlayPlugin = plugin {
         } catch (e: Throwable) {
         }
         unhooks = emptyList()
-        enabled = false
+        overlayOn = false
         main.post { detach() }
     }
 }
