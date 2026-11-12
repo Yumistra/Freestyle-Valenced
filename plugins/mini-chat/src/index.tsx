@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.7'
+const VERSION = '1.2.8'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -543,7 +543,9 @@ function useKeyboard() {
     const [h, setH] = useState(keyboard)
     useEffect(() => {
         const a = Keyboard.addListener('keyboardDidShow', (e: any) => {
-            keyboard = e?.endCoordinates?.height ?? 0
+            const next = e?.endCoordinates?.height ?? 0
+            if (next !== keyboard) note(`keyboard ${Math.round(next)} (top ${Math.round(e?.endCoordinates?.screenY ?? -1)}, screen ${Math.round(Dimensions.get('screen').height)}, window ${Math.round(Dimensions.get('window').height)}, nav ${Math.round(navBarHeight())})`)
+            keyboard = next
             setH(keyboard)
         })
         const b = Keyboard.addListener('keyboardDidHide', () => {
@@ -926,7 +928,7 @@ function NoInsets({ children, kb }: { children: any; kb: number }) {
     const Ctx = insetsContext()
     // 위 여백은 디스코드가 기기 값을 직접 읽어서 비워서(알려 줘도 그대로였다), 상태 바 높이만큼 끌어올려 가린다
     // 아래 내비게이션 바 자리도 (키보드가 없을 때만) 아래로 내려 가린다
-    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0), marginBottom: kb > 0 ? -kb : -navBarHeight() }}>{children}</View>
+    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0), marginBottom: -(kb + navBarHeight()) }}>{children}</View>
     return Ctx?.Provider ? <Ctx.Provider value={ZERO}>{inner}</Ctx.Provider> : inner
 }
 
