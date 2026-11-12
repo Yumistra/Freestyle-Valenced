@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.4'
+const VERSION = '1.2.5'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -600,7 +600,12 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             onPanResponderGrant: () => bringToFront(winRef.current.id),
             onPanResponderMove: (_e, g) => {
                 const w = winRef.current
-                if (!w.minimized && (w.docked || w.maximized)) return
+                if (!w.minimized && w.docked) {
+                    // 분할 창: 위아래로만 따라오고, 분할선을 넘겨 놓으면 자리를 바꾼다
+                    setDrag({ dx: 0, dy: g.dy, dw: 0, dh: 0 })
+                    return
+                }
+                if (!w.minimized && w.maximized) return
                 setDrag({ dx: g.dx, dy: g.dy, dw: 0, dh: 0 })
                 if (!w.minimized) setSnap(g.moveY < (StatusBar.currentHeight ?? 24) + SNAP_ZONE)
             },
@@ -630,7 +635,12 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                     setWin(w.id, { bx: cx < W / 2 ? 6 : W - BUBBLE - 6, by: Math.min(Math.max((w.by ?? w.y) + g.dy, StatusBar.currentHeight ?? 0), H - BUBBLE - 8) })
                     return
                 }
-                if (w.docked || w.maximized) return
+                if (w.docked) {
+                    const sg = splitGeom()
+                    if (sg.swap ? g.moveY < sg.L : g.moveY > sg.L) splitActions.swap()
+                    return
+                }
+                if (w.maximized) return
                 // 화면 맨 위로 끌어 놓으면 분할 화면으로
                 if (g.moveY < (StatusBar.currentHeight ?? 24) + SNAP_ZONE) {
                     smooth()
@@ -714,7 +724,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
                 // 분할: 위 절반은 창(들), 아래 절반은 디스코드 (앱 바깥 자리가 있으면 디스코드를 아래로 줄인다)
                 const g = splitGeom()
                 const each = (g.chatBottom - g.chatTop) / Math.max(1, dockCount)
-                return { left: 0, top: g.chatTop + each * dockIndex, width, height: each }
+                return { left: 0, top: g.chatTop + each * dockIndex + drag.dy, width, height: each }
             })()
           : {
                 left: win.x + drag.dx - (drag.left ? drag.dw : 0),
@@ -763,7 +773,7 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
         >
             {/* 위 손잡이 */}
             <View {...move.panHandlers} style={{ height: HANDLE_H, alignItems: 'center', justifyContent: 'center', backgroundColor: strip }}>
-                <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: muted }} />
+                <View style={{ width: front ? 46 : 40, height: 4, borderRadius: 2, backgroundColor: front ? accent : muted }} />
             </View>
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <Boundary win={win}>
@@ -1055,7 +1065,9 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
 // ── 분할 화면: 디스코드 전체를 아래 절반으로 ────────────────────
 let rootActive = false
 let stackHost = false
-const DIV = 26
+const DIV = 14
+/** 분할선을 잡는 자리 (보이는 선보다 넓게) */
+const DIV_TOUCH = 40
 const SNAP_ZONE = 40
 const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, a), b)
 /** 분할 화면 배치: 분할선 위치, Mini Chat 자리, 디스코드 자리 */
@@ -1247,68 +1259,81 @@ function Divider() {
 
     const strip = color('BACKGROUND_BASE_LOWEST', '#111214')
     const accent = color('TEXT_BRAND', '#5865f2')
-    const knob = color('INTERACTIVE_MUTED', '#888')
+    const knob = color('INTERACTIVE_NORMAL', '#ddd')
     const subtle = color('BORDER_SUBTLE', '#ffffff22')
     const danger = color('TEXT_FEEDBACK_CRITICAL', '#f23f43')
     const edge = dy ? edgeOf(dy) : null
-    const top = clamp(g.L - DIV / 2 + dy, g.SB, g.H - DIV)
+    const line = clamp(g.L + dy, g.SB + DIV, g.H - DIV)
     const act = (f: () => void) => () => {
         showMenu(false)
         f()
     }
-    // 메뉴는 디스코드 쪽에 띄운다 (채팅을 가리지 않게)
-    const menuTop = g.swap ? g.L - DIV / 2 - 50 : g.L + DIV / 2 + 6
+
+    // 끄는 중: 삼성처럼 양쪽을 판으로 덮어 새 크기를 보여 준다 (놓아야 실제로 바뀐다)
+    const fw = frontDocked()
+    const chatPanel = { top: g.swap ? line + DIV / 2 : g.SB, bottom: g.swap ? g.H : line - DIV / 2 }
+    const discordPanel = { top: g.swap ? g.SB : line + DIV / 2, bottom: g.swap ? line - DIV / 2 : g.H }
+    const panel = (key: string, r: { top: number; bottom: number }, closing: boolean, filling: boolean, label: string, names: string[], img?: string) => (
+        <View
+            key={key}
+            pointerEvents="none"
+            style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: r.top,
+                height: Math.max(0, r.bottom - r.top),
+                backgroundColor: closing ? danger + '55' : filling ? accent + '33' : color('BACKGROUND_BASE_LOW', '#232428'),
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                zIndex: 999998,
+            }}
+        >
+            <View style={{ width: 48, height: 48, borderRadius: 24, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: strip }}>
+                {img ? <Image source={{ uri: img }} style={{ width: 48, height: 48 }} /> : <DIcon names={names} fallback="#" c={knob} size={26} />}
+            </View>
+            <RNText numberOfLines={1} style={{ marginTop: 8, color: color('TEXT_NORMAL', '#fff'), fontSize: 13, fontWeight: '700' }}>{label}</RNText>
+        </View>
+    )
 
     return (
         <>
-            {dy ? (
-                // 끄는 중: 새 분할선 위치와, 닫힐 쪽 표시
-                <View
-                    pointerEvents="none"
-                    style={{
-                        position: 'absolute',
-                        left: 0,
-                        right: 0,
-                        top: edge === null ? 0 : (edge === 'chat') !== g.swap ? g.SB : top + DIV,
-                        height: edge === null ? 0 : (edge === 'chat') !== g.swap ? Math.max(0, top - g.SB) : Math.max(0, g.H - top - DIV),
-                        backgroundColor: (edge === 'chat' ? danger : accent) + '40',
-                        zIndex: 999998,
-                    }}
-                />
-            ) : null}
+            {dy
+                ? [
+                      panel('chat', chatPanel, edge === 'chat', edge === 'discord', fw ? channelName(fw.channelId) : 'Mini Chat', fw ? channelIconNames(fw.channelId) : ['ChatIcon'], fw ? bubbleImage(fw.channelId) : undefined),
+                      panel('discord', discordPanel, edge === 'discord', edge === 'chat', 'Discord', ['ClydeIcon', 'DiscordIcon', 'HomeIcon']),
+                  ]
+                : null}
+            {/* 보이는 선은 얇게, 잡는 자리는 넓게 */}
+            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: line - DIV / 2, height: DIV, backgroundColor: strip, zIndex: 999999, elevation: 18 }} />
             <View
                 {...pan.panHandlers}
-                style={{ position: 'absolute', left: 0, right: 0, top, height: DIV, backgroundColor: strip, alignItems: 'center', justifyContent: 'center', zIndex: 999999, elevation: 18 }}
+                style={{ position: 'absolute', left: 0, right: 0, top: line - DIV_TOUCH / 2, height: DIV_TOUCH, alignItems: 'center', justifyContent: 'center', zIndex: 999999, elevation: 18 }}
             >
                 <Animated.View
                     style={{
-                        width: 56,
-                        height: 18,
-                        borderRadius: 9,
-                        backgroundColor: dy ? accent : color('BACKGROUND_MOD_STRONG', '#ffffff1f'),
-                        borderWidth: 1,
-                        borderColor: subtle,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transform: [{ scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }) }],
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: dy ? accent : knob,
+                        transform: [{ scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
                     }}
-                >
-                    <View style={{ width: 22, height: 4, borderRadius: 2, backgroundColor: dy ? '#fff' : knob }} />
-                </Animated.View>
+                />
             </View>
             {menu ? (
                 <Animated.View
                     style={{
                         opacity: menuAnim,
-                        transform: [{ scale: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
+                        transform: [{ scale: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
                         position: 'absolute',
-                        top: menuTop,
+                        top: line - 20,
                         alignSelf: 'center',
                         flexDirection: 'row',
                         alignItems: 'center',
-                        paddingHorizontal: 6,
-                        height: 44,
-                        borderRadius: 22,
+                        paddingHorizontal: 4,
+                        height: 40,
+                        borderRadius: 20,
                         backgroundColor: strip,
                         borderWidth: 1,
                         borderColor: subtle,
@@ -1572,7 +1597,7 @@ function SettingsPage() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
             <Stack spacing={16}>
                 <Text variant="text-sm/normal" color="text-muted">
-                    Long press a channel and pick "Open in Mini Chat". Drag the title bar to move a window, drag the corner to resize it, "–" to shrink it into a bubble. Double tap the title bar to fill the screen. Drag a window to the top edge (or use the split button) for split screen: drag the middle bar to change the size, drag it to an edge to close or fill a side, tap it for swap, pop-up, minimize, full screen and close, double tap it to fill the screen.
+                    Long press a channel and pick "Open in Mini Chat". Drag the title bar to move a window, drag the corner to resize it, "–" to shrink it into a bubble. Double tap the title bar to fill the screen. Drag a window to the top edge (or use the split button) for split screen: drag the title bar across the middle line to swap, drag the middle dot to change the size, drag it to an edge to close or fill a side, tap it for swap, pop-up, minimize, full screen and close, double tap it to fill the screen.
                 </Text>
                 <TableRowGroup title="Open">
                     <TableRow
