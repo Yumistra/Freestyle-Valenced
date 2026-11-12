@@ -119,42 +119,86 @@ private fun windowManager(c: Context): Pair<WindowManager, Boolean>? {
 }
 
 // ── 디스코드 아이콘 ──────────────────────────────────────────────
-/** 아이콘 이름 후보 (앞의 것부터). 디스코드 앱 리소스 안에서 찾고, 찾은 이름은 status 에 남긴다 */
+/**
+ * 아이콘 이름 후보 (앞의 것부터). 디스코드(리액트 네이티브)의 아이콘 그림은 앱 리소스에
+ * "…_microphoneicon" 처럼 경로를 이어 붙인 이름으로 들어 있어서, 이름 끝으로 찾는다
+ */
 private val ICONS = mapOf(
-    "chat" to listOf("ic_chat", "ic_chat_24dp", "ic_message", "ic_channel_text", "ic_text_channel"),
-    "mic" to listOf("ic_microphone", "ic_mic", "ic_mic_24dp", "ic_microphone_24dp", "ic_mic_white_24dp"),
-    "micOff" to listOf("ic_microphone_slash", "ic_mic_muted", "ic_mic_off", "ic_mic_mute", "ic_microphone_off", "ic_mute"),
-    "headset" to listOf("ic_headphones", "ic_headset", "ic_headset_24dp", "ic_deafen_off"),
-    "headsetOff" to listOf("ic_headphones_slash", "ic_headset_deafened", "ic_headset_off", "ic_deafen", "ic_deafened"),
-    "stream" to listOf("ic_screen_arrow", "ic_screenshare", "ic_screen_share", "ic_go_live", "ic_stream", "ic_screen"),
-    "leave" to listOf("ic_phone_hangup", "ic_call_disconnect", "ic_disconnect", "ic_call_end", "ic_phone_x", "ic_leave"),
-    "close" to listOf("ic_x_small", "ic_close", "ic_close_24dp", "ic_x", "ic_clear"),
-    "send" to listOf("ic_send", "ic_send_24dp", "ic_arrow_up", "ic_send_message"),
+    "chat" to listOf("chaticon", "chatsmileicon", "textchannelicon"),
+    "mic" to listOf("microphoneicon"),
+    "micOff" to listOf("microphoneslashicon", "microphonemutedicon"),
+    "headset" to listOf("headphonesicon", "headseticon"),
+    "headsetOff" to listOf("headphonesslashicon", "headphonesdeafenedicon"),
+    "stream" to listOf("screenarrowicon", "screensharestarticon", "screenicon"),
+    "leave" to listOf("phonehangupicon", "phonecallendicon", "callendicon"),
+    "close" to listOf("xsmallicon", "xlargeicon", "closesmallicon"),
+    "send" to listOf("sendmessageicon", "sendicon", "arrowupicon"),
 )
-/** 위 후보가 없을 때 이름에 들어 있으면 쓸 낱말 */
-private val ICON_WORDS = mapOf(
-    "chat" to listOf("chat"),
-    "mic" to listOf("microphone", "mic"),
-    "micOff" to listOf("microphone_slash", "mic_off", "mic_mute", "muted"),
-    "headset" to listOf("headphones", "headset"),
-    "headsetOff" to listOf("headphones_slash", "headset_off", "deafen"),
-    "stream" to listOf("screen_arrow", "screenshare", "screen_share", "go_live", "stream"),
-    "leave" to listOf("hangup", "disconnect", "call_end"),
-    "close" to listOf("x_small", "close"),
-    "send" to listOf("send"),
-)
+private val ICON_WORDS = ICONS
+
 private val iconIds = ConcurrentHashMap<String, Int>()
 private val iconNames = ConcurrentHashMap<String, String>()
 private var allDrawables: List<String>? = null
+/** 리소스 이름을 찾을 패키지 (R 클래스를 찾은 쪽) */
+private var resPkg: String? = null
+
+private fun resId(c: Context, name: String): Int {
+    for (pkg in listOfNotNull(resPkg, c.packageName, "com.discord").distinct()) {
+        val id = c.resources.getIdentifier(name, "drawable", pkg)
+        if (id != 0) return id
+    }
+    return 0
+}
 
 private fun drawableNames(c: Context): List<String> {
     allDrawables?.let { return it }
     val out = ArrayList<String>()
-    try {
-        val cls = Class.forName("${c.packageName}.R\$drawable", false, c.classLoader)
-        for (f in cls.fields) out += f.name
-    } catch (e: Throwable) {
-        lastError = "R.drawable: $e"
+    // 모드 앱은 패키지 이름이 바뀌어 있어서 원래 이름(com.discord)의 R 도 찾아본다
+    for (pkg in listOf(c.packageName, "com.discord")) {
+        try {
+            val cls = Class.forName("$pkg.R\$drawable", false, c.classLoader)
+            for (f in cls.fields) out += f.name
+            resPkg = pkg
+            break
+        } catch (e: Throwable) {
+            lastError = "R.drawable ($pkg): $e"
+        }
+    }
+    // R 클래스가 줄여져 없으면 리소스 번호를 차례로 훑는다 (drawable 종류 번호를 찾아 그 안을 끝까지)
+    if (out.isEmpty()) {
+        try {
+            val res = c.resources
+            for (pkgId in listOf(0x7f)) {
+                for (type in 1..0x40) {
+                    val base = (pkgId shl 24) or (type shl 16)
+                    val typeName = try {
+                        res.getResourceTypeName(base)
+                    } catch (e: Throwable) {
+                        null
+                    } ?: continue
+                    if (typeName != "drawable") continue
+                    var miss = 0
+                    var i = 0
+                    while (miss < 50 && i < 0xffff) {
+                        try {
+                            out += res.getResourceEntryName(base + i)
+                            miss = 0
+                        } catch (e: Throwable) {
+                            miss++
+                        }
+                        i++
+                    }
+                    resPkg = try {
+                        res.getResourcePackageName(base)
+                    } catch (e: Throwable) {
+                        resPkg
+                    }
+                }
+            }
+            if (out.isNotEmpty()) lastError = ""
+        } catch (e: Throwable) {
+            lastError = "scan: $e"
+        }
     }
     allDrawables = out
     return out
@@ -162,29 +206,21 @@ private fun drawableNames(c: Context): List<String> {
 
 private fun iconId(c: Context, key: String): Int {
     iconIds[key]?.let { return it }
-    val res = c.resources
     var found = 0
     var name = ""
-    for (n in ICONS[key].orEmpty()) {
-        val id = res.getIdentifier(n, "drawable", c.packageName)
-        if (id != 0) {
-            found = id
-            name = n
-            break
-        }
-    }
-    if (found == 0) {
-        val words = ICON_WORDS[key].orEmpty()
-        // 짧은 이름(기본 아이콘)부터
-        val cand = drawableNames(c).filter { n -> n.startsWith("ic_") && words.any { n.contains(it) } && (key.endsWith("Off") || !n.contains("slash") && !n.contains("off") && !n.contains("mute")) }.sortedBy { it.length }
+    val all = drawableNames(c)
+    for (want in ICONS[key].orEmpty()) {
+        // 이름 끝이 "_microphoneicon" 이거나 그 자체 (짧은 것부터)
+        val cand = all.filter { it == want || it.endsWith("_$want") }.sortedBy { it.length }
         for (n in cand) {
-            val id = res.getIdentifier(n, "drawable", c.packageName)
+            val id = resId(c, n)
             if (id != 0) {
                 found = id
                 name = n
                 break
             }
         }
+        if (found != 0) break
     }
     iconIds[key] = found
     iconNames[key] = if (found == 0) "(none)" else name
@@ -993,7 +1029,8 @@ val voiceOverlayPlugin = plugin {
         registerNativeMethod("${manifest.id}.findIcons") { args ->
             val c = ctx() ?: return@registerNativeMethod ""
             val word = (args.getOrNull(0) as? String).orEmpty()
-            drawableNames(c).filter { it.contains(word) }.take(80).joinToString(", ")
+            val all = drawableNames(c)
+            "(${all.size} drawables, R from ${resPkg ?: "none"}) " + all.filter { it.contains(word) }.take(60).joinToString(", ")
         }
     }
 

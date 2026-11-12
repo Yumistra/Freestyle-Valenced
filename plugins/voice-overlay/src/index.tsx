@@ -1,5 +1,6 @@
 import { ToastActionCreators } from '@valenced/discord/actions'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
+import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
@@ -263,9 +264,64 @@ const toast = (text: string) => {
 }
 
 // ── 설정 화면 ───────────────────────────────────────────────────
+/** 테마 색 (토큰 이름 여러 개 중 있는 것) */
+function color(names: string[], fallback: string) {
+    try {
+        const t: any = (Tokens as any).default ?? Tokens
+        const theme = S().ThemeStore?.theme ?? 'dark'
+        for (const n of names) {
+            const c = t.colors?.[n] && t.internal?.resolveSemanticColor?.(theme, t.colors[n])
+            if (typeof c === 'string') return c
+        }
+    } catch {}
+    return fallback
+}
+
+/** 설정 칸을 묶는 카드 (디스코드 설정의 둥근 상자) */
+function Card({ children }: { children: any }) {
+    return (
+        <View
+            style={{
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: color(['BORDER_SUBTLE', 'BACKGROUND_MOD_SUBTLE'], '#ffffff14'),
+                backgroundColor: color(['CARD_PRIMARY_BG', 'BACKGROUND_BASE_LOWER', 'BACKGROUND_SECONDARY'], '#0f1012'),
+                padding: 16,
+                gap: 18,
+            }}
+        >
+            {children}
+        </View>
+    )
+}
+
+/** 퍼센트를 직접 쓰는 칸. 범위를 벗어나면 빨간 안내, 맞으면 바로 저장 */
+function PercentInput({ label, description, value, min, max, onSave }: { label: string; description: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
+    const { TextInput } = Design as any
+    const [text, setText] = useState(String(Math.round(value * 100)))
+    const n = Number(text)
+    const bad = text.trim() === '' || !Number.isFinite(n) || n < min || n > max
+    return (
+        <TextInput
+            label={label}
+            description={description}
+            value={text}
+            keyboardType="numeric"
+            placeholder={`${min} to ${max}`}
+            errorMessage={bad ? `Enter a number from ${min} to ${max}.` : undefined}
+            onChange={(v: string) => {
+                const t = v.replace(/[^0-9]/g, '').slice(0, 3)
+                setText(t)
+                const x = Number(t)
+                if (t && x >= min && x <= max) onSave(x / 100)
+            }}
+        />
+    )
+}
+
 function SettingsPage() {
     storage?.use?.()
-    const { Stack, TableRowGroup, TableRow, TableSwitchRow, Button, Text } = Design as any
+    const { TableRowGroup, TableRow, TableSwitchRow, Button, Text } = Design as any
     const s = settings()
     const [allowed, setAllowed] = useState<boolean | undefined>()
     useEffect(() => {
@@ -278,72 +334,61 @@ function SettingsPage() {
         const sub = AppState.addEventListener('change', st => st === 'active' && check())
         return () => sub.remove()
     }, [])
-    const pick = (label: string, value: number, key: 'scale' | 'opacity' | 'idleAlpha', options: Array<[number, string]>) => (
-        <View>
-            <Text variant="text-sm/semibold" color="text-muted" style={{ marginBottom: 8 }}>
-                {label}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {options.map(([v, t]) => (
-                    <Button key={t} size="sm" text={t} variant={Math.abs(value - v) < 0.01 ? 'primary' : 'secondary'} onPress={() => save({ [key]: v } as any)} />
-                ))}
-            </View>
-        </View>
+    const heading = (t: string) => (
+        <Text variant="heading-lg/bold" style={{ marginTop: 8 }}>
+            {t}
+        </Text>
     )
+    const copyLog = async () => {
+        try {
+            const st = await native('status')
+            const words = ['microphone', 'headphones', 'screen', 'phone', 'chat', 'send', 'xsmall']
+            const found: string[] = []
+            for (const w of words) found.push(`${w}: ${await native('findIcons', [w])}`)
+            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\n\nIcons:\n${found.join('\n')}`)
+            toast('Copied')
+        } catch (e: any) {
+            toast(`Could not copy: ${e?.message ?? e}`)
+        }
+    }
     return (
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Stack spacing={16}>
-                <Text variant="text-sm/normal" color="text-muted">
-                    When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking. Drag the overlay to move it.
-                </Text>
-                <TableRowGroup title="Display over other apps">
-                    <TableRow
-                        label={allowed ? 'Allowed' : allowed === false ? 'Not allowed yet' : 'Checking'}
-                        subLabel={allowed ? 'The overlay shows over games and other apps' : 'Without it, the overlay only shows inside Discord'}
-                        onPress={allowed ? undefined : () => native('requestOverlay').catch(() => toast('Could not open the settings'))}
-                        arrow={!allowed}
-                    />
-                </TableRowGroup>
-                <TableRowGroup>
-                    <TableSwitchRow label="Show the overlay" value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
-                    <TableSwitchRow label="Only people talking" value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
-                    <TableSwitchRow label="Hide while Discord is open" value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
-                </TableRowGroup>
-                {pick('Size', s.scale, 'scale', [
-                    [0.75, 'Small'],
-                    [1, 'Normal'],
-                    [1.3, 'Large'],
-                ])}
-                {pick('People not talking', s.idleAlpha, 'idleAlpha' as any, [
-                    [0.25, '25%'],
-                    [0.45, '45%'],
-                    [0.7, '70%'],
-                    [1, '100%'],
-                ])}
-                {pick('Opacity', s.opacity, 'opacity', [
-                    [0.5, '50%'],
-                    [0.75, '75%'],
-                    [1, '100%'],
-                ])}
-                <Button size="md" variant="secondary" text="Reset position" onPress={() => save({ x: 24, y: 200 })} />
-                <Button
-                    size="md"
-                    variant="secondary"
-                    text="Copy log"
-                    onPress={async () => {
-                        try {
-                            const st = await native('status')
-                            const words = ['microphone', 'mic', 'headphone', 'headset', 'deafen', 'screen', 'stream', 'hangup', 'disconnect', 'chat', 'send', 'close']
-                            const found: string[] = []
-                            for (const w of words) found.push(`${w}: ${await native('findIcons', [w])}`)
-                            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\n\nIcons:\n${found.join('\n')}`)
-                            toast('Copied')
-                        } catch (e: any) {
-                            toast(`Could not copy: ${e?.message ?? e}`)
-                        }
-                    }}
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
+            <Text variant="text-md/normal" color="text-muted">
+                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and tap the chat button to chat.
+            </Text>
+
+            {heading('Permission')}
+            <TableRowGroup>
+                <TableRow
+                    label={allowed ? 'Display over other apps, allowed' : allowed === false ? 'Display over other apps, not allowed' : 'Checking'}
+                    subLabel={allowed ? 'The overlay shows over games and other apps.' : 'Tap to allow it. Without it, the overlay only shows inside Discord.'}
+                    onPress={allowed ? undefined : () => native('requestOverlay').catch(() => toast('Could not open the settings'))}
+                    arrow={!allowed}
                 />
-            </Stack>
+            </TableRowGroup>
+
+            {heading('Overlay')}
+            <TableRowGroup>
+                <TableSwitchRow label="Show the overlay" subLabel="Only while you are in a voice channel." value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
+                <TableSwitchRow label="Only people talking" subLabel="The chat button always stays." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
+                <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+            </TableRowGroup>
+
+            {heading('Appearance')}
+            <Text variant="text-md/normal" color="text-muted">
+                Type a percent. Changes apply right away.
+            </Text>
+            <Card>
+                <PercentInput label="Size" description="How big the overlay is, 50 to 200." value={s.scale} min={50} max={200} onSave={v => save({ scale: v })} />
+                <PercentInput label="Opacity" description="How see-through the whole overlay is, 20 to 100." value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
+                <PercentInput label="People not talking" description="How faint people are while they are quiet, 10 to 100. Whoever talks is always fully shown." value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
+            </Card>
+
+            {heading('More')}
+            <View style={{ gap: 10 }}>
+                <Button size="lg" variant="secondary" text="Reset position" onPress={() => save({ x: 24, y: 200 })} />
+                <Button size="lg" variant="secondary" text="Copy log" onPress={copyLog} />
+            </View>
         </ScrollView>
     )
 }
