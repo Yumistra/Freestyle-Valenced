@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.2.6'
+const VERSION = '1.2.7'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'
@@ -786,12 +786,12 @@ function Window({ win, dockIndex, dockCount, kb, front }: { win: Win; dockIndex:
             }
     // 키보드가 열리면 채널 화면은 키보드 높이만큼 아래를 비운다 (화면 맨 아래까지 닿는다고 생각한다).
     // 그래서 맨 앞 창은 아래쪽을 화면 끝까지 늘리고, 키보드 위로 원래 높이만큼 보이게 올린다
-    if (kb > 0 && front && (!win.docked || splitGeom().swap)) {
+    // 창 크기는 그대로 두고, 안의 채널 화면만 키보드 높이만큼 아래로 늘려 잘라 낸다 (NoInsets).
+    // (예전처럼 창을 늘리면 아래의 분할 창, 디스코드를 덮어 검게 보였다)
+    // 지금 입력하는 창(마지막에 누른 창)만 키보드에 가리면 키보드 위로 올리고, 그래도 안 되면 줄인다
+    if (kb > 0 && focusId === win.id && frame.top + frame.height > height - kb) {
         const top = Math.max(minTop, height - kb - frame.height)
-        frame = { ...frame, top, height: height - top }
-    } else if (kb > 0) {
-        // 뒤의 창도 채널 화면이 키보드 높이만큼 아래를 비운다: 그만큼 아래로 늘려 (키보드 뒤로) 내용은 그대로 보이게
-        frame = { ...frame, height: frame.height + kb }
+        frame = { ...frame, top, height: Math.max(80, Math.min(frame.height, height - kb - top)) }
     }
     const free = !win.docked && !win.maximized
     const act = (f: () => void) => () => {
@@ -926,7 +926,7 @@ function NoInsets({ children, kb }: { children: any; kb: number }) {
     const Ctx = insetsContext()
     // 위 여백은 디스코드가 기기 값을 직접 읽어서 비워서(알려 줘도 그대로였다), 상태 바 높이만큼 끌어올려 가린다
     // 아래 내비게이션 바 자리도 (키보드가 없을 때만) 아래로 내려 가린다
-    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0), marginBottom: kb > 0 ? 0 : -navBarHeight() }}>{children}</View>
+    const inner = <View style={{ flex: 1, marginTop: -(StatusBar.currentHeight ?? 0), marginBottom: kb > 0 ? -kb : -navBarHeight() }}>{children}</View>
     return Ctx?.Provider ? <Ctx.Provider value={ZERO}>{inner}</Ctx.Provider> : inner
 }
 
