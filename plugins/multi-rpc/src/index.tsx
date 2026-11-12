@@ -177,18 +177,57 @@ function discordMedia(v: string): string | undefined {
  *    바꾸는 요청은 실제로 있는 앱이어야 해서, 활동마다 쓰는 무작위 ID 대신 기본 앱 ID 로 한다
  *    (나온 mp: 경로는 앱과 상관없이 보인다)
  */
+/** 바꾼 이미지 값 (앱 ID + 원래 값 → 디스코드 값). 같은 이미지는 다시 묻지 않는다 (저장해서 디스코드를 다시 켜도 바로) */
+const assetCache = new Map<string, string>()
+let cacheLoaded = false
+function loadAssetCache() {
+    if (cacheLoaded) return
+    cacheLoaded = true
+    try {
+        const saved = storage?.cache?.assetCache
+        if (saved && typeof saved === 'object') for (const k of Object.keys(saved)) assetCache.set(k, saved[k])
+    } catch {}
+}
+let saveTimer: any
+function saveAssetCache() {
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+        try {
+            // 오래된 것부터 버려서 200개까지만
+            const entries = [...assetCache.entries()].slice(-200)
+            storage?.set?.({ ...(storage.cache ?? {}), assetCache: Object.fromEntries(entries) }, true)
+        } catch {}
+    }, 1000)
+}
+/** 디스코드가 답을 늦게 주면 (없는 앱 ID 등) 기다리지 않고 원래 값으로 */
+const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | undefined> => Promise.race([p, new Promise<undefined>(r => setTimeout(() => r(undefined), ms))])
+
 async function resolveAssets(appId: string, keys: Array<{ field: string; value: string }>) {
     const out: Record<string, string> = {}
     const present = keys.filter(k => k.value)
     if (!present.length) return out
+    loadAssetCache()
     const assets = find('getAssetIds')
-    const run = async (id: string, list: Array<{ field: string; value: string }>) => {
+    const run = async (id: string, all: Array<{ field: string; value: string }>) => {
+        // 전에 바꾼 적 있는 이미지는 바로
+        const list = all.filter(k => {
+            const hit = assetCache.get(`${id}|${k.value}`)
+            if (hit) out[k.field] = hit
+            return !hit
+        })
         if (!list.length) return
         const raw = list.map(k => k.value)
         try {
             let ids = assets?.getAssetIds?.(id, raw)
-            if (!ids?.length || ids.some((x: any) => !x)) ids = await assets?.fetchAssetIds?.(id, raw)
-            list.forEach((k, i) => (out[k.field] = ids?.[i] || k.value))
+            if (!ids?.length || ids.some((x: any) => !x)) ids = await withTimeout(Promise.resolve(assets?.fetchAssetIds?.(id, raw)), 6000)
+            list.forEach((k, i) => {
+                const v = ids?.[i]
+                out[k.field] = v || k.value
+                if (v && v !== k.value) {
+                    assetCache.set(`${id}|${k.value}`, v)
+                    saveAssetCache()
+                }
+            })
         } catch {
             for (const k of list) out[k.field] = k.value
         }
@@ -201,8 +240,8 @@ async function resolveAssets(appId: string, keys: Array<{ field: string; value: 
         else if (k.value.startsWith('mp:')) out[k.field] = k.value
         else (isUrl(k.value) ? urls : named).push(k)
     }
-    await run(DEFAULT_APP_ID, urls)
-    await run(appId, named)
+    // 바깥 주소와 에셋 이름은 따로 묻는다: 한꺼번에 (하나씩 기다리면 느렸다)
+    await Promise.all([run(DEFAULT_APP_ID, urls), run(appId, named)])
     return out
 }
 
@@ -266,12 +305,16 @@ async function apply() {
     const all = list()
     const skip = reasons(all)
     const on = all.filter((a, i) => a?.enabled && !skip[i])
-    const built: Array<{ socketId: string; pid: number; activity: any }> = []
-    for (let i = 0; i < on.length; i++) {
-        try {
-            built.push({ socketId: `MultiRPC-${on[i].id}@Valenced`, pid: 1700 + i, activity: await build(on[i]) })
-        } catch {}
-    }
+    // 활동들을 한꺼번에 만든다 (이미지를 하나씩 기다리면 활동 수만큼 느려졌다)
+    const made = await Promise.all(
+        on.map((a, i) =>
+            build(a).then(
+                activity => ({ socketId: `MultiRPC-${a.id}@Valenced`, pid: 1700 + i, activity }),
+                () => null,
+            ),
+        ),
+    )
+    const built = made.filter(Boolean) as Array<{ socketId: string; pid: number; activity: any }>
     if (my !== runId) return
     const keep = new Set(built.map(b => b.socketId))
     // 꺼졌거나 지운 활동은 내린다 (디스코드를 다시 켜기 전 것까지)
