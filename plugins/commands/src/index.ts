@@ -55,25 +55,56 @@ function clip(text: string, max = MAX) {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** 2000 자 제한에 맞게 줄 단위로 나눈다 */
+/** 2000 자 제한에 맞게 나눈다. 빈 줄(또는 빈 인용 줄 "> ")로 나뉜 덩어리(플러그인 하나)는 되도록 자르지 않는다 */
 function chunks(text: string, max = MAX): string[] {
-    const out: string[] = []
-    let cur = ''
+    const empty = (l: string) => /^\s*>?\s*$/.test(l)
+    const groups: string[][] = []
+    let g: string[] = []
     for (const line of text.split('\n')) {
-        const l = clip(line, max)
-        if (cur && cur.length + 1 + l.length > max) {
-            out.push(cur)
-            cur = l
-        } else cur = cur ? `${cur}\n${l}` : l
+        if (empty(line)) {
+            if (g.length) groups.push(g)
+            groups.push([line])
+            g = []
+        } else g.push(clip(line, max))
     }
-    if (cur) out.push(cur)
+    if (g.length) groups.push(g)
+    const size = (a: string[]) => a.join('\n').length
+    const out: string[][] = []
+    let cur: string[] = []
+    for (const grp of groups) {
+        if (cur.length && size([...cur, ...grp]) > max) {
+            out.push(cur)
+            cur = []
+        }
+        if (size(grp) <= max) cur.push(...grp)
+        else
+            for (const l of grp) {
+                if (cur.length && size([...cur, l]) > max) {
+                    out.push(cur)
+                    cur = []
+                }
+                cur.push(l)
+            }
+    }
+    if (cur.length) out.push(cur)
+    // 나뉜 곳에 빈 인용 줄("> ")만 남으면 ">" 가 그대로 보인다: 앞뒤에서 지운다
     return out
+        .map(lines => {
+            while (lines.length && empty(lines[0]!)) lines.shift()
+            while (lines.length && empty(lines[lines.length - 1]!)) lines.pop()
+            return lines.join('\n')
+        })
+        .filter(Boolean)
 }
 
 let sender: any
+const SUPPRESS_EMBEDS = 1 << 2
 function sendMessage(channelId: string, content: string) {
     sender ??= (lookupModule(withProps('sendMessage', 'receiveMessage') as any) as any)?.[0]
-    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, {})
+    // 멘션 알림 없이, 링크가 있으면 미리보기 없이
+    const options: any = { allowedMentions: { parse: [], replied_user: false } }
+    if (/\]\(https?:/.test(content)) options.flags = SUPPRESS_EMBEDS
+    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, options)
 }
 
 /** 보내거나(기본) 나만 보이게. 길면 여러 메시지로 나눈다 */
@@ -82,6 +113,11 @@ function reply(ctx: any, content: string, ephemeral: boolean) {
     const id = ctx?.channel?.id
     if (ephemeral) {
         if (id) parts.forEach((t, i) => setTimeout(() => sendEphemeral(id, t), i * 150))
+        return
+    }
+    // 멘션이나 링크가 있으면 직접 보낸다: 아무도 알림을 받지 않게, 링크 미리보기 없이
+    if (id && (/<@!?\d+>/.test(content) || /\]\(https?:/.test(content))) {
+        parts.forEach((t, i) => setTimeout(() => sendMessage(id, t), i * 700))
         return
     }
     // 첫 부분은 명령어 결과로, 나머지는 이어서 보낸다
@@ -97,11 +133,49 @@ interface Info {
     version: string
     enabled: boolean
     author?: string
+    authorRaw?: string
     description?: string
     native?: boolean
+    /** 설치한 리포 주소. null 이면 직접 설치(사이드로드) */
+    repo?: string | null
 }
 
 const authorOf = (m: any) => (Array.isArray(m?.authors) ? m.authors.map((a: any) => a?.name ?? a).join(', ') : typeof m?.author === 'string' ? m.author : m?.author?.name)
+
+/** Valenced 의 author 형식: `Name <DISCORD_ID> (LINK "LABEL")` (ID, 링크는 없거나 여러 개) */
+const ContributorEntry = /^(?:<(\d{17,20})>|\(((?:https?:\/\/|mailto:)[^()\s]+)(?:\s+"([^"()]+)")?\))\s*/i
+function parseContributor(raw: string): { name: string; ids: string[]; links: { url: string; label?: string }[] } {
+    const start = raw.search(/[<(]/)
+    const name = (start === -1 ? raw : raw.slice(0, start)).trim() || raw
+    const ids: string[] = []
+    const links: { url: string; label?: string }[] = []
+    let rest = start === -1 ? '' : raw.slice(start)
+    while (rest) {
+        const m = ContributorEntry.exec(rest)
+        if (!m) return { name: raw.trim(), ids: [], links: [] }
+        if (m[1]) ids.push(m[1])
+        else links.push({ url: m[2]!, label: m[3] })
+        rest = rest.slice(m[0].length)
+    }
+    return { name, ids, links }
+}
+/** "Wolfie(<@id>)" 와 링크 줄 */
+function authorText(raw?: string) {
+    if (!raw) return { by: '', links: '' }
+    const c = parseContributor(raw)
+    const by = `${c.name}${c.ids.length ? `(${c.ids.map(id => `<@${id}>`).join(' ')})` : ''}`
+    const label = (l: { url: string; label?: string }) => l.label ?? safeHost(l.url)
+    // 링크 미리보기는 보낼 때 SUPPRESS_EMBEDS 로 막는다
+    const links = c.links.map(l => `"[${label(l)}](<${l.url}>)"`).join(', ')
+    return { by, links }
+}
+function safeHost(url: string) {
+    try {
+        return url.replace(/^\w+:(\/\/)?/, '').split(/[/?#]/)[0] || url
+    } catch {
+        return url
+    }
+}
 
 const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
 
@@ -120,8 +194,10 @@ async function installedPlugins(): Promise<Info[]> {
                     version: formatVersion(p.manifest.version),
                     enabled: !!I.isPluginEnabledInActiveSlot?.(p),
                     author: authorOf(p.manifest),
+                    authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                     description: p.manifest.description,
                     native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
+                    repo: meta?.source?.repo ?? null,
                 })
             }
             return out
@@ -144,33 +220,73 @@ async function installedPlugins(): Promise<Info[]> {
                 version: typeof v === 'string' ? v : v ? formatVersion(v) : '?',
                 enabled: !!states?.[active]?.[p.manifest.id]?.enabled,
                 author: authorOf(p.manifest),
+                authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                 description: p.manifest.description,
                 native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
+                repo: p.source?.repo ?? null,
             }
         })
 }
 
+/** 리포 주소 → 이름 (Valenced 리포 목록에서) */
+async function repoNames(): Promise<Map<string, string>> {
+    const map = new Map<string, string>()
+    try {
+        const repos: any[] = unwrap(await (callNativeMethod as any)(`${NS}.plugins.repos.list`, [])) ?? []
+        for (const r of repos) if (r?.url) map.set(r.url, r.name || safeHost(r.url))
+    } catch {}
+    return map
+}
+
+const sameRepo = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
+
+/** 리포별로 묶는다 (이름 순, 직접 설치한 것은 맨 뒤) */
+async function byRepo(all: Info[]) {
+    const names = await repoNames()
+    const groups = new Map<string, { name: string; url: string | null; plugins: Info[] }>()
+    for (const p of all) {
+        const key = p.repo ?? ''
+        if (!groups.has(key)) {
+            const known = p.repo ? [...names.entries()].find(([u]) => sameRepo(u, p.repo!))?.[1] : undefined
+            groups.set(key, { name: p.repo ? (known ?? safeHost(p.repo)) : 'Sideloaded', url: p.repo ?? null, plugins: [] })
+        }
+        groups.get(key)!.plugins.push(p)
+    }
+    return [...groups.values()].sort((a, b) => (!a.url ? 1 : !b.url ? -1 : a.name.localeCompare(b.name)))
+}
+
 async function pluginsText(versions: boolean, detailed = false) {
     const all = (await installedPlugins()).sort((a, b) => a.name.localeCompare(b.name))
+    const groups = await byRepo(all)
+    const onAll = all.filter(p => p.enabled).length
+    const head = (g: { name: string; url: string | null; plugins: Info[] }) => (g.url ? `[${g.name}](<${g.url}>)` : g.name)
     if (detailed) {
-        // 자세히: 플러그인마다 이름, 버전, 만든 사람, 설명, ID
-        const block = (p: Info) =>
-            [`> **${p.name}** ${p.version}${p.author ? `, by ${p.author}` : ''}${p.native ? ', native' : ''}`, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
+        // 자세히: 리포마다, 플러그인마다 이름, 버전, 만든 사람, 링크, ID
+        const block = (p: Info) => {
+            const a = p.authorRaw ? authorText(p.authorRaw) : { by: p.author ?? '', links: '' }
+            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links ? `> ${a.links}` : null, `> \`${p.id}\``]
                 .filter(Boolean)
                 .join('\n')
-        const on = all.filter(p => p.enabled)
-        const off = all.filter(p => !p.enabled)
-        const lines = [`**Installed Plugins (${all.length}), ${on.length} enabled, ${off.length} disabled**`]
-        if (on.length) lines.push('', `**Enabled (${on.length}):**`, ...on.map(block))
-        if (off.length) lines.push('', `**Disabled (${off.length}):**`, ...off.map(block))
+        }
+        const lines = [`**Installed Plugins (${all.length}), ${onAll} enabled, ${all.length - onAll} disabled**`]
+        for (const g of groups) {
+            const on = g.plugins.filter(p => p.enabled)
+            const off = g.plugins.filter(p => !p.enabled)
+            lines.push('', head(g))
+            if (on.length) lines.push(`**Enabled (${on.length}):**`, on.map(block).join('\n> \n'))
+            if (off.length) lines.push(`**Disabled (${off.length}):**`, off.map(block).join('\n> \n'))
+        }
         return lines.join('\n')
     }
     const fmt = (p: Info) => (versions ? `${p.name} (${p.version})` : p.name)
-    const on = all.filter(p => p.enabled)
-    const off = all.filter(p => !p.enabled)
     const lines = [`**Installed Plugins (${all.length}):**`]
-    if (on.length) lines.push(`> **Enabled (${on.length}):**`, `> ${on.map(fmt).join(', ')}`)
-    if (off.length) lines.push(`> **Disabled (${off.length}):**`, `> ${off.map(fmt).join(', ')}`)
+    for (const g of groups) {
+        const on = g.plugins.filter(p => p.enabled)
+        const off = g.plugins.filter(p => !p.enabled)
+        lines.push('', head(g))
+        if (on.length) lines.push(`> **Enabled (${on.length}):**`, `> ${on.map(fmt).join(', ')}`)
+        if (off.length) lines.push(`> **Disabled (${off.length}):**`, `> ${off.map(fmt).join(', ')}`)
+    }
     return lines.join('\n')
 }
 
@@ -209,28 +325,29 @@ async function debugText(detailed = false) {
     const font = safe(() => ReactNative.PixelRatio.getFontScale())
     const intl = safe(() => Intl.DateTimeFormat().resolvedOptions())
     const plugins = await safe(() => installedPlugins())?.catch?.(() => undefined)
-    const up = safe(() => (globalThis as any).performance?.now?.())
+    // performance.now() 는 폰이 켜진 때부터라, 번들이 시작된 때(__BUNDLE_START_TIME__)를 뺀다
+    const up = safe(() => {
+        const now = (globalThis as any).performance?.now?.()
+        const start = (globalThis as any).__BUNDLE_START_TIME__
+        return typeof now === 'number' && typeof start === 'number' && now >= start ? now - start : undefined
+    })
     const dur = (ms?: number) => {
         if (ms == null) return '?'
         const m = Math.floor(ms / 60000)
         return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${Math.floor((ms % 60000) / 1000)}s`
     }
-    const dark = safe(() => ReactNative.Appearance.getColorScheme())
+    // 폰 설정이 아니라 디스코드에서 고른 테마
+    const theme = safe(() => (Stores as any).ThemeStore?.theme) ?? safe(() => ReactNative.Appearance.getColorScheme())
+    const locale = safe(() => (Stores as any).LocaleStore?.locale) ?? intl?.locale
+    // 위 기본 정보와 겹치는 것, 시간대, 빌드 지문(지역, 보안 패치가 드러난다)은 넣지 않는다
+    const bridgeExtra = bridge ? Object.entries(bridge).filter(([k]) => k !== 'name' && k !== 'version') : []
     const extra = [
-        '',
-        '**More**',
         `> **Screen:** ${screen ? `${Math.round(screen.width * (scale ?? 1))}x${Math.round(screen.height * (scale ?? 1))}` : '?'} px, ${win ? `${Math.round(win.width)}x${Math.round(win.height)}` : '?'} dp, scale ${scale ?? '?'}, font ${font ?? '?'}`,
-        `> **Language:** ${intl?.locale ?? '?'}, ${intl?.timeZone ?? '?'}`,
-        `> **Theme:** ${dark ?? '?'}`,
+        `> **Language:** ${locale ?? '?'}`,
+        `> **Theme:** ${theme ?? '?'}`,
         `> **Plugins:** ${plugins ? `${plugins.filter(p => p.enabled).length} enabled of ${plugins.length} installed` : '?'}`,
-        `> **App running for:** ${dur(up)}`,
-        `> **Hermes:** ${Object.entries(hermes)
-            .filter(([k]) => /version|build|bytecode/i.test(k))
-            .map(([k, v]) => `${k} ${v}`)
-            .join(', ') || '?'}`,
-        `> **Discord:** ${[client.Version, client.Build, client.ReleaseChannel, client.Manifest, client.OTABuild].filter(Boolean).join(', ') || '?'}`,
-        `> **Android:** ${[P.Brand, P.Model, P.Release, P.Fingerprint ? P.Fingerprint.split('/').slice(-3).join('/') : null, (P as any).uiMode].filter(Boolean).join(', ') || '?'}`,
-        bridge ? `> **${MOD} bridge:** ${Object.entries(bridge).map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}` : null,
+        up != null ? `> **Discord running for:** ${dur(up)}` : null,
+        bridgeExtra.length ? `> **${MOD} bridge:** ${bridgeExtra.map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}` : null,
     ].filter(Boolean)
     return [...lines, ...extra].join('\n')
 }
