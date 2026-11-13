@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.server-count",
+	"name": "Server Count",
+	"description": "/servers tells you how many servers you're in.",
+	"author": "Yumistra",
+	"icon": "ServerIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
