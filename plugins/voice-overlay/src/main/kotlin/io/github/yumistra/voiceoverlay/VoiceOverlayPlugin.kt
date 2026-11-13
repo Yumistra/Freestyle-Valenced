@@ -377,6 +377,23 @@ private var attachedSystem = false
 private val rows = LinkedHashMap<String, Row>()
 private var chatBtn: View? = null
 private var builtScale = 0f
+/**
+ * 터치 통과일 때 채팅 버튼은 따로 작은 창에 둔다: 그 창만 터치를 받고, 나머지 오버레이는 전부 아래 앱으로 넘긴다.
+ * (한 번 받은 터치를 나중에 다른 앱으로 넘길 수는 없어서, 버튼 자리는 탭도 길게 누르기도 버튼이 받는다)
+ */
+private var btnWin: android.widget.FrameLayout? = null
+private var btnWm: WindowManager? = null
+private var builtSplit = false
+private val splitButton get() = passThrough && chatMode != "hidden"
+
+private fun detachButton() {
+    val b = btnWin ?: return
+    try {
+        btnWm?.removeView(b)
+    } catch (e: Throwable) {
+    }
+    btnWm = null
+}
 
 @SuppressLint("ClickableViewAccessibility")
 private fun ensureRoot(c: Context): LinearLayout {
@@ -450,6 +467,7 @@ private fun ensureRoot(c: Context): LinearLayout {
 }
 
 private fun detach() {
+    detachButton()
     val r = root ?: return
     try {
         attachedTo?.removeView(r)
@@ -544,13 +562,17 @@ private fun render() {
         return
     }
     val r = ensureRoot(c)
-    if (builtScale != scale || builtChatMode != chatMode) {
+    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
+        detachButton()
+        btnWin?.removeAllViews()
+        btnWin = null
         chatBtn = null
         builtScale = scale
         builtChatMode = chatMode
+        builtSplit = splitButton
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
@@ -574,10 +596,20 @@ private fun render() {
                 press(it)
                 true
             }
-        } else b.setOnClickListener(press)
+        } else {
+            b.setOnClickListener(press)
+            // 탭으로 열기일 때 길게 누르기는 아무것도 하지 않는다
+            b.setOnLongClickListener { true }
+        }
         val lp = LinearLayout.LayoutParams(size, size)
         lp.bottomMargin = gap
-        r.addView(b, 0, lp)
+        if (splitButton) {
+            // 버튼은 따로 창에, 오버레이 안에는 같은 크기의 빈자리 (사람 줄 위치가 그대로)
+            val holder = android.widget.FrameLayout(c)
+            holder.addView(b, android.widget.FrameLayout.LayoutParams(size, size))
+            btnWin = holder
+            r.addView(View(c), 0, lp)
+        } else r.addView(b, 0, lp)
         chatBtn = b
     }
     // 빠진 사람은 흐려지며 사라진다
@@ -638,6 +670,27 @@ private fun render() {
             r.animate().scaleX(1f).scaleY(1f).setDuration(200).setInterpolator(OvershootInterpolator(1.2f)).start()
         } catch (e: Throwable) {
             lastError = "attach: $e"
+        }
+    }
+    // 따로 떼어 낸 채팅 버튼 창 (터치를 받는 창)
+    val holder = btnWin
+    if (splitButton && holder != null && btnWm == null && attachedTo != null) {
+        val lp = WindowManager.LayoutParams(
+            size,
+            size,
+            overlayType(system),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = posX
+        lp.y = posY
+        try {
+            holder.alpha = opacity
+            addOwn(wm, holder, lp)
+            btnWm = wm
+        } catch (e: Throwable) {
+            lastError = "button attach: $e"
         }
     }
 }

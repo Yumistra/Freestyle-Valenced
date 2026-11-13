@@ -448,7 +448,7 @@ function SettingsPage() {
                 <TableSwitchRow label="Lock position" subLabel="The overlay stays where it is and can't be dragged." value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
                 <TableSwitchRow
                     label="Touches go through"
-                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. The overlay's buttons don't work while this is on, and Android keeps it at most 80% visible."
+                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. Only the chat button still takes touches (tap or long press, as set below), and Android keeps the rest at most 80% visible."
                     value={s.passThrough}
                     onValueChange={(v: boolean) => save({ passThrough: v })}
                 />

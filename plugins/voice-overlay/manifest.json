@@ -5,7 +5,7 @@
 	"description": "Shows who is in your voice channel, and who is talking, over other apps like the PC overlay.",
 	"author": "Yumistra",
 	"icon": "VoiceNormalIcon",
-	"version": "1.0.6",
+	"version": "1.0.7",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
