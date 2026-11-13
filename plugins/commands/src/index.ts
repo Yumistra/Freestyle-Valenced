@@ -55,12 +55,38 @@ function clip(text: string, max = MAX) {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** 보내거나(기본) 나만 보이게 */
+/** 2000 자 제한에 맞게 줄 단위로 나눈다 */
+function chunks(text: string, max = MAX): string[] {
+    const out: string[] = []
+    let cur = ''
+    for (const line of text.split('\n')) {
+        const l = clip(line, max)
+        if (cur && cur.length + 1 + l.length > max) {
+            out.push(cur)
+            cur = l
+        } else cur = cur ? `${cur}\n${l}` : l
+    }
+    if (cur) out.push(cur)
+    return out
+}
+
+let sender: any
+function sendMessage(channelId: string, content: string) {
+    sender ??= (lookupModule(withProps('sendMessage', 'receiveMessage') as any) as any)?.[0]
+    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, {})
+}
+
+/** 보내거나(기본) 나만 보이게. 길면 여러 메시지로 나눈다 */
 function reply(ctx: any, content: string, ephemeral: boolean) {
-    const text = clip(content)
-    if (!ephemeral) return { content: text }
+    const parts = chunks(content)
     const id = ctx?.channel?.id
-    if (id) sendEphemeral(id, text)
+    if (ephemeral) {
+        if (id) parts.forEach((t, i) => setTimeout(() => sendEphemeral(id, t), i * 150))
+        return
+    }
+    // 첫 부분은 명령어 결과로, 나머지는 이어서 보낸다
+    if (id) parts.slice(1).forEach((t, i) => setTimeout(() => sendMessage(id, t), 700 + i * 700))
+    return { content: parts[0] ?? '' }
 }
 
 // ── /plugins ───────────────────────────────────────────────────
@@ -70,7 +96,12 @@ interface Info {
     name: string
     version: string
     enabled: boolean
+    author?: string
+    description?: string
+    native?: boolean
 }
+
+const authorOf = (m: any) => (Array.isArray(m?.authors) ? m.authors.map((a: any) => a?.name ?? a).join(', ') : typeof m?.author === 'string' ? m.author : m?.author?.name)
 
 const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
 
@@ -83,7 +114,15 @@ async function installedPlugins(): Promise<Info[]> {
             for (const p of I.pList.values() as Iterable<any>) {
                 const meta = I.getInternalPluginMeta?.(p)
                 if (I.isPluginInternal?.(meta)) continue
-                out.push({ id: p.manifest.id, name: p.manifest.name, version: formatVersion(p.manifest.version), enabled: !!I.isPluginEnabledInActiveSlot?.(p) })
+                out.push({
+                    id: p.manifest.id,
+                    name: p.manifest.name,
+                    version: formatVersion(p.manifest.version),
+                    enabled: !!I.isPluginEnabledInActiveSlot?.(p),
+                    author: authorOf(p.manifest),
+                    description: p.manifest.description,
+                    native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
+                })
             }
             return out
         }
@@ -104,12 +143,28 @@ async function installedPlugins(): Promise<Info[]> {
                 name: p.manifest.name ?? p.manifest.id,
                 version: typeof v === 'string' ? v : v ? formatVersion(v) : '?',
                 enabled: !!states?.[active]?.[p.manifest.id]?.enabled,
+                author: authorOf(p.manifest),
+                description: p.manifest.description,
+                native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
             }
         })
 }
 
-async function pluginsText(versions: boolean) {
+async function pluginsText(versions: boolean, detailed = false) {
     const all = (await installedPlugins()).sort((a, b) => a.name.localeCompare(b.name))
+    if (detailed) {
+        // 자세히: 플러그인마다 이름, 버전, 만든 사람, 설명, ID
+        const block = (p: Info) =>
+            [`> **${p.name}** ${p.version}${p.author ? `, by ${p.author}` : ''}${p.native ? ', native' : ''}`, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
+                .filter(Boolean)
+                .join('\n')
+        const on = all.filter(p => p.enabled)
+        const off = all.filter(p => !p.enabled)
+        const lines = [`**Installed Plugins (${all.length}), ${on.length} enabled, ${off.length} disabled**`]
+        if (on.length) lines.push('', `**Enabled (${on.length}):**`, ...on.map(block))
+        if (off.length) lines.push('', `**Disabled (${off.length}):**`, ...off.map(block))
+        return lines.join('\n')
+    }
     const fmt = (p: Info) => (versions ? `${p.name} (${p.version})` : p.name)
     const on = all.filter(p => p.enabled)
     const off = all.filter(p => !p.enabled)
@@ -127,7 +182,7 @@ function safe<T>(fn: () => T): T | undefined {
     } catch {}
 }
 
-function debugText() {
+async function debugText(detailed = false) {
     const P: any = (ReactNative as any).Platform?.constants ?? {}
     const client: any = safe(() => (ClientInfoModule as any).getConstants?.()) ?? {}
     const device: any = safe(() => (DeviceModule as any).getConstants?.()) ?? {}
@@ -145,7 +200,39 @@ function debugText() {
         `> **System:** ${os} ${P.Release ?? device.systemVersion ?? ReactNative.Platform.Version}${os === 'Android' ? ` (SDK ${ReactNative.Platform.Version})` : ''}`,
         `> **Device:** ${P.Model ?? device.deviceModel ?? '?'}${P.Manufacturer ? ` (${P.Manufacturer})` : ''}${device.deviceCodename ? `, ${device.deviceCodename}` : ''}`,
     ]
-    return lines.join('\n')
+    if (!detailed) return lines.join('\n')
+
+    // 자세히: 화면, 언어, 플러그인 수, 실행 시간, 그 밖의 값들
+    const win = safe(() => ReactNative.Dimensions.get('window'))
+    const screen = safe(() => ReactNative.Dimensions.get('screen'))
+    const scale = safe(() => ReactNative.PixelRatio.get())
+    const font = safe(() => ReactNative.PixelRatio.getFontScale())
+    const intl = safe(() => Intl.DateTimeFormat().resolvedOptions())
+    const plugins = await safe(() => installedPlugins())?.catch?.(() => undefined)
+    const up = safe(() => (globalThis as any).performance?.now?.())
+    const dur = (ms?: number) => {
+        if (ms == null) return '?'
+        const m = Math.floor(ms / 60000)
+        return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${Math.floor((ms % 60000) / 1000)}s`
+    }
+    const dark = safe(() => ReactNative.Appearance.getColorScheme())
+    const extra = [
+        '',
+        '**More**',
+        `> **Screen:** ${screen ? `${Math.round(screen.width * (scale ?? 1))}x${Math.round(screen.height * (scale ?? 1))}` : '?'} px, ${win ? `${Math.round(win.width)}x${Math.round(win.height)}` : '?'} dp, scale ${scale ?? '?'}, font ${font ?? '?'}`,
+        `> **Language:** ${intl?.locale ?? '?'}, ${intl?.timeZone ?? '?'}`,
+        `> **Theme:** ${dark ?? '?'}`,
+        `> **Plugins:** ${plugins ? `${plugins.filter(p => p.enabled).length} enabled of ${plugins.length} installed` : '?'}`,
+        `> **App running for:** ${dur(up)}`,
+        `> **Hermes:** ${Object.entries(hermes)
+            .filter(([k]) => /version|build|bytecode/i.test(k))
+            .map(([k, v]) => `${k} ${v}`)
+            .join(', ') || '?'}`,
+        `> **Discord:** ${[client.Version, client.Build, client.ReleaseChannel, client.Manifest, client.OTABuild].filter(Boolean).join(', ') || '?'}`,
+        `> **Android:** ${[P.Brand, P.Model, P.Release, P.Fingerprint ? P.Fingerprint.split('/').slice(-3).join('/') : null, (P as any).uiMode].filter(Boolean).join(', ') || '?'}`,
+        bridge ? `> **${MOD} bridge:** ${Object.entries(bridge).map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}` : null,
+    ].filter(Boolean)
+    return [...lines, ...extra].join('\n')
 }
 
 // ── /eval ──────────────────────────────────────────────────────
@@ -249,9 +336,9 @@ function makeCommands() {
         execute,
     })
     commands = [
-        base('-73918', 'plugins', 'Send list of installed plugins', [option('ephemeral', 'Only you can see it', BOOLEAN), option('versions', 'Show versions', BOOLEAN)], async (args, ctx) => {
+        base('-73918', 'plugins', 'Send list of installed plugins', [option('ephemeral', 'Only you can see it', BOOLEAN), option('versions', 'Show versions', BOOLEAN), option('detailed', 'Show version, author, description and ID of each plugin', BOOLEAN)], async (args, ctx) => {
             try {
-                return reply(ctx, await pluginsText(!!argOf(args, 'versions')), !!argOf(args, 'ephemeral'))
+                return reply(ctx, await pluginsText(!!argOf(args, 'versions'), !!argOf(args, 'detailed')), !!argOf(args, 'ephemeral'))
             } catch (e: any) {
                 reply(ctx, `Couldn't list plugins: ${e?.message ?? e}`, true)
             }
@@ -262,7 +349,9 @@ function makeCommands() {
             const text = await evaluate(code, ctx, argOf(args, 'async') !== false)
             if (!argOf(args, 'silent')) reply(ctx, text, true)
         }),
-        base('-73920', 'debug', 'Send debug information', [option('ephemeral', 'Only you can see it', BOOLEAN)], (args, ctx) => reply(ctx, debugText(), !!argOf(args, 'ephemeral'))),
+        base('-73920', 'debug', 'Send debug information', [option('ephemeral', 'Only you can see it', BOOLEAN), option('detailed', 'Also show screen, language, plugins, uptime and build details', BOOLEAN)], async (args, ctx) =>
+            reply(ctx, await debugText(!!argOf(args, 'detailed')), !!argOf(args, 'ephemeral')),
+        ),
     ]
     return commands
 }
