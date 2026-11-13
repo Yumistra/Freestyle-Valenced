@@ -133,7 +133,7 @@ function authorText(raw?: string) {
     const by = `${c.name}${c.ids.length ? `(${c.ids.map(id => `<@${id}>`).join(' ')})` : ''}`
     const label = (l: { url: string; label?: string }) => l.label ?? safeHost(l.url)
     // <url> 로 감싸 링크 미리보기가 줄줄이 붙지 않게
-    const links = c.links.map(l => `["${label(l)}"](<${l.url}>)`).join(' ')
+    const links = c.links.map(l => `["${label(l)}"](<${l.url}>)`).join(', ')
     return { by, links }
 }
 function safeHost(url: string) {
@@ -199,7 +199,7 @@ async function pluginsText(versions: boolean, detailed = false) {
         // 자세히: 플러그인마다 이름, 버전, 만든 사람, 설명, ID
         const block = (p: Info) => {
             const a = p.authorRaw ? authorText(p.authorRaw) : { by: p.author ?? '', links: '' }
-            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links || null, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
+            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links ? `> ${a.links}` : null, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
                 .filter(Boolean)
                 .join('\n')
         }
