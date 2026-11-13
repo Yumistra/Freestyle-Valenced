@@ -256,21 +256,38 @@ function toggle(kind: 'mute' | 'deafen') {
     }
 }
 
-/** 방송(화면 공유) 켜기, 끄기 */
+/**
+ * 방송(화면 공유) 켜기, 끄기. 모바일 디스코드의 화면 공유 버튼과 같은 순서로 한다:
+ *  켜기: 통화 알림(포그라운드 서비스)이 돌고 있으면 음성 엔진의 startBroadcast (안드로이드 화면 녹화 허락 창이 뜬다)
+ *  끄기: stopBroadcast, 내 방송 stopStream, 방송 소스 비우기
+ */
 function stream() {
     try {
-        const st = S().ApplicationStreamingStore
-        const mine = st?.getCurrentUserActiveStream?.()
-        const m = find('stopStream', 'startStream') ?? find('stopStream')
+        const engine = find('getVoiceEngine')?.getVoiceEngine?.()
+        const mine = S().ApplicationStreamingStore?.getCurrentUserActiveStream?.()
         if (mine) {
-            const key = mine.streamKey ?? `${mine.streamType}:${mine.guildId}:${mine.channelId}:${mine.ownerId}`
-            if (typeof m?.stopStream === 'function') return m.stopStream(key)
-        } else {
-            const channelId = S().SelectedChannelStore?.getVoiceChannelId?.()
-            const guildId = S().ChannelStore?.getChannel?.(channelId)?.guild_id ?? null
-            if (typeof m?.startStream === 'function') return m.startStream(guildId, channelId, {})
+            engine?.stopBroadcast?.()
+            const keyOf = find('encodeStreamKey')
+            const key = keyOf?.encodeStreamKey ? keyOf.encodeStreamKey(mine) : (mine.streamKey ?? `${mine.streamType}:${mine.guildId}:${mine.channelId}:${mine.ownerId}`)
+            ;(find('stopStream', 'startStream') ?? find('stopStream'))?.stopStream?.(key)
+            find('setGoLiveSource')?.setGoLiveSource?.(null)
+            return
         }
-        toast('Go Live is not available here')
+        if (typeof engine?.startBroadcast !== 'function') return toast('Go Live is not available here')
+        const fg = find('isForegroundServiceRunning')
+        const go = () => {
+            try {
+                engine.startBroadcast()
+            } catch (e: any) {
+                toast(`Go Live failed: ${e?.message ?? e}`)
+            }
+        }
+        if (typeof fg?.isForegroundServiceRunning === 'function')
+            fg.isForegroundServiceRunning((running: boolean) => {
+                if (running) go()
+                else toast('Go Live needs the call notification to be on')
+            })
+        else go()
     } catch (e: any) {
         toast(`Go Live failed: ${e?.message ?? e}`)
     }
