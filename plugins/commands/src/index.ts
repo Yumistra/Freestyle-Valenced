@@ -325,26 +325,29 @@ async function debugText(detailed = false) {
     const font = safe(() => ReactNative.PixelRatio.getFontScale())
     const intl = safe(() => Intl.DateTimeFormat().resolvedOptions())
     const plugins = await safe(() => installedPlugins())?.catch?.(() => undefined)
-    const up = safe(() => (globalThis as any).performance?.now?.())
+    // performance.now() 는 폰이 켜진 때부터라, 번들이 시작된 때(__BUNDLE_START_TIME__)를 뺀다
+    const up = safe(() => {
+        const now = (globalThis as any).performance?.now?.()
+        const start = (globalThis as any).__BUNDLE_START_TIME__
+        return typeof now === 'number' && typeof start === 'number' && now >= start ? now - start : undefined
+    })
     const dur = (ms?: number) => {
         if (ms == null) return '?'
         const m = Math.floor(ms / 60000)
         return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${Math.floor((ms % 60000) / 1000)}s`
     }
-    const dark = safe(() => ReactNative.Appearance.getColorScheme())
+    // 폰 설정이 아니라 디스코드에서 고른 테마
+    const theme = safe(() => (Stores as any).ThemeStore?.theme) ?? safe(() => ReactNative.Appearance.getColorScheme())
+    const locale = safe(() => (Stores as any).LocaleStore?.locale) ?? intl?.locale
+    // 위 기본 정보와 겹치는 것, 시간대, 빌드 지문(지역, 보안 패치가 드러난다)은 넣지 않는다
+    const bridgeExtra = bridge ? Object.entries(bridge).filter(([k]) => k !== 'name' && k !== 'version') : []
     const extra = [
         `> **Screen:** ${screen ? `${Math.round(screen.width * (scale ?? 1))}x${Math.round(screen.height * (scale ?? 1))}` : '?'} px, ${win ? `${Math.round(win.width)}x${Math.round(win.height)}` : '?'} dp, scale ${scale ?? '?'}, font ${font ?? '?'}`,
-        `> **Language:** ${intl?.locale ?? '?'}, ${intl?.timeZone ?? '?'}`,
-        `> **Theme:** ${dark ?? '?'}`,
+        `> **Language:** ${locale ?? '?'}`,
+        `> **Theme:** ${theme ?? '?'}`,
         `> **Plugins:** ${plugins ? `${plugins.filter(p => p.enabled).length} enabled of ${plugins.length} installed` : '?'}`,
-        `> **App running for:** ${dur(up)}`,
-        `> **Hermes:** ${Object.entries(hermes)
-            .filter(([k]) => /version|build|bytecode/i.test(k))
-            .map(([k, v]) => `${k} ${v}`)
-            .join(', ') || '?'}`,
-        `> **Discord:** ${[client.Version, client.Build, client.ReleaseChannel, client.Manifest, client.OTABuild].filter(Boolean).join(', ') || '?'}`,
-        `> **Android:** ${[P.Brand, P.Model, P.Release, P.Fingerprint ? P.Fingerprint.split('/').slice(-3).join('/') : null, (P as any).uiMode].filter(Boolean).join(', ') || '?'}`,
-        bridge ? `> **${MOD} bridge:** ${Object.entries(bridge).map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}` : null,
+        up != null ? `> **Discord running for:** ${dur(up)}` : null,
+        bridgeExtra.length ? `> **${MOD} bridge:** ${bridgeExtra.map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}` : null,
     ].filter(Boolean)
     return [...lines, ...extra].join('\n')
 }
