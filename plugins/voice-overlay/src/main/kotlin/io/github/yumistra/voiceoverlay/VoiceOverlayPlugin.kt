@@ -411,7 +411,9 @@ private fun passTap(x: Float, y: Float) {
         try {
             Thread.sleep(60)
             val imClass = Class.forName("android.hardware.input.InputManager")
-            val im = imClass.getMethod("getInstance").invoke(null)
+            // 안드로이드 16 에는 getInstance 가 없다: 시스템 서비스로 받는다
+            val im = holder.context.getSystemService(Context.INPUT_SERVICE)
+                ?: imClass.getMethod("getInstance").invoke(null)
             val inject = imClass.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType)
             val t = android.os.SystemClock.uptimeMillis()
             val down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0)
