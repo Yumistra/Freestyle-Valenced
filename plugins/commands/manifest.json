@@ -5,7 +5,7 @@
 	"description": "/plugins, /eval and /debug, with a detailed option.",
 	"author": "Yumistra",
 	"icon": "SlashBoxIcon",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
