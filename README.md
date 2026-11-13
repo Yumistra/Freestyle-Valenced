@@ -16,6 +16,7 @@ Plugins for Valenced.
 | Multi RPC | `yumistra.multi-rpc` |
 | Clean Emoji | `yumistra.clean-emoji` |
 | Better Channel List | `yumistra.better-channel-list` |
+| Commands | `yumistra.commands` |
 | Mini Chat | `yumistra.mini-chat` |
 | Voice Overlay | `yumistra.voice-overlay` |
 
