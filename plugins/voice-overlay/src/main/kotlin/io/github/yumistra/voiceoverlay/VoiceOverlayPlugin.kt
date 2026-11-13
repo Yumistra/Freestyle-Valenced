@@ -386,6 +386,66 @@ private var btnWm: WindowManager? = null
 private var builtSplit = false
 private val splitButton get() = passThrough && chatMode != "hidden"
 
+/** 짧은 탭을 게임으로 다시 눌러 준 마지막 결과 (로그용) */
+@Volatile private var tapPass = "not tried"
+private var downRawX = 0f
+private var downRawY = 0f
+
+/**
+ * 버튼 창이 받아 버린 짧은 탭을 아래 앱(게임)에 다시 눌러 준다.
+ * 버튼 창을 잠깐 터치 통과로 바꾼 뒤 같은 자리에 탭을 넣는다.
+ * 다른 앱에 터치를 넣는 건 보통 앱에게 막혀 있어서 (INJECT_EVENTS), 루트가 있으면 su 로도 시도한다.
+ */
+private fun passTap(x: Float, y: Float) {
+    val holder = btnWin ?: return
+    val wm = btnWm ?: return
+    val lp = holder.layoutParams as? WindowManager.LayoutParams ?: return
+    lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    try {
+        wm.updateViewLayout(holder, lp)
+    } catch (e: Throwable) {
+    }
+    Thread {
+        var ok = false
+        val how = StringBuilder()
+        try {
+            Thread.sleep(60)
+            val imClass = Class.forName("android.hardware.input.InputManager")
+            val im = imClass.getMethod("getInstance").invoke(null)
+            val inject = imClass.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType)
+            val t = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0)
+            down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            val up = MotionEvent.obtain(t, t + 40, MotionEvent.ACTION_UP, x, y, 0)
+            up.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            ok = (inject.invoke(im, down, 0) as? Boolean == true) && (inject.invoke(im, up, 0) as? Boolean == true)
+            down.recycle()
+            up.recycle()
+            how.append("inject=").append(ok)
+        } catch (e: Throwable) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+            how.append("inject failed: ").append(cause.javaClass.simpleName).append(' ').append(cause.message ?: "")
+        }
+        if (!ok) {
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "input tap ${x.toInt()} ${y.toInt()}"))
+                ok = p.waitFor() == 0
+                how.append(", su=").append(ok)
+            } catch (e: Throwable) {
+                how.append(", su failed: ").append(e.javaClass.simpleName)
+            }
+        }
+        tapPass = "${if (ok) "worked" else "blocked"} at ${x.toInt()},${y.toInt()} ($how)"
+        main.postDelayed({
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            try {
+                if (btnWin === holder) wm.updateViewLayout(holder, lp)
+            } catch (e: Throwable) {
+            }
+        }, 200)
+    }.start()
+}
+
 private fun detachButton() {
     val b = btnWin ?: return
     try {
@@ -589,8 +649,19 @@ private fun render() {
             toggleChat()
         }
         if (chatMode == "long") {
-            // 톡 누르면 살짝 눌리는 것만 보이고 열리지 않는다 (게임 중 실수로 열리지 않게)
-            b.setOnClickListener { it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(60).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(100).start() }.start() }
+            // 누른 자리 기억 (짧은 탭을 게임으로 다시 눌러 줄 때 쓴다)
+            b.setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    downRawX = e.rawX
+                    downRawY = e.rawY
+                }
+                false
+            }
+            // 톡 누르면: 터치 통과일 때는 게임으로 넘기고, 아니면 살짝 눌리는 것만 보인다
+            b.setOnClickListener {
+                if (splitButton) passTap(downRawX, downRawY)
+                else it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(60).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(100).start() }.start()
+            }
             b.setOnLongClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 press(it)
@@ -1166,6 +1237,7 @@ val voiceOverlayPlugin = plugin {
                 "enabled" to overlayOn,
                 "icons" to iconNames.entries.joinToString(", ") { "${it.key}=${it.value}" },
                 "foreignOverlays" to foreignWindows.joinToString(" | "),
+                "tapPass" to tapPass,
                 "error" to lastError,
             )
         }
