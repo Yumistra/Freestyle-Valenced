@@ -259,12 +259,12 @@ async function pluginsText(versions: boolean, detailed = false) {
     const all = (await installedPlugins()).sort((a, b) => a.name.localeCompare(b.name))
     const groups = await byRepo(all)
     const onAll = all.filter(p => p.enabled).length
-    const head = (g: { name: string; url: string | null; plugins: Info[] }) => `**${g.name} (${g.plugins.length})**${g.url ? ` <${g.url}>` : ''}`
+    const head = (g: { name: string; url: string | null; plugins: Info[] }) => (g.url ? `[${g.name}](<${g.url}>)` : g.name)
     if (detailed) {
-        // 자세히: 리포마다, 플러그인마다 이름, 버전, 만든 사람, 링크, 설명, ID
+        // 자세히: 리포마다, 플러그인마다 이름, 버전, 만든 사람, 링크, ID
         const block = (p: Info) => {
             const a = p.authorRaw ? authorText(p.authorRaw) : { by: p.author ?? '', links: '' }
-            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links ? `> ${a.links}` : null, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
+            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links ? `> ${a.links}` : null, `> \`${p.id}\``]
                 .filter(Boolean)
                 .join('\n')
         }
