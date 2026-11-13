@@ -55,25 +55,56 @@ function clip(text: string, max = MAX) {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** 2000 자 제한에 맞게 줄 단위로 나눈다 */
+/** 2000 자 제한에 맞게 나눈다. 빈 줄(또는 빈 인용 줄 "> ")로 나뉜 덩어리(플러그인 하나)는 되도록 자르지 않는다 */
 function chunks(text: string, max = MAX): string[] {
-    const out: string[] = []
-    let cur = ''
+    const empty = (l: string) => /^\s*>?\s*$/.test(l)
+    const groups: string[][] = []
+    let g: string[] = []
     for (const line of text.split('\n')) {
-        const l = clip(line, max)
-        if (cur && cur.length + 1 + l.length > max) {
-            out.push(cur)
-            cur = l
-        } else cur = cur ? `${cur}\n${l}` : l
+        if (empty(line)) {
+            if (g.length) groups.push(g)
+            groups.push([line])
+            g = []
+        } else g.push(clip(line, max))
     }
-    if (cur) out.push(cur)
+    if (g.length) groups.push(g)
+    const size = (a: string[]) => a.join('\n').length
+    const out: string[][] = []
+    let cur: string[] = []
+    for (const grp of groups) {
+        if (cur.length && size([...cur, ...grp]) > max) {
+            out.push(cur)
+            cur = []
+        }
+        if (size(grp) <= max) cur.push(...grp)
+        else
+            for (const l of grp) {
+                if (cur.length && size([...cur, l]) > max) {
+                    out.push(cur)
+                    cur = []
+                }
+                cur.push(l)
+            }
+    }
+    if (cur.length) out.push(cur)
+    // 나뉜 곳에 빈 인용 줄("> ")만 남으면 ">" 가 그대로 보인다: 앞뒤에서 지운다
     return out
+        .map(lines => {
+            while (lines.length && empty(lines[0]!)) lines.shift()
+            while (lines.length && empty(lines[lines.length - 1]!)) lines.pop()
+            return lines.join('\n')
+        })
+        .filter(Boolean)
 }
 
 let sender: any
+const SUPPRESS_EMBEDS = 1 << 2
 function sendMessage(channelId: string, content: string) {
     sender ??= (lookupModule(withProps('sendMessage', 'receiveMessage') as any) as any)?.[0]
-    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, { allowedMentions: { parse: [], replied_user: false } })
+    // 멘션 알림 없이, 링크가 있으면 미리보기 없이
+    const options: any = { allowedMentions: { parse: [], replied_user: false } }
+    if (/\]\(https?:/.test(content)) options.flags = SUPPRESS_EMBEDS
+    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, options)
 }
 
 /** 보내거나(기본) 나만 보이게. 길면 여러 메시지로 나눈다 */
@@ -84,8 +115,8 @@ function reply(ctx: any, content: string, ephemeral: boolean) {
         if (id) parts.forEach((t, i) => setTimeout(() => sendEphemeral(id, t), i * 150))
         return
     }
-    // 멘션이 있으면 직접 보내되 아무도 알림을 받지 않게 (allowedMentions 비움)
-    if (id && /<@!?\d+>/.test(content)) {
+    // 멘션이나 링크가 있으면 직접 보낸다: 아무도 알림을 받지 않게, 링크 미리보기 없이
+    if (id && (/<@!?\d+>/.test(content) || /\]\(https?:/.test(content))) {
         parts.forEach((t, i) => setTimeout(() => sendMessage(id, t), i * 700))
         return
     }
@@ -132,8 +163,8 @@ function authorText(raw?: string) {
     const c = parseContributor(raw)
     const by = `${c.name}${c.ids.length ? `(${c.ids.map(id => `<@${id}>`).join(' ')})` : ''}`
     const label = (l: { url: string; label?: string }) => l.label ?? safeHost(l.url)
-    // <url> 로 감싸 링크 미리보기가 줄줄이 붙지 않게
-    const links = c.links.map(l => `["${label(l)}"](<${l.url}>)`).join(', ')
+    // 링크 미리보기는 보낼 때 SUPPRESS_EMBEDS 로 막는다
+    const links = c.links.map(l => `[${label(l)}](${l.url})`).join(', ')
     return { by, links }
 }
 function safeHost(url: string) {
