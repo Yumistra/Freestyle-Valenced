@@ -206,8 +206,8 @@ async function pluginsText(versions: boolean, detailed = false) {
         const on = all.filter(p => p.enabled)
         const off = all.filter(p => !p.enabled)
         const lines = [`**Installed Plugins (${all.length}), ${on.length} enabled, ${off.length} disabled**`]
-        if (on.length) lines.push('', `**Enabled (${on.length}):**`, ...on.map(block))
-        if (off.length) lines.push('', `**Disabled (${off.length}):**`, ...off.map(block))
+        if (on.length) lines.push('', `**Enabled (${on.length}):**`, on.map(block).join('\n> \n'))
+        if (off.length) lines.push('', `**Disabled (${off.length}):**`, off.map(block).join('\n> \n'))
         return lines.join('\n')
     }
     const fmt = (p: Info) => (versions ? `${p.name} (${p.version})` : p.name)
