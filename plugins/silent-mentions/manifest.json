@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.silent-mentions",
+	"name": "Silent Mentions",
+	"description": "Mention people without notifying them.",
+	"author": "Yumistra",
+	"icon": "AtIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
