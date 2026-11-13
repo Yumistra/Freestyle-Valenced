@@ -1,11 +1,13 @@
 import { ToastActionCreators } from '@valenced/discord/actions'
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
+import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath, lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { proxify } from '@valenced/utils/proxy'
 import { useEffect, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
+import { currentChannelId, labelOf, targetOf } from './chat'
 import { settings, update, useSettings } from './store'
 
 const BUTTON_PATH = 'modules/chat_input/native/action_buttons/ChatInputActionButton.tsx'
@@ -17,9 +19,23 @@ function toast(text: string, icon?: any) {
     } catch {}
 }
 
-/** 채팅 입력창의 @ 버튼. 누르면 멘션 알림 끄기를 켜고 끈다 */
+/** 지금 보고 있는 채널 (바뀌면 다시 그린다) */
+function useChannelId() {
+    const [id, setId] = useState(currentChannelId)
+    useEffect(() => {
+        const store: any = (Stores as any).SelectedChannelStore
+        const on = () => setId(currentChannelId())
+        store?.addChangeListener?.(on)
+        on()
+        return () => store?.removeChangeListener?.(on)
+    }, [])
+    return id
+}
+
+/** 채팅 입력창의 @ 버튼. 누르면 이 대화의 멘션 알림 끄기를 켜고 끈다 (Silent Messages 의 종 버튼처럼) */
 export function MentionButton() {
     const s = useSettings()
+    const channelId = useChannelId()
     const AtIcon = lookupGeneratedIconComponent('AtIcon')
     const [ActionButton, setActionButton] = useState(() => (lookupModuleWithImportedPath(BUTTON_PATH) as any)?.[0]?.default)
 
@@ -30,15 +46,23 @@ export function MentionButton() {
     }, [ActionButton])
 
     if (!ActionButton || !AtIcon) return null
+    const target = targetOf(channelId)
+    const silent = s.always || (!!target && s.list.includes(target))
     return (
         <ActionButton
             accessibilityLabel="Toggle silent mentions"
-            accessibilityState={{ checked: s.on }}
-            IconComponent={s.on ? AtOffIcon : AtIcon}
+            accessibilityState={{ checked: silent }}
+            IconComponent={silent ? AtOffIcon : AtIcon}
             onPress={() => {
-                const on = !settings().on
-                update({ on })
-                toast(on ? 'Mentions won’t notify anyone' : 'Mentions notify people again', AtIcon)
+                const cur = settings()
+                if (cur.always) {
+                    toast('Silent mentions are on everywhere (plugin settings)', AtIcon)
+                    return
+                }
+                if (!target) return
+                const on = !cur.list.includes(target)
+                update({ list: on ? [...cur.list, target] : cur.list.filter(x => x !== target) })
+                toast(`Silent mentions ${on ? 'on' : 'off'} for ${labelOf(target)}`, AtIcon)
             }}
         />
     )

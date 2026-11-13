@@ -5,6 +5,7 @@ import { after, instead } from '@valenced/patcher'
 import { findInReactFiber } from '@valenced/utils/react'
 import { MentionButton } from './button'
 import SettingsPage from './Settings'
+import { idsFor } from './chat'
 import { bind, DEFAULTS, settings } from './store'
 
 /**
@@ -12,6 +13,15 @@ import { bind, DEFAULTS, settings } from './store'
  * 메시지를 보낼 때 디스코드에 allowed_mentions 를 비워서 넘긴다 (봇, 웹후크가 쓰는 방법).
  * 디스코드의 sendMessage(채널, 메시지, 기다림, 옵션) 는 옵션의 allowedMentions 를 그대로 서버로 보낸다.
  */
+
+/** 이 대화로 보내는 메시지의 멘션 알림을 끌지 */
+function shouldSilence(channelId: unknown): boolean {
+    if (typeof channelId !== 'string') return false
+    const s = settings()
+    if (s.always) return true
+    if (!s.list.length) return false
+    return idsFor(channelId).some(id => s.list.includes(id))
+}
 
 function withSilentMentions(options: any) {
     const s = settings()
@@ -47,7 +57,7 @@ export default plugin({
                 cleanup(
                     instead(mod, 'sendMessage', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                         try {
-                            if (settings().on && typeof args[0] === 'string') {
+                            if (shouldSilence(args[0])) {
                                 // 옵션은 네 번째 인자. 빈 자리는 디스코드 기본값(true) 으로 채운다
                                 const next = [...args]
                                 if (next.length < 3) next[2] = true

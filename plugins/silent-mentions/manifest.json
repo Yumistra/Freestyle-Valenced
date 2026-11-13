@@ -5,7 +5,7 @@
 	"description": "Mention people without notifying them.",
 	"author": "Yumistra",
 	"icon": "AtIcon",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
