@@ -164,7 +164,7 @@ function authorText(raw?: string) {
     const by = `${c.name}${c.ids.length ? `(${c.ids.map(id => `<@${id}>`).join(' ')})` : ''}`
     const label = (l: { url: string; label?: string }) => l.label ?? safeHost(l.url)
     // 링크 미리보기는 보낼 때 SUPPRESS_EMBEDS 로 막는다
-    const links = c.links.map(l => `[${label(l)}](${l.url})`).join(', ')
+    const links = c.links.map(l => `[${label(l)}](<${l.url}>)`).join(', ')
     return { by, links }
 }
 function safeHost(url: string) {
