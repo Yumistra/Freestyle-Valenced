@@ -73,7 +73,7 @@ function chunks(text: string, max = MAX): string[] {
 let sender: any
 function sendMessage(channelId: string, content: string) {
     sender ??= (lookupModule(withProps('sendMessage', 'receiveMessage') as any) as any)?.[0]
-    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, {})
+    sender?.sendMessage?.(channelId, { content, invalidEmojis: [], tts: false, validNonShortcutEmojis: [] }, undefined, { allowedMentions: { parse: [], replied_user: false } })
 }
 
 /** 보내거나(기본) 나만 보이게. 길면 여러 메시지로 나눈다 */
@@ -82,6 +82,11 @@ function reply(ctx: any, content: string, ephemeral: boolean) {
     const id = ctx?.channel?.id
     if (ephemeral) {
         if (id) parts.forEach((t, i) => setTimeout(() => sendEphemeral(id, t), i * 150))
+        return
+    }
+    // 멘션이 있으면 직접 보내되 아무도 알림을 받지 않게 (allowedMentions 비움)
+    if (id && /<@!?\d+>/.test(content)) {
+        parts.forEach((t, i) => setTimeout(() => sendMessage(id, t), i * 700))
         return
     }
     // 첫 부분은 명령어 결과로, 나머지는 이어서 보낸다
@@ -97,11 +102,47 @@ interface Info {
     version: string
     enabled: boolean
     author?: string
+    authorRaw?: string
     description?: string
     native?: boolean
 }
 
 const authorOf = (m: any) => (Array.isArray(m?.authors) ? m.authors.map((a: any) => a?.name ?? a).join(', ') : typeof m?.author === 'string' ? m.author : m?.author?.name)
+
+/** Valenced 의 author 형식: `Name <DISCORD_ID> (LINK "LABEL")` (ID, 링크는 없거나 여러 개) */
+const ContributorEntry = /^(?:<(\d{17,20})>|\(((?:https?:\/\/|mailto:)[^()\s]+)(?:\s+"([^"()]+)")?\))\s*/i
+function parseContributor(raw: string): { name: string; ids: string[]; links: { url: string; label?: string }[] } {
+    const start = raw.search(/[<(]/)
+    const name = (start === -1 ? raw : raw.slice(0, start)).trim() || raw
+    const ids: string[] = []
+    const links: { url: string; label?: string }[] = []
+    let rest = start === -1 ? '' : raw.slice(start)
+    while (rest) {
+        const m = ContributorEntry.exec(rest)
+        if (!m) return { name: raw.trim(), ids: [], links: [] }
+        if (m[1]) ids.push(m[1])
+        else links.push({ url: m[2]!, label: m[3] })
+        rest = rest.slice(m[0].length)
+    }
+    return { name, ids, links }
+}
+/** "Wolfie(<@id>)" 와 링크 줄 */
+function authorText(raw?: string) {
+    if (!raw) return { by: '', links: '' }
+    const c = parseContributor(raw)
+    const by = `${c.name}${c.ids.length ? `(${c.ids.map(id => `<@${id}>`).join(' ')})` : ''}`
+    const label = (l: { url: string; label?: string }) => l.label ?? safeHost(l.url)
+    // <url> 로 감싸 링크 미리보기가 줄줄이 붙지 않게
+    const links = c.links.map(l => `["${label(l)}"](<${l.url}>)`).join(' ')
+    return { by, links }
+}
+function safeHost(url: string) {
+    try {
+        return url.replace(/^\w+:(\/\/)?/, '').split(/[/?#]/)[0] || url
+    } catch {
+        return url
+    }
+}
 
 const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
 
@@ -120,6 +161,7 @@ async function installedPlugins(): Promise<Info[]> {
                     version: formatVersion(p.manifest.version),
                     enabled: !!I.isPluginEnabledInActiveSlot?.(p),
                     author: authorOf(p.manifest),
+                    authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                     description: p.manifest.description,
                     native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
                 })
@@ -144,6 +186,7 @@ async function installedPlugins(): Promise<Info[]> {
                 version: typeof v === 'string' ? v : v ? formatVersion(v) : '?',
                 enabled: !!states?.[active]?.[p.manifest.id]?.enabled,
                 author: authorOf(p.manifest),
+                authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                 description: p.manifest.description,
                 native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
             }
@@ -154,10 +197,12 @@ async function pluginsText(versions: boolean, detailed = false) {
     const all = (await installedPlugins()).sort((a, b) => a.name.localeCompare(b.name))
     if (detailed) {
         // 자세히: 플러그인마다 이름, 버전, 만든 사람, 설명, ID
-        const block = (p: Info) =>
-            [`> **${p.name}** ${p.version}${p.author ? `, by ${p.author}` : ''}${p.native ? ', native' : ''}`, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
+        const block = (p: Info) => {
+            const a = p.authorRaw ? authorText(p.authorRaw) : { by: p.author ?? '', links: '' }
+            return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links || null, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
                 .filter(Boolean)
                 .join('\n')
+        }
         const on = all.filter(p => p.enabled)
         const off = all.filter(p => !p.enabled)
         const lines = [`**Installed Plugins (${all.length}), ${on.length} enabled, ${off.length} disabled**`]
@@ -217,8 +262,6 @@ async function debugText(detailed = false) {
     }
     const dark = safe(() => ReactNative.Appearance.getColorScheme())
     const extra = [
-        '',
-        '**More**',
         `> **Screen:** ${screen ? `${Math.round(screen.width * (scale ?? 1))}x${Math.round(screen.height * (scale ?? 1))}` : '?'} px, ${win ? `${Math.round(win.width)}x${Math.round(win.height)}` : '?'} dp, scale ${scale ?? '?'}, font ${font ?? '?'}`,
         `> **Language:** ${intl?.locale ?? '?'}, ${intl?.timeZone ?? '?'}`,
         `> **Theme:** ${dark ?? '?'}`,
