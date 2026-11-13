@@ -377,6 +377,85 @@ private var attachedSystem = false
 private val rows = LinkedHashMap<String, Row>()
 private var chatBtn: View? = null
 private var builtScale = 0f
+/**
+ * 터치 통과일 때 채팅 버튼은 따로 작은 창에 둔다: 그 창만 터치를 받고, 나머지 오버레이는 전부 아래 앱으로 넘긴다.
+ * (한 번 받은 터치를 나중에 다른 앱으로 넘길 수는 없어서, 버튼 자리는 탭도 길게 누르기도 버튼이 받는다)
+ */
+private var btnWin: android.widget.FrameLayout? = null
+private var btnWm: WindowManager? = null
+private var builtSplit = false
+private val splitButton get() = passThrough && chatMode != "hidden"
+
+/** 짧은 탭을 게임으로 다시 눌러 준 마지막 결과 (로그용) */
+@Volatile private var tapPass = "not tried"
+private var downRawX = 0f
+private var downRawY = 0f
+
+/**
+ * 버튼 창이 받아 버린 짧은 탭을 아래 앱(게임)에 다시 눌러 준다.
+ * 버튼 창을 잠깐 터치 통과로 바꾼 뒤 같은 자리에 탭을 넣는다.
+ * 다른 앱에 터치를 넣는 건 보통 앱에게 막혀 있어서 (INJECT_EVENTS), 루트가 있으면 su 로도 시도한다.
+ */
+private fun passTap(x: Float, y: Float) {
+    val holder = btnWin ?: return
+    val wm = btnWm ?: return
+    val lp = holder.layoutParams as? WindowManager.LayoutParams ?: return
+    lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    try {
+        wm.updateViewLayout(holder, lp)
+    } catch (e: Throwable) {
+    }
+    Thread {
+        var ok = false
+        val how = StringBuilder()
+        try {
+            Thread.sleep(60)
+            val imClass = Class.forName("android.hardware.input.InputManager")
+            // 안드로이드 16 에는 getInstance 가 없다: 시스템 서비스로 받는다
+            val im = holder.context.getSystemService(Context.INPUT_SERVICE)
+                ?: imClass.getMethod("getInstance").invoke(null)
+            val inject = imClass.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType)
+            val t = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0)
+            down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            val up = MotionEvent.obtain(t, t + 40, MotionEvent.ACTION_UP, x, y, 0)
+            up.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            ok = (inject.invoke(im, down, 0) as? Boolean == true) && (inject.invoke(im, up, 0) as? Boolean == true)
+            down.recycle()
+            up.recycle()
+            how.append("inject=").append(ok)
+        } catch (e: Throwable) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+            how.append("inject failed: ").append(cause.javaClass.simpleName).append(' ').append(cause.message ?: "")
+        }
+        if (!ok) {
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "input tap ${x.toInt()} ${y.toInt()}"))
+                ok = p.waitFor() == 0
+                how.append(", su=").append(ok)
+            } catch (e: Throwable) {
+                how.append(", su failed: ").append(e.javaClass.simpleName)
+            }
+        }
+        tapPass = "${if (ok) "worked" else "blocked"} at ${x.toInt()},${y.toInt()} ($how)"
+        main.postDelayed({
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            try {
+                if (btnWin === holder) wm.updateViewLayout(holder, lp)
+            } catch (e: Throwable) {
+            }
+        }, 200)
+    }.start()
+}
+
+private fun detachButton() {
+    val b = btnWin ?: return
+    try {
+        btnWm?.removeView(b)
+    } catch (e: Throwable) {
+    }
+    btnWm = null
+}
 
 @SuppressLint("ClickableViewAccessibility")
 private fun ensureRoot(c: Context): LinearLayout {
@@ -450,6 +529,7 @@ private fun ensureRoot(c: Context): LinearLayout {
 }
 
 private fun detach() {
+    detachButton()
     val r = root ?: return
     try {
         attachedTo?.removeView(r)
@@ -544,13 +624,17 @@ private fun render() {
         return
     }
     val r = ensureRoot(c)
-    if (builtScale != scale || builtChatMode != chatMode) {
+    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
+        detachButton()
+        btnWin?.removeAllViews()
+        btnWin = null
         chatBtn = null
         builtScale = scale
         builtChatMode = chatMode
+        builtSplit = splitButton
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
@@ -567,17 +651,38 @@ private fun render() {
             toggleChat()
         }
         if (chatMode == "long") {
-            // 톡 누르면 살짝 눌리는 것만 보이고 열리지 않는다 (게임 중 실수로 열리지 않게)
-            b.setOnClickListener { it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(60).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(100).start() }.start() }
+            // 누른 자리 기억 (짧은 탭을 게임으로 다시 눌러 줄 때 쓴다)
+            b.setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    downRawX = e.rawX
+                    downRawY = e.rawY
+                }
+                false
+            }
+            // 톡 누르면: 터치 통과일 때는 게임으로 넘기고, 아니면 살짝 눌리는 것만 보인다
+            b.setOnClickListener {
+                if (splitButton) passTap(downRawX, downRawY)
+                else it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(60).withEndAction { it.animate().scaleX(1f).scaleY(1f).setDuration(100).start() }.start()
+            }
             b.setOnLongClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 press(it)
                 true
             }
-        } else b.setOnClickListener(press)
+        } else {
+            b.setOnClickListener(press)
+            // 탭으로 열기일 때 길게 누르기는 아무것도 하지 않는다
+            b.setOnLongClickListener { true }
+        }
         val lp = LinearLayout.LayoutParams(size, size)
         lp.bottomMargin = gap
-        r.addView(b, 0, lp)
+        if (splitButton) {
+            // 버튼은 따로 창에, 오버레이 안에는 같은 크기의 빈자리 (사람 줄 위치가 그대로)
+            val holder = android.widget.FrameLayout(c)
+            holder.addView(b, android.widget.FrameLayout.LayoutParams(size, size))
+            btnWin = holder
+            r.addView(View(c), 0, lp)
+        } else r.addView(b, 0, lp)
         chatBtn = b
     }
     // 빠진 사람은 흐려지며 사라진다
@@ -638,6 +743,27 @@ private fun render() {
             r.animate().scaleX(1f).scaleY(1f).setDuration(200).setInterpolator(OvershootInterpolator(1.2f)).start()
         } catch (e: Throwable) {
             lastError = "attach: $e"
+        }
+    }
+    // 따로 떼어 낸 채팅 버튼 창 (터치를 받는 창)
+    val holder = btnWin
+    if (splitButton && holder != null && btnWm == null && attachedTo != null) {
+        val lp = WindowManager.LayoutParams(
+            size,
+            size,
+            overlayType(system),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = posX
+        lp.y = posY
+        try {
+            holder.alpha = opacity
+            addOwn(wm, holder, lp)
+            btnWm = wm
+        } catch (e: Throwable) {
+            lastError = "button attach: $e"
         }
     }
 }
@@ -1113,6 +1239,7 @@ val voiceOverlayPlugin = plugin {
                 "enabled" to overlayOn,
                 "icons" to iconNames.entries.joinToString(", ") { "${it.key}=${it.value}" },
                 "foreignOverlays" to foreignWindows.joinToString(" | "),
+                "tapPass" to tapPass,
                 "error" to lastError,
             )
         }

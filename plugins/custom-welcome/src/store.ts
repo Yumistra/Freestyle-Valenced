@@ -11,6 +11,12 @@ export interface Settings {
     mode: 'together' | 'separate'
     /** 니트로가 없어 못 보내는 스티커는 이미지 링크로 보낸다 (FakeNitro 처럼) */
     stickerLinks: boolean
+    /** DM 의 손 흔들기: 디스코드 그대로(wave), 서버와 같게(same), DM 용 따로(own) */
+    dm: 'wave' | 'same' | 'own'
+    /** DM 용 메시지들 */
+    dmMessages: string[]
+    /** DM 용 스티커 ID 들 */
+    dmStickers: string[]
     /** 예전 버전에서 쓰던 값 */
     lastSticker?: string
 }
@@ -22,6 +28,9 @@ export const DEFAULTS: Settings = {
     ping: true,
     mode: 'together',
     stickerLinks: true,
+    dm: 'wave',
+    dmMessages: ['Hey {name}! 👋'],
+    dmStickers: [],
 }
 
 let storage: any

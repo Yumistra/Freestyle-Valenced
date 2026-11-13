@@ -125,8 +125,18 @@ function stickerLink(id: string): string | undefined {
 
 function send(channelId: string, ref: any): boolean {
     const s = settings()
-    const content = s.messages.length ? fill(pick(s.messages), channelId, ref) : ''
-    const sticker = s.stickers.length ? pick(s.stickers) : undefined
+    // DM (서버가 없는 채널): 디스코드 그대로 두거나, DM 용 것을 보낸다
+    let isDM = false
+    try {
+        const ch = (Stores as any).ChannelStore?.getChannel?.(channelId)
+        isDM = !!ch && !ch.guild_id
+    } catch {}
+    if (isDM && s.dm === 'wave') return false
+    const own = isDM && s.dm === 'own'
+    const messages = own ? s.dmMessages : s.messages
+    const stickerList = own ? s.dmStickers : s.stickers
+    const content = messages.length ? fill(pick(messages), channelId, ref) : ''
+    const sticker = stickerList.length ? pick(stickerList) : undefined
     if (!content.trim() && !sticker) return false
     if (typeof actions?.sendMessage !== 'function') return false
     const options: any = {}

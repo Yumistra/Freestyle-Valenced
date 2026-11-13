@@ -4,6 +4,8 @@ import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { instead } from '@valenced/patcher'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useState } from 'react'
@@ -96,6 +98,42 @@ function snapshot() {
         })
         .filter(Boolean)
         .sort((a: any, b: any) => a.name.localeCompare(b.name))
+}
+
+// ── 디스코드 안의 떠 있는 통화 창 (오른쪽 위 작은 타일) 숨기기 ─────────
+const PIP_PATH = 'modules/voice_panel/native/pip/VoicePanelPIP.tsx'
+let pipStatus = 'not found yet'
+function patchCallTile(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModuleWithImportedPath(PIP_PATH, (mod: any) => {
+            // 그냥 함수일 수도, memo/forwardRef 로 싸여 있을 수도 있다
+            const targets: Array<[any, string]> = []
+            // 화면 요소만 (대문자 이름이나 default). 도우미 함수는 건드리지 않는다
+            const keys = Object.keys(mod ?? {}).filter(k => k === 'default' || /^[A-Z]/.test(k) || /^[A-Z]/.test(mod[k]?.name ?? ''))
+            for (const key of keys) {
+                const v = mod[key]
+                if (typeof v === 'function') targets.push([mod, key])
+                else if (v && typeof v === 'object') {
+                    if (typeof v.type === 'function') targets.push([v, 'type'])
+                    else if (typeof v.render === 'function') targets.push([v, 'render'])
+                }
+            }
+            if (!targets.length) {
+                pipStatus = `module found, nothing to patch (${Object.keys(mod ?? {}).join(', ')})`
+                return
+            }
+            for (const [obj, key] of targets) {
+                cleanup(
+                    instead(obj, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        const out = orig.apply(this, args)
+                        // 훅 순서를 지키려고 원래 것은 그대로 부르고, 결과만 버린다
+                        return settings().hideDiscordOverlay ? null : out
+                    }),
+                )
+            }
+            pipStatus = `patched ${targets.map(([o, k]) => (o === mod ? k : `${k}()`)).join(', ')}`
+        }) as any,
+    )
 }
 
 let timer: any
@@ -218,21 +256,38 @@ function toggle(kind: 'mute' | 'deafen') {
     }
 }
 
-/** 방송(화면 공유) 켜기, 끄기 */
+/**
+ * 방송(화면 공유) 켜기, 끄기. 모바일 디스코드의 화면 공유 버튼과 같은 순서로 한다:
+ *  켜기: 통화 알림(포그라운드 서비스)이 돌고 있으면 음성 엔진의 startBroadcast (안드로이드 화면 녹화 허락 창이 뜬다)
+ *  끄기: stopBroadcast, 내 방송 stopStream, 방송 소스 비우기
+ */
 function stream() {
     try {
-        const st = S().ApplicationStreamingStore
-        const mine = st?.getCurrentUserActiveStream?.()
-        const m = find('stopStream', 'startStream') ?? find('stopStream')
+        const engine = find('getVoiceEngine')?.getVoiceEngine?.()
+        const mine = S().ApplicationStreamingStore?.getCurrentUserActiveStream?.()
         if (mine) {
-            const key = mine.streamKey ?? `${mine.streamType}:${mine.guildId}:${mine.channelId}:${mine.ownerId}`
-            if (typeof m?.stopStream === 'function') return m.stopStream(key)
-        } else {
-            const channelId = S().SelectedChannelStore?.getVoiceChannelId?.()
-            const guildId = S().ChannelStore?.getChannel?.(channelId)?.guild_id ?? null
-            if (typeof m?.startStream === 'function') return m.startStream(guildId, channelId, {})
+            engine?.stopBroadcast?.()
+            const keyOf = find('encodeStreamKey')
+            const key = keyOf?.encodeStreamKey ? keyOf.encodeStreamKey(mine) : (mine.streamKey ?? `${mine.streamType}:${mine.guildId}:${mine.channelId}:${mine.ownerId}`)
+            ;(find('stopStream', 'startStream') ?? find('stopStream'))?.stopStream?.(key)
+            find('setGoLiveSource')?.setGoLiveSource?.(null)
+            return
         }
-        toast('Go Live is not available here')
+        if (typeof engine?.startBroadcast !== 'function') return toast('Go Live is not available here')
+        const fg = find('isForegroundServiceRunning')
+        const go = () => {
+            try {
+                engine.startBroadcast()
+            } catch (e: any) {
+                toast(`Go Live failed: ${e?.message ?? e}`)
+            }
+        }
+        if (typeof fg?.isForegroundServiceRunning === 'function')
+            fg.isForegroundServiceRunning((running: boolean) => {
+                if (running) go()
+                else toast('Go Live needs the call notification to be on')
+            })
+        else go()
     } catch (e: any) {
         toast(`Go Live failed: ${e?.message ?? e}`)
     }
@@ -370,7 +425,7 @@ function SettingsPage() {
             const words = ['microphone', 'headphones', 'screen', 'phone', 'chat', 'send', 'xsmall']
             const found: string[] = []
             for (const w of words) found.push(`${w}: ${await native('findIcons', [w])}`)
-            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\n\nIcons:\n${found.join('\n')}`)
+            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\nCall tile: ${pipStatus}\n\nIcons:\n${found.join('\n')}`)
             toast('Copied')
         } catch (e: any) {
             toast(`Could not copy: ${e?.message ?? e}`)
@@ -398,8 +453,8 @@ function SettingsPage() {
                 <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
                 <TableSwitchRow
-                    label="Remove Discord's own overlay"
-                    subLabel="Stops Discord's built-in voice overlay from showing over other apps, so only this one shows. Takes effect the next time Discord tries to show it."
+                    label="Hide Discord's floating call"
+                    subLabel="Hides the small call window Discord shows in the corner while you are in a voice channel, so only this overlay shows. Open the call from the voice channel or the panel at the bottom instead."
                     value={s.hideDiscordOverlay}
                     onValueChange={(v: boolean) => save({ hideDiscordOverlay: v })}
                 />
@@ -410,7 +465,7 @@ function SettingsPage() {
                 <TableSwitchRow label="Lock position" subLabel="The overlay stays where it is and can't be dragged." value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
                 <TableSwitchRow
                     label="Touches go through"
-                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. The overlay's buttons don't work while this is on, and Android keeps it at most 80% visible."
+                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. Only the chat button still takes touches (tap or long press, as set below), and Android keeps the rest at most 80% visible."
                     value={s.passThrough}
                     onValueChange={(v: boolean) => save({ passThrough: v })}
                 />
@@ -449,6 +504,7 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
+        patchCallTile(cleanup)
         sendConfig()
         for (const name of ['MediaEngineStore', 'ApplicationStreamingStore']) {
             const st = S()[name]

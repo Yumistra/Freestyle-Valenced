@@ -49,18 +49,25 @@ export default function SettingsPage({ api }: { api?: any }) {
     const [emojiGrid, setEmojiGrid] = useState(false)
     const [stickerGrid, setStickerGrid] = useState(false)
     const pickable = canPick()
+    // 고치는 목록: 서버용, 또는 (DM 용 따로일 때) DM 용
+    const [target, setTarget] = useState<'server' | 'dm'>('server')
+    const dmEdit = s.dm === 'own' && target === 'dm'
+    const MK = dmEdit ? 'dmMessages' : 'messages'
+    const SK = dmEdit ? 'dmStickers' : 'stickers'
+    const messages: string[] = s[MK]
+    const stickerIds: string[] = s[SK]
 
     const addMessage = (text = msg) => {
         const t = text.trim()
         if (!t) return
         anim()
-        update({ messages: [...settings().messages, t] })
+        update({ [MK]: [...settings()[MK], t] } as any)
         setMsg('')
     }
     const addSticker = (id?: string) => {
-        if (!id || settings().stickers.includes(id)) return
+        if (!id || settings()[SK].includes(id)) return
         anim()
-        update({ stickers: [...settings().stickers, id] })
+        update({ [SK]: [...settings()[SK], id] } as any)
         setSid('')
     }
     // 고르기 창에서 이모지를 누르면 쓰고 있는 메시지 끝에 붙인다. GIF 는 링크를 붙인다
@@ -110,26 +117,39 @@ export default function SettingsPage({ api }: { api?: any }) {
                     <TableRadioRow label="One at random" value="separate" />
                 </TableRadioGroup>
 
+                <TableRadioGroup title="Wave button in DMs" defaultValue={s.dm} onChange={(dm: 'wave' | 'same' | 'own') => (anim(), update({ dm }), dm !== 'own' && setTarget('server'))}>
+                    <TableRadioRow label="Discord's wave" subLabel="DMs send Discord's normal wave sticker" value="wave" />
+                    <TableRadioRow label="Same as servers" subLabel="DMs send the messages and stickers below" value="same" />
+                    <TableRadioRow label="Its own DM welcome" subLabel="DMs get their own messages and stickers" value="own" />
+                </TableRadioGroup>
+
+                {s.dm === 'own' ? (
+                    <TableRadioGroup title="Editing" defaultValue={target} onChange={(t: 'server' | 'dm') => (anim(), setTarget(t))}>
+                        <TableRadioRow label="Server welcome" value="server" />
+                        <TableRadioRow label="DM welcome" value="dm" />
+                    </TableRadioGroup>
+                ) : null}
+
                 <Section
-                    title="Messages"
-                    sub={s.messages.length ? `${s.messages.length} message(s)` : 'None'}
+                    title={dmEdit ? 'DM messages' : 'Messages'}
+                    sub={messages.length ? `${messages.length} message(s)` : 'None'}
                     icon="ChatIcon"
                     open={openMsg}
                     onToggle={() => setOpenMsg(v => !v)}
                 >
                     <Stack spacing={12}>
-                        {s.messages.length ? (
+                        {messages.length ? (
                             <TableRowGroup>
-                                {s.messages.map((m, i) => (
+                                {messages.map((m, i) => (
                                     <TableRow
                                         key={`${i}${m}`}
                                         label={m}
-                                        trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => (anim(), update({ messages: settings().messages.filter((_, j) => j !== i) }))} />}
+                                        trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => (anim(), update({ [MK]: settings()[MK].filter((_, j) => j !== i) } as any))} />}
                                     />
                                 ))}
                             </TableRowGroup>
                         ) : null}
-                        <TextInput label="New message" value={msg} placeholder="Welcome {mention}! 👋" onChange={setMsg} onSubmitEditing={() => addMessage()} returnKeyType="done" />
+                        <TextInput label="New message" value={msg} placeholder={dmEdit ? 'Hey {name}! 👋' : 'Welcome {mention}! 👋'} onChange={setMsg} onSubmitEditing={() => addMessage()} returnKeyType="done" />
                         <View style={{ flexDirection: 'row' }}>
                             <View style={{ flex: 1, marginRight: 8 }}>
                                 <Button text={emojiGrid ? 'Hide emojis' : 'Server emojis'} variant="secondary" size="md" onPress={() => (anim(), setEmojiGrid(v => !v))} />
@@ -151,21 +171,21 @@ export default function SettingsPage({ api }: { api?: any }) {
                 </Section>
 
                 <Section
-                    title="Stickers"
-                    sub={s.stickers.length ? `${s.stickers.length} sticker(s)` : 'None'}
+                    title={dmEdit ? 'DM stickers' : 'Stickers'}
+                    sub={stickerIds.length ? `${stickerIds.length} sticker(s)` : 'None'}
                     icon="StickerIcon"
                     open={openSticker}
                     onToggle={() => setOpenSticker(v => !v)}
                 >
                     <Stack spacing={12}>
-                        {s.stickers.length ? (
+                        {stickerIds.length ? (
                             <TableRowGroup>
-                                {s.stickers.map(id => (
+                                {stickerIds.map(id => (
                                     <TableRow
                                         key={id}
                                         icon={thumb(id)}
                                         label={stickerName(id)}
-                                        trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => (anim(), update({ stickers: settings().stickers.filter(x => x !== id) }))} />}
+                                        trailing={<Button size="sm" variant="secondary" text="Remove" onPress={() => (anim(), update({ [SK]: settings()[SK].filter(x => x !== id) } as any))} />}
                                     />
                                 ))}
                             </TableRowGroup>
@@ -173,12 +193,12 @@ export default function SettingsPage({ api }: { api?: any }) {
                         <Button text={stickerGrid ? 'Hide stickers' : 'Pick a sticker'} variant="primary" size="md" onPress={() => (anim(), setStickerGrid(v => !v))} />
                         {stickerGrid ? <ExpressionGrid
                                 kind="sticker"
-                                chosen={s.stickers}
+                                chosen={stickerIds}
                                 onPick={st => {
                                     const id = st?.id && String(st.id)
                                     if (!id) return
                                     // 이미 고른 것을 다시 누르면 뺀다
-                                    if (settings().stickers.includes(id)) (anim(), update({ stickers: settings().stickers.filter(x => x !== id) }))
+                                    if (settings()[SK].includes(id)) (anim(), update({ [SK]: settings()[SK].filter(x => x !== id) } as any))
                                     else addSticker(id)
                                 }}
                             /> : null}
