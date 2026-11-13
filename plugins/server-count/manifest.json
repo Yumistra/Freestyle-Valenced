@@ -5,7 +5,7 @@
 	"description": "/servers tells you how many servers you're in.",
 	"author": "Yumistra",
 	"icon": "ServerIcon",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

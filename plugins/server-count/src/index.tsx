@@ -16,12 +16,39 @@ const BOOLEAN = 5
 
 const S = () => Stores as any
 
+/** 장애 등으로 앱에 안 보이는 서버 수 */
+function unavailable(): number {
+    const st = S().GuildAvailabilityStore ?? S().UnavailableGuildsStore
+    try {
+        if (typeof st?.totalUnavailableGuilds === 'number') return st.totalUnavailableGuilds
+        const u = st?.getUnavailableGuilds?.() ?? st?.unavailableGuilds
+        if (Array.isArray(u)) return u.length
+        if (u && typeof u === 'object') return Object.keys(u).length
+    } catch {}
+    return 0
+}
+
+/** 디스코드 서버에 직접 물어본 실제 서버 수 (/users/@me/guilds). 안 되면 null */
+let http: any
+async function serverCount(): Promise<number | null> {
+    try {
+        if (!http) {
+            const a = (lookupModule(withProps('HTTP') as any) as any)?.[0]?.HTTP
+            http = a?.get ? a : (lookupModule(withProps('getAPIBaseURL', 'get') as any) as any)?.[0]
+        }
+        const res = await http?.get?.({ url: '/users/@me/guilds', query: { limit: 200 } })
+        return Array.isArray(res?.body) ? res.body.length : null
+    } catch {
+        return null
+    }
+}
+
 /** 서버 수와 그중 내가 만든 서버 수 */
 function counts() {
     const guilds: any = S().GuildStore?.getGuilds?.() ?? {}
     const list: any[] = Object.values(guilds)
     const me = S().UserStore?.getCurrentUser?.()?.id
-    const total = typeof S().GuildStore?.getGuildCount === 'function' ? S().GuildStore.getGuildCount() : list.length
+    const total = (typeof S().GuildStore?.getGuildCount === 'function' ? S().GuildStore.getGuildCount() : list.length) + unavailable()
     const owned = me ? list.filter(g => (g?.ownerId ?? g?.owner_id) === me).length : 0
     // 서버 한도: 기본 100, Nitro 200
     const premium = S().UserStore?.getCurrentUser?.()?.premiumType
@@ -29,9 +56,15 @@ function counts() {
     return { total, owned, limit }
 }
 
-function text() {
-    const { total, owned, limit } = counts()
-    return `You're in **${total}** server${total === 1 ? '' : 's'} (${owned} owned, ${Math.max(0, limit - total)} left of ${limit}).`
+async function text() {
+    const c = counts()
+    const real = await serverCount()
+    const total = real ?? c.total
+    const lines = [`You're in **${total}** server${total === 1 ? '' : 's'} (${c.owned} owned, ${Math.max(0, c.limit - total)} left of ${c.limit}).`]
+    // 앱에 보이는 수와 다르면 같이 알려준다
+    if (real != null && real !== c.total) lines.push(`-# Discord's servers say ${real}, the app only shows ${c.total}.`)
+    if (real == null) lines.push(`-# Counted from the app, couldn't ask Discord's servers.`)
+    return lines.join('\n')
 }
 
 let bot: any
@@ -64,11 +97,12 @@ function makeCommand() {
         untranslatedDescription: description,
         displayDescription: description,
         options: [{ name: 'send', displayName: 'send', description: option, displayDescription: option, type: BOOLEAN, required: false }],
-        execute(args: any[], ctx: any) {
+        async execute(args: any[], ctx: any) {
             const send = Array.isArray(args) && args.find(a => a?.name === 'send')?.value
-            if (send) return { content: text() }
+            const content = await text()
+            if (send) return { content }
             const id = ctx?.channel?.id
-            if (id) sendEphemeral(id, text())
+            if (id) sendEphemeral(id, content)
         },
     }
     return command
@@ -76,13 +110,19 @@ function makeCommand() {
 
 function SettingsPage() {
     const [, tick] = useState(0)
+    const [real, setReal] = useState<number | null | undefined>(undefined)
+    useEffect(() => {
+        serverCount().then(setReal)
+    }, [])
     useEffect(() => {
         const store = S().GuildStore
         const on = () => tick(n => n + 1)
         store?.addChangeListener?.(on)
         return () => store?.removeChangeListener?.(on)
     }, [])
-    const { total, owned, limit } = counts()
+    const c = counts()
+    const total = real ?? c.total
+    const { owned, limit } = c
     const { Stack, TableRowGroup, TableRow, Text } = Design as any
     return (
         <Page>
@@ -91,6 +131,11 @@ function SettingsPage() {
                     <TableRow label="Servers" trailing={<Text variant="text-md/semibold">{`${total} / ${limit}`}</Text>} />
                     <TableRow label="Owned by you" trailing={<Text variant="text-md/semibold">{String(owned)}</Text>} />
                     <TableRow label="Room left" trailing={<Text variant="text-md/semibold">{String(Math.max(0, limit - total))}</Text>} />
+                    <TableRow
+                        label="Shown in the app"
+                        subLabel={real === undefined ? 'Asking Discord\u2019s servers\u2026' : real === null ? 'Couldn\u2019t ask Discord\u2019s servers' : real === c.total ? 'Same as Discord\u2019s servers' : `Discord\u2019s servers say ${real}`}
+                        trailing={<Text variant="text-md/semibold">{String(c.total)}</Text>}
+                    />
                 </TableRowGroup>
                 <Text variant="text-sm/medium" color="text-muted">
                     Type /servers in any chat to see this, or /servers send:True to post it.
