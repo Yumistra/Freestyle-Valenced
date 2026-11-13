@@ -4,6 +4,8 @@ import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { instead } from '@valenced/patcher'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useState } from 'react'
@@ -96,6 +98,42 @@ function snapshot() {
         })
         .filter(Boolean)
         .sort((a: any, b: any) => a.name.localeCompare(b.name))
+}
+
+// ── 디스코드 안의 떠 있는 통화 창 (오른쪽 위 작은 타일) 숨기기 ─────────
+const PIP_PATH = 'modules/voice_panel/native/pip/VoicePanelPIP.tsx'
+let pipStatus = 'not found yet'
+function patchCallTile(cleanup: (...f: any[]) => void) {
+    cleanup(
+        getModuleWithImportedPath(PIP_PATH, (mod: any) => {
+            // 그냥 함수일 수도, memo/forwardRef 로 싸여 있을 수도 있다
+            const targets: Array<[any, string]> = []
+            // 화면 요소만 (대문자 이름이나 default). 도우미 함수는 건드리지 않는다
+            const keys = Object.keys(mod ?? {}).filter(k => k === 'default' || /^[A-Z]/.test(k) || /^[A-Z]/.test(mod[k]?.name ?? ''))
+            for (const key of keys) {
+                const v = mod[key]
+                if (typeof v === 'function') targets.push([mod, key])
+                else if (v && typeof v === 'object') {
+                    if (typeof v.type === 'function') targets.push([v, 'type'])
+                    else if (typeof v.render === 'function') targets.push([v, 'render'])
+                }
+            }
+            if (!targets.length) {
+                pipStatus = `module found, nothing to patch (${Object.keys(mod ?? {}).join(', ')})`
+                return
+            }
+            for (const [obj, key] of targets) {
+                cleanup(
+                    instead(obj, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        const out = orig.apply(this, args)
+                        // 훅 순서를 지키려고 원래 것은 그대로 부르고, 결과만 버린다
+                        return settings().hideDiscordOverlay ? null : out
+                    }),
+                )
+            }
+            pipStatus = `patched ${targets.map(([o, k]) => (o === mod ? k : `${k}()`)).join(', ')}`
+        }) as any,
+    )
 }
 
 let timer: any
@@ -370,7 +408,7 @@ function SettingsPage() {
             const words = ['microphone', 'headphones', 'screen', 'phone', 'chat', 'send', 'xsmall']
             const found: string[] = []
             for (const w of words) found.push(`${w}: ${await native('findIcons', [w])}`)
-            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\n\nIcons:\n${found.join('\n')}`)
+            Clipboard.setString(`Voice Overlay log\nStatus: ${JSON.stringify(st)}\nCall tile: ${pipStatus}\n\nIcons:\n${found.join('\n')}`)
             toast('Copied')
         } catch (e: any) {
             toast(`Could not copy: ${e?.message ?? e}`)
@@ -398,8 +436,8 @@ function SettingsPage() {
                 <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
                 <TableSwitchRow
-                    label="Remove Discord's own overlay"
-                    subLabel="Stops Discord's built-in voice overlay from showing over other apps, so only this one shows. Takes effect the next time Discord tries to show it."
+                    label="Hide Discord's floating call"
+                    subLabel="Hides the small call window Discord shows in the corner while you are in a voice channel, so only this overlay shows. Open the call from the voice channel or the panel at the bottom instead."
                     value={s.hideDiscordOverlay}
                     onValueChange={(v: boolean) => save({ hideDiscordOverlay: v })}
                 />
@@ -449,6 +487,7 @@ export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
+        patchCallTile(cleanup)
         sendConfig()
         for (const name of ['MediaEngineStore', 'ApplicationStreamingStore']) {
             const st = S()[name]
