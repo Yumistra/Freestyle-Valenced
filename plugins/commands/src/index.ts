@@ -136,6 +136,8 @@ interface Info {
     authorRaw?: string
     description?: string
     native?: boolean
+    /** 설치한 리포 주소. null 이면 직접 설치(사이드로드) */
+    repo?: string | null
 }
 
 const authorOf = (m: any) => (Array.isArray(m?.authors) ? m.authors.map((a: any) => a?.name ?? a).join(', ') : typeof m?.author === 'string' ? m.author : m?.author?.name)
@@ -195,6 +197,7 @@ async function installedPlugins(): Promise<Info[]> {
                     authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                     description: p.manifest.description,
                     native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
+                    repo: meta?.source?.repo ?? null,
                 })
             }
             return out
@@ -220,33 +223,70 @@ async function installedPlugins(): Promise<Info[]> {
                 authorRaw: typeof p.manifest.author === 'string' ? p.manifest.author : undefined,
                 description: p.manifest.description,
                 native: !!(p.manifest.native ?? p.native ?? p.manifest.dist?.native),
+                repo: p.source?.repo ?? null,
             }
         })
 }
 
+/** 리포 주소 → 이름 (Valenced 리포 목록에서) */
+async function repoNames(): Promise<Map<string, string>> {
+    const map = new Map<string, string>()
+    try {
+        const repos: any[] = unwrap(await (callNativeMethod as any)(`${NS}.plugins.repos.list`, [])) ?? []
+        for (const r of repos) if (r?.url) map.set(r.url, r.name || safeHost(r.url))
+    } catch {}
+    return map
+}
+
+const sameRepo = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
+
+/** 리포별로 묶는다 (이름 순, 직접 설치한 것은 맨 뒤) */
+async function byRepo(all: Info[]) {
+    const names = await repoNames()
+    const groups = new Map<string, { name: string; url: string | null; plugins: Info[] }>()
+    for (const p of all) {
+        const key = p.repo ?? ''
+        if (!groups.has(key)) {
+            const known = p.repo ? [...names.entries()].find(([u]) => sameRepo(u, p.repo!))?.[1] : undefined
+            groups.set(key, { name: p.repo ? (known ?? safeHost(p.repo)) : 'Sideloaded', url: p.repo ?? null, plugins: [] })
+        }
+        groups.get(key)!.plugins.push(p)
+    }
+    return [...groups.values()].sort((a, b) => (!a.url ? 1 : !b.url ? -1 : a.name.localeCompare(b.name)))
+}
+
 async function pluginsText(versions: boolean, detailed = false) {
     const all = (await installedPlugins()).sort((a, b) => a.name.localeCompare(b.name))
+    const groups = await byRepo(all)
+    const onAll = all.filter(p => p.enabled).length
+    const head = (g: { name: string; url: string | null; plugins: Info[] }) => `**${g.name} (${g.plugins.length})**${g.url ? ` <${g.url}>` : ''}`
     if (detailed) {
-        // 자세히: 플러그인마다 이름, 버전, 만든 사람, 설명, ID
+        // 자세히: 리포마다, 플러그인마다 이름, 버전, 만든 사람, 링크, 설명, ID
         const block = (p: Info) => {
             const a = p.authorRaw ? authorText(p.authorRaw) : { by: p.author ?? '', links: '' }
             return [`> **${p.name}** ${p.version}${a.by ? `, by ${a.by}` : ''}`, a.links ? `> ${a.links}` : null, p.description ? `> ${p.description}` : null, `> \`${p.id}\``]
                 .filter(Boolean)
                 .join('\n')
         }
-        const on = all.filter(p => p.enabled)
-        const off = all.filter(p => !p.enabled)
-        const lines = [`**Installed Plugins (${all.length}), ${on.length} enabled, ${off.length} disabled**`]
-        if (on.length) lines.push('', `**Enabled (${on.length}):**`, on.map(block).join('\n> \n'))
-        if (off.length) lines.push('', `**Disabled (${off.length}):**`, off.map(block).join('\n> \n'))
+        const lines = [`**Installed Plugins (${all.length}), ${onAll} enabled, ${all.length - onAll} disabled**`]
+        for (const g of groups) {
+            const on = g.plugins.filter(p => p.enabled)
+            const off = g.plugins.filter(p => !p.enabled)
+            lines.push('', head(g))
+            if (on.length) lines.push(`**Enabled (${on.length}):**`, on.map(block).join('\n> \n'))
+            if (off.length) lines.push(`**Disabled (${off.length}):**`, off.map(block).join('\n> \n'))
+        }
         return lines.join('\n')
     }
     const fmt = (p: Info) => (versions ? `${p.name} (${p.version})` : p.name)
-    const on = all.filter(p => p.enabled)
-    const off = all.filter(p => !p.enabled)
     const lines = [`**Installed Plugins (${all.length}):**`]
-    if (on.length) lines.push(`> **Enabled (${on.length}):**`, `> ${on.map(fmt).join(', ')}`)
-    if (off.length) lines.push(`> **Disabled (${off.length}):**`, `> ${off.map(fmt).join(', ')}`)
+    for (const g of groups) {
+        const on = g.plugins.filter(p => p.enabled)
+        const off = g.plugins.filter(p => !p.enabled)
+        lines.push('', head(g))
+        if (on.length) lines.push(`> **Enabled (${on.length}):**`, `> ${on.map(fmt).join(', ')}`)
+        if (off.length) lines.push(`> **Disabled (${off.length}):**`, `> ${off.map(fmt).join(', ')}`)
+    }
     return lines.join('\n')
 }
 
