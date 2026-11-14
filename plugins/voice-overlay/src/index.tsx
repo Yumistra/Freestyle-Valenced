@@ -376,7 +376,7 @@ function Card({ children }: { children: any }) {
 }
 
 /** 퍼센트를 직접 쓰는 칸. 범위를 벗어나면 빨간 안내, 맞으면 바로 저장 */
-function PercentInput({ label, description, value, min, max, onSave }: { label: string; description: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
+function PercentInput({ label, description, value, min, max, onSave }: { label: string; description?: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
     const { TextInput } = Design as any
     const [text, setText] = useState(String(Math.round(value * 100)))
     const n = Number(text)
