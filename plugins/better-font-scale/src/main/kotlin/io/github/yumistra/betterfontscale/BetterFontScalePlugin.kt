@@ -2,6 +2,11 @@
 
 package io.github.yumistra.betterfontscale
 
+import android.app.Activity
+import android.app.AndroidAppHelper
+import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -38,6 +43,32 @@ private val original = WeakHashMap<TextView, Float>()
 /** 우리가 바꾸는 중 (원래 크기로 기록하지 않게) */
 private var applying = false
 
+/** 디스코드 전체 글자 배율 (폰 글자 크기에 곱한다). 1 이면 그대로 */
+@Volatile private var allScale = 1f
+private const val PREFS = "yumistra.better-font-scale"
+
+/** 폰 설정의 글자 배율 */
+private fun systemFontScale() = Resources.getSystem().configuration.fontScale
+
+/** 이 화면(Activity)이 쓸 컨텍스트를 글자 배율만 바꿔서 */
+private fun scaled(base: Context): Context {
+    if (allScale == 1f) return base
+    val cfg = Configuration(base.resources.configuration)
+    cfg.fontScale = systemFontScale() * allScale
+    return base.createConfigurationContext(cfg)
+}
+
+/** 앱 전체 리소스의 글자 배율 (React Native 가 여기서 글자 배율을 읽는다) */
+@Suppress("DEPRECATION")
+private fun scaleResources(res: Resources?) {
+    if (res == null) return
+    val cfg = Configuration(res.configuration)
+    val want = systemFontScale() * allScale
+    if (cfg.fontScale == want) return
+    cfg.fontScale = want
+    res.updateConfiguration(cfg, res.displayMetrics)
+}
+
 @Volatile private var lastError = ""
 @Volatile private var hits = 0
 
@@ -67,18 +98,37 @@ private fun inMessage(v: View): Boolean {
     return false
 }
 
-/** 이 텍스트 칸이 어느 종류인지. 모르면 null */
-private fun categoryOf(tv: TextView): String? =
-    when (nameOf(tv)) {
-        "author_name", "username_text", "userName", "chat_list_adapter_item_text_name" -> "username"
-        "timestamp_view", "chat_list_adapter_item_text_timestamp" -> "timestamp"
-        "reply_text", "reply_author_name" -> "reply"
-        "chat_input_edit_text", "text_input" -> "chatbox"
-        "chat_list_adapter_item_text", "message_content" -> "messages"
-        // "content" 는 여러 곳에 쓰여서 메시지 안일 때만
-        "content" -> if (tv.parent != null && inMessage(tv)) "messages" else null
-        else -> null
+/** 위 칸들 중 이름이나 종류에 낱말이 든 것이 있는지 */
+private fun underAny(v: View, vararg words: String): Boolean {
+    var p = v.parent
+    var i = 0
+    while (p is View && i < 16) {
+        val n = nameOf(p).lowercase()
+        val c = p.javaClass.name.lowercase()
+        if (words.any { n.contains(it) || c.contains(it) }) return true
+        p = p.parent
+        i++
     }
+    return false
+}
+
+/** 이 텍스트 칸이 어느 종류인지. 모르면 null */
+private fun categoryOf(tv: TextView): String? {
+    when (nameOf(tv)) {
+        "author_name", "username_text", "userName", "chat_list_adapter_item_text_name" -> return "username"
+        "timestamp_view", "chat_list_adapter_item_text_timestamp" -> return "timestamp"
+        "reply_text", "reply_author_name" -> return "reply"
+        "chat_input_edit_text", "text_input" -> return "chatbox"
+        "message_tag_view", "reply_message_tag_view" -> return "tags"
+        "chat_list_adapter_item_text", "message_content" -> return "messages"
+    }
+    // 나머지는 어디 안에 있는지로 (붙기 전에는 모른다)
+    if (tv.parent == null || !inMessage(tv)) return null
+    if (underAny(tv, "embed")) return "embeds"
+    if (underAny(tv, "reaction")) return "reactions"
+    if (nameOf(tv) == "content") return "messages"
+    return "chatOther"
+}
 
 private fun spToPx(tv: TextView, sp: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, tv.resources.displayMetrics)
 
@@ -141,6 +191,33 @@ val betterFontScalePlugin = plugin {
 
     start {
         val hooks = mutableListOf<XC_MethodHook.Unhook>()
+        // 디스코드 전체 글자 배율: 저장해 둔 값으로 앱 리소스와 새로 만드는 화면에 적용 (바꾸면 다시 시작해야 전부 맞는다)
+        try {
+            val app = AndroidAppHelper.currentApplication()
+            allScale = app?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.getFloat("all", 1f) ?: 1f
+            scaleResources(app?.resources)
+        } catch (e: Throwable) {
+            lastError = "scale: $e"
+        }
+        try {
+            hooks += XposedHelpers.findAndHookMethod(
+                Activity::class.java,
+                "attachBaseContext",
+                Context::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val base = param.args[0] as? Context ?: return
+                        try {
+                            param.args[0] = scaled(base)
+                        } catch (e: Throwable) {
+                            lastError = "activity scale: $e"
+                        }
+                    }
+                },
+            )
+        } catch (e: Throwable) {
+            lastError = "attachBaseContext: $e"
+        }
         // 원본과 같은 곳: 글자 크기를 정할 때 우리 크기로 바꿔 넣는다
         try {
             hooks += XposedHelpers.findAndHookMethod(
@@ -188,6 +265,17 @@ val betterFontScalePlugin = plugin {
         registerNativeMethod("${manifest.id}.config") { args ->
             try {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
+                // 전체 배율(%)은 따로: 저장해서 다음 시작 때 처음부터 쓴다
+                val all = (o.optDouble("all", 100.0).toFloat() / 100f).let { if (it <= 0f) 1f else it.coerceIn(0.5f, 3f) }
+                o.remove("all")
+                if (all != allScale) {
+                    allScale = all
+                    try {
+                        AndroidAppHelper.currentApplication()?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.putFloat("all", all)?.apply()
+                    } catch (e: Throwable) {
+                        lastError = "save: $e"
+                    }
+                }
                 for (k in o.keys()) {
                     val v = o.optDouble(k, 0.0).toFloat()
                     if (v > 0f) sizes[k] = v.coerceIn(4f, 80f) else sizes.remove(k)
@@ -220,7 +308,7 @@ val betterFontScalePlugin = plugin {
             result
         }
         registerNativeMethod("${manifest.id}.status") {
-            mapOf("sizes" to sizes.toString(), "changed" to hits, "error" to lastError)
+            mapOf("sizes" to sizes.toString(), "changed" to hits, "all" to allScale, "systemFontScale" to systemFontScale(), "error" to lastError)
         }
     }
 

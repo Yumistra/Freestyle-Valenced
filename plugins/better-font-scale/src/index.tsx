@@ -21,6 +21,10 @@ const FIELDS: Array<[key: string, label: string]> = [
     ['username', 'Username'],
     ['timestamp', 'Timestamp'],
     ['reply', 'Reply'],
+    ['tags', 'Tags (bot, role, server)'],
+    ['embeds', 'Embeds'],
+    ['reactions', 'Reactions'],
+    ['chatOther', 'Other chat text'],
     ['aboutMe', 'About Me'],
     ['gameStatus', 'Game Status'],
     ['profileStatus', 'Profile Status'],
@@ -221,6 +225,29 @@ function SizeInput({ label, value, onSave }: { label: string; value: number; onS
     )
 }
 
+/** 디스코드 전체 글자 크기 (%) */
+function AllInput({ value, onSave }: { value: number; onSave: (v: number) => void }) {
+    const { TextInput } = Design as any
+    const [text, setText] = useState(String(value || 100))
+    const n = Number(text)
+    const bad = text.trim() === '' || !Number.isFinite(n) || n < 50 || n > 300
+    return (
+        <TextInput
+            label="All text (%)"
+            value={text}
+            keyboardType="numeric"
+            placeholder="100"
+            errorMessage={bad ? 'Enter a number from 50 to 300.' : undefined}
+            onChange={(v: string) => {
+                setText(v)
+                const x = Number(v)
+                if (v.trim() !== '' && Number.isFinite(x) && x >= 50 && x <= 300) onSave(x)
+            }}
+            size="md"
+        />
+    )
+}
+
 function SettingsPage() {
     storage?.use?.()
     const s = sizes()
@@ -249,8 +276,13 @@ function SettingsPage() {
     }
     return (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
+            <AllInput value={s.all ?? 100} onSave={v => save('all', v)} />
             <Text variant="text-sm/medium" color="text-muted">
-                0 = default. Profiles and the channel list update the next time they show.
+                Restart Discord after changing it.
+            </Text>
+            <Text variant="heading-md/bold">Each part</Text>
+            <Text variant="text-sm/medium" color="text-muted">
+                0 = default
             </Text>
             <Stack spacing={12}>
                 {FIELDS.map(([key, label]) => (
