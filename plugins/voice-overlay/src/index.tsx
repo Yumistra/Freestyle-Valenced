@@ -37,10 +37,12 @@ interface Settings {
     chatButton: 'tap' | 'long' | 'hidden'
     /** 디스코드가 직접 띄우는 오버레이를 막는다 */
     hideDiscordOverlay: boolean
+    /** 친구 별명이 있으면 그걸로 */
+    friendNicknames: boolean
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -68,6 +70,11 @@ function avatarOf(userId: string, guildId?: string | null): string {
 }
 function nameOf(userId: string, guildId?: string | null): string {
     try {
+        // PC 처럼 친구 별명이 먼저
+        if (settings().friendNicknames) {
+            const friend = S().RelationshipStore?.getNickname?.(userId)
+            if (friend) return friend
+        }
         const nick = guildId ? S().GuildMemberStore?.getNick?.(guildId, userId) : undefined
         const u = S().UserStore?.getUser?.(userId)
         return nick || u?.globalName || u?.global_name || u?.username || userId
@@ -138,10 +145,17 @@ function patchCallTile(cleanup: (...f: any[]) => void) {
 
 let timer: any
 let lastSent = ''
+let lastChannel: string | null | undefined
 function push() {
     clearTimeout(timer)
     timer = setTimeout(() => {
         try {
+            // 통화에 들어갈 때마다 설정을 다시 보낸다 (시작할 때 저장된 설정을 읽기 전에 기본값이 갔을 수 있다)
+            const ch = S().SelectedChannelStore?.getVoiceChannelId?.() ?? null
+            if (ch !== lastChannel) {
+                lastChannel = ch
+                if (ch) sendConfig()
+            }
             const json = JSON.stringify(snapshot())
             if (json === lastSent) return
             lastSent = json
@@ -351,7 +365,7 @@ function Card({ children }: { children: any }) {
                 borderRadius: 16,
                 borderWidth: 1,
                 borderColor: color(['BORDER_SUBTLE', 'BACKGROUND_MOD_SUBTLE'], '#ffffff14'),
-                backgroundColor: color(['CARD_PRIMARY_BG', 'BACKGROUND_BASE_LOWER', 'BACKGROUND_SECONDARY'], '#0f1012'),
+                backgroundColor: color(['CARD_PRIMARY_BG', 'BACKGROUND_BASE_LOWER'], '#0f1012'),
                 padding: 16,
                 gap: 18,
             }}
@@ -362,7 +376,7 @@ function Card({ children }: { children: any }) {
 }
 
 /** 퍼센트를 직접 쓰는 칸. 범위를 벗어나면 빨간 안내, 맞으면 바로 저장 */
-function PercentInput({ label, description, value, min, max, onSave }: { label: string; description: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
+function PercentInput({ label, description, value, min, max, onSave }: { label: string; description?: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
     const { TextInput } = Design as any
     const [text, setText] = useState(String(Math.round(value * 100)))
     const n = Number(text)
@@ -433,15 +447,11 @@ function SettingsPage() {
     }
     return (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
-            <Text variant="text-md/normal" color="text-muted">
-                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking and a red LIVE on whoever is streaming. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and long press the chat button to chat. All of this can be changed under Touch.
-            </Text>
 
             {heading('Permission')}
             <TableRowGroup>
                 <TableRow
                     label={allowed ? 'Display over other apps, allowed' : allowed === false ? 'Display over other apps, not allowed' : 'Checking'}
-                    subLabel={allowed ? 'The overlay shows over games and other apps.' : 'Tap to allow it. Without it, the overlay only shows inside Discord.'}
                     onPress={allowed ? undefined : () => native('requestOverlay').catch(() => toast('Could not open the settings'))}
                     arrow={!allowed}
                 />
@@ -449,12 +459,16 @@ function SettingsPage() {
 
             {heading('Overlay')}
             <TableRowGroup>
-                <TableSwitchRow label="Show the overlay" subLabel="Only while you are in a voice channel." value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
-                <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
-                <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+                <TableSwitchRow label="Show the overlay" value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
+                <TableSwitchRow label="Only people talking" value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
+                <TableSwitchRow label="Hide while Discord is open" value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+                <TableSwitchRow
+                    label="Use friend nicknames"
+                    value={s.friendNicknames}
+                    onValueChange={(v: boolean) => (save({ friendNicknames: v }), (lastSent = ''), push())}
+                />
                 <TableSwitchRow
                     label="Hide Discord's floating call"
-                    subLabel="Hides the small call window Discord shows in the corner while you are in a voice channel, so only this overlay shows. Open the call from the voice channel or the panel at the bottom instead."
                     value={s.hideDiscordOverlay}
                     onValueChange={(v: boolean) => save({ hideDiscordOverlay: v })}
                 />
@@ -462,33 +476,29 @@ function SettingsPage() {
 
             {heading('Touch')}
             <TableRowGroup>
-                <TableSwitchRow label="Lock position" subLabel="The overlay stays where it is and can't be dragged." value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
+                <TableSwitchRow label="Lock position" value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
                 <TableSwitchRow
                     label="Touches go through"
-                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. Only the chat button still takes touches (tap or long press, as set below), and Android keeps the rest at most 80% visible."
                     value={s.passThrough}
                     onValueChange={(v: boolean) => save({ passThrough: v })}
                 />
             </TableRowGroup>
             {choose('Chat button', s.chatButton, [
-                ['long', 'Long press to open', 'A quick tap does nothing, so it is hard to open by mistake.'],
+                ['long', 'Long press to open'],
                 ['tap', 'Tap to open'],
                 ['hidden', 'Hidden'],
             ], v => save({ chatButton: v }))}
             {choose('Long press the overlay', s.longPress, [
-                ['menu', 'Menu', 'Mute, deafen, Go Live and leave.'],
+                ['menu', 'Menu'],
                 ['chat', 'Chat'],
                 ['off', 'Nothing'],
             ], v => save({ longPress: v }))}
 
             {heading('Appearance')}
-            <Text variant="text-md/normal" color="text-muted">
-                Type a percent. Changes apply right away.
-            </Text>
             <Card>
-                <PercentInput label="Size" description="How big the overlay is, 50 to 200." value={s.scale} min={50} max={200} onSave={v => save({ scale: v })} />
-                <PercentInput label="Opacity" description="How see-through the whole overlay is, 20 to 100." value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
-                <PercentInput label="People not talking" description="How faint people are while they are quiet, 10 to 100. Whoever talks is always fully shown." value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
+                <PercentInput label="Size" value={s.scale} min={50} max={200} onSave={v => save({ scale: v })} />
+                <PercentInput label="Opacity" value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
+                <PercentInput label="People not talking" value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
             </Card>
 
             {heading('More')}
@@ -506,6 +516,9 @@ export default plugin({
         storage = jsonStorage
         patchCallTile(cleanup)
         sendConfig()
+        // 저장된 설정을 읽어 오는 데 시간이 걸릴 수 있어서 조금 뒤에 한 번 더
+        const again = [setTimeout(sendConfig, 1500), setTimeout(sendConfig, 5000)]
+        cleanup(() => again.forEach(clearTimeout))
         for (const name of ['MediaEngineStore', 'ApplicationStreamingStore']) {
             const st = S()[name]
             if (!st?.addChangeListener) continue
@@ -513,7 +526,7 @@ export default plugin({
             cleanup(() => st.removeChangeListener?.(pushSelf))
         }
         pushSelf()
-        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore']
+        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore', 'RelationshipStore']
         for (const name of stores) {
             const st = S()[name]
             if (!st?.addChangeListener) continue
