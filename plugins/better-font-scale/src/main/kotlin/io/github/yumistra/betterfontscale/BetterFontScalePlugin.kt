@@ -132,11 +132,22 @@ private fun categoryOf(tv: TextView): String? {
 
 private fun spToPx(tv: TextView, sp: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, tv.resources.displayMetrics)
 
+/**
+ * 전체 배율(All text)을 따로 곱해야 하는 종류.
+ * 메시지 본문은 디스코드가 크기를 직접 계산해 넣어서 안드로이드 글자 배율을 따르지 않는다.
+ */
+private val FOLLOW_ALL = setOf("messages", "embeds")
+
 /** 지금 설정대로 맞춘다 (붙을 때, 설정이 바뀔 때) */
 private fun fit(tv: TextView) {
     val cat = categoryOf(tv) ?: return
     val sp = sizes[cat] ?: 0f
-    val want = if (sp > 0f) spToPx(tv, sp) else synchronized(original) { original[tv] } ?: return
+    val base = synchronized(original) { original[tv] ?: tv.textSize.also { original[tv] = it } }
+    val want = when {
+        sp > 0f -> spToPx(tv, sp)
+        cat in FOLLOW_ALL -> base * allScale
+        else -> base
+    }
     if (tv.textSize == want) return
     applying = true
     try {
@@ -234,6 +245,9 @@ val betterFontScalePlugin = plugin {
                         if (sp > 0f) {
                             param.args[0] = spToPx(tv, sp)
                             hits++
+                        } else if (cat in FOLLOW_ALL && allScale != 1f) {
+                            param.args[0] = (param.args[0] as Float) * allScale
+                            hits++
                         }
                     }
                 },
@@ -249,7 +263,7 @@ val betterFontScalePlugin = plugin {
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val tv = param.thisObject as? TextView ?: return
-                        if (sizes.isEmpty()) return
+                        if (sizes.isEmpty() && allScale == 1f) return
                         try {
                             fit(tv)
                         } catch (e: Throwable) {
