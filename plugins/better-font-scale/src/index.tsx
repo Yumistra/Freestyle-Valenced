@@ -76,9 +76,28 @@ function resize(node: any, size: number, name: string | undefined, depth = 0): n
 /** 클래스 컴포넌트는 그냥 부르면 안 된다 */
 const isPlainFunction = (f: any) => typeof f === 'function' && !f.prototype?.isReactComponent && !/^class\b/.test(Function.prototype.toString.call(f))
 
+/**
+ * 값이 0 인 칸은 아예 건드리지 않는다 (감싸기만 해도 프로필 화면 배치가 틀어졌다).
+ * 처음, 그리고 값을 바꿀 때마다 불러서 0 이 아닌 칸만 그때 패치한다.
+ */
+const patchedKeys = new Set<string>()
+let pluginCleanup: ((...f: any[]) => void) | null = null
 function patchRn(cleanup: (...f: any[]) => void) {
+    pluginCleanup = cleanup
+    ensurePatched()
+}
+function ensurePatched() {
+    const cleanup = pluginCleanup
+    if (!cleanup) return
+    const s = sizes()
     for (const t of RN_TARGETS) {
         const short = t.path.split('/').pop()!
+        if (!s[t.key]) {
+            if (!patchedKeys.has(t.key)) rnStatus[short] = 'off (0)'
+            continue
+        }
+        if (patchedKeys.has(t.key)) continue
+        patchedKeys.add(t.key)
         rnStatus[short] = 'not loaded yet'
         let hits = 0
         cleanup(
@@ -107,7 +126,12 @@ function patchRn(cleanup: (...f: any[]) => void) {
             }) as any,
         )
     }
-    patchChannelNames(cleanup)
+    if (s.channel || s.voice || s.thread) {
+        if (!patchedKeys.has('channelNames')) {
+            patchedKeys.add('channelNames')
+            patchChannelNames(cleanup)
+        }
+    } else if (!patchedKeys.has('channelNames')) rnStatus['channel names'] = 'off (0)'
 }
 
 /**
@@ -255,6 +279,7 @@ function SettingsPage() {
     const save = (key: string, v: number) => {
         storage?.set?.({ ...sizes(), [key]: v }, true)
         sendConfig()
+        ensurePatched()
     }
     // 5 초 뒤에 복사: 그 사이에 채팅 화면이나 프로필로 가서 그 화면의 칸을 담는다
     const copy = () => {
@@ -299,9 +324,18 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         patchRn(cleanup)
+        cleanup(() => {
+            pluginCleanup = null
+            patchedKeys.clear()
+        })
         sendConfig()
         // 저장된 설정을 읽어 오는 데 시간이 걸릴 수 있어서 조금 뒤에 한 번 더
-        const again = [setTimeout(sendConfig, 1500), setTimeout(sendConfig, 5000)]
+        const again = [1500, 5000].map(ms =>
+            setTimeout(() => {
+                sendConfig()
+                ensurePatched()
+            }, ms),
+        )
         cleanup(() => again.forEach(clearTimeout))
     },
     SettingsComponent: SettingsPage,
