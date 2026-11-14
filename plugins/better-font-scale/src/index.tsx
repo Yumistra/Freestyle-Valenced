@@ -166,7 +166,12 @@ function SettingsPage() {
         storage?.set?.({ ...sizes(), [key]: v }, true)
         sendConfig()
     }
-    const copy = async () => {
+    // 5 초 뒤에 복사: 그 사이에 채팅 화면이나 프로필로 가서 그 화면의 칸을 담는다
+    const copy = () => {
+        toast('Go to the screen to check, copying in 5 seconds')
+        setTimeout(copyNow, 5000)
+    }
+    const copyNow = async () => {
         try {
             const list = await native('scan')
             const st = await native('status').catch(() => ({}))

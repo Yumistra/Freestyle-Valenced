@@ -5,7 +5,7 @@
 	"description": "Set your own font size for messages, names, profiles, channels and more.",
 	"author": "Yumistra",
 	"icon": "TextIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
