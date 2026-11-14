@@ -3,8 +3,8 @@ import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { Design } from '@valenced/discord/design'
 import { callNativeMethod } from '@valenced/modules/native'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { after } from '@valenced/patcher'
-import { useState } from 'react'
+import { after, instead } from '@valenced/patcher'
+import { cloneElement, createElement, useState } from 'react'
 import { ScrollView } from 'react-native'
 
 /**
@@ -31,21 +31,12 @@ const FIELDS: Array<[key: string, label: string]> = [
 ]
 
 // ── React Native 로 그리는 곳: 그 화면 요소가 그린 결과에서 글자 요소를 찾아 크기를 바꾼다 ──
-/** 경로, 종류, 바꿀 글 (없으면 그 요소 안의 글 전부) */
-const RN_TARGETS: Array<{ path: string; key: string | ((props: any) => string); name?: (props: any) => string | undefined }> = [
+/** 경로, 종류, 바꿀 글 (없으면 그 요소 안의 글 전부). default 함수 하나만 패치한다 */
+const RN_TARGETS: Array<{ path: string; key: string; name?: (props: any) => string | undefined }> = [
     { path: 'modules/profile_customization/native/BioText.tsx', key: 'aboutMe' },
     { path: 'modules/user_profile/native/UserProfileCustomStatusBubble.tsx', key: 'profileStatus' },
     { path: 'modules/activity_status/native/ActivityStatusText.tsx', key: 'gameStatus' },
     { path: 'modules/channel_list_v2/native/items/RedesignCategory.tsx', key: 'category', name: p => p?.category?.name ?? p?.channel?.name },
-    { path: 'modules/channel_list_v2/native/items/TextChannel.tsx', key: 'channel', name: p => p?.channel?.name },
-    { path: 'modules/channel_list_v2/native/items/VoiceChannel.tsx', key: 'voice', name: p => p?.channel?.name },
-    { path: 'modules/channel_list_v2/native/items/ThreadChannel.tsx', key: 'thread', name: p => p?.channel?.name ?? p?.thread?.name },
-    // 채널 줄이 공통으로 쓰는 것: 채널 종류로 나눈다 (2 음성, 13 무대, 10~12 스레드)
-    {
-        path: 'modules/guild_sidebar/native/BaseChannelItem.tsx',
-        key: p => ([2, 13].includes(p?.channel?.type) ? 'voice' : [10, 11, 12].includes(p?.channel?.type) ? 'thread' : 'channel'),
-        name: p => p?.channel?.name,
-    },
 ]
 
 const rnStatus: Record<string, string> = {}
@@ -78,6 +69,9 @@ function resize(node: any, size: number, name: string | undefined, depth = 0): n
     return resize(props.children, size, name, depth + 1)
 }
 
+/** 클래스 컴포넌트는 그냥 부르면 안 된다 */
+const isPlainFunction = (f: any) => typeof f === 'function' && !f.prototype?.isReactComponent && !/^class\b/.test(Function.prototype.toString.call(f))
+
 function patchRn(cleanup: (...f: any[]) => void) {
     for (const t of RN_TARGETS) {
         const short = t.path.split('/').pop()!
@@ -85,40 +79,109 @@ function patchRn(cleanup: (...f: any[]) => void) {
         let hits = 0
         cleanup(
             getModuleWithImportedPath(t.path, (mod: any) => {
-                // 그냥 함수일 수도, memo, forwardRef 로 싸여 있을 수도 있다
-                const spots: Array<[any, string]> = []
-                for (const k of Object.keys(mod ?? {})) {
-                    const v = mod[k]
-                    if (k !== 'default' && !/^[A-Z]/.test(k)) continue
-                    if (typeof v === 'function') spots.push([mod, k])
-                    else if (typeof v?.type === 'function') spots.push([v, 'type'])
-                    else if (typeof v?.render === 'function') spots.push([v, 'render'])
-                }
-                if (!spots.length) {
-                    rnStatus[short] = `nothing to patch (${Object.keys(mod ?? {}).join(', ')})`
+                const d = mod?.default
+                const spot: [any, string] | null = isPlainFunction(d) ? [mod, 'default'] : isPlainFunction(d?.type) ? [d, 'type'] : isPlainFunction(d?.render) ? [d, 'render'] : null
+                if (!spot) {
+                    rnStatus[short] = 'nothing to patch'
                     return
                 }
-                for (const [obj, key] of spots)
-                    cleanup(
-                        after(obj, key, (args: any[], out: any) => {
-                            try {
-                                const props = args?.[0]
-                                const k = typeof t.key === 'function' ? t.key(props) : t.key
-                                const size = sizes()[k]
-                                if (!size) return out
-                                const n = resize(out, size, t.name?.(props))
-                                if (n) rnStatus[short] = `patched, ${(hits += n)} changed`
-                                else if (!hits) rnStatus[short] = 'patched, no text found'
-                            } catch (e: any) {
-                                rnStatus[short] = `error: ${e?.message ?? e}`
-                            }
-                            return out
-                        }),
-                    )
+                cleanup(
+                    after(spot[0], spot[1], (args: any[], out: any) => {
+                        try {
+                            const size = sizes()[t.key]
+                            if (!size) return out
+                            const n = resize(out, size, t.name?.(args?.[0]))
+                            if (n) rnStatus[short] = `patched, ${(hits += n)} changed`
+                            else if (!hits) rnStatus[short] = 'patched, no text found'
+                        } catch (e: any) {
+                            rnStatus[short] = `error: ${e?.message ?? e}`
+                        }
+                        return out
+                    }),
+                )
                 rnStatus[short] = 'patched'
             }) as any,
         )
     }
+    patchChannelNames(cleanup)
+}
+
+/**
+ * 채널 이름: BaseChannelItem 은 이름을 직접 그리지 않고 name 요소(이름 전용 컴포넌트)로 받는다.
+ * 그 요소에 크기를 실어 보내고, 이름 컴포넌트가 그린 글의 크기를 바꾼다. 채널 종류로 채널, 음성, 스레드를 나눈다.
+ */
+const SIZE_PROP = '__bfsSize'
+const patchedNameTypes = new WeakSet<any>()
+function patchNameType(type: any, cleanup: (...f: any[]) => void) {
+    if (!type || patchedNameTypes.has(type)) return
+    const spot: [any, string] | null = isPlainFunction(type) ? null : isPlainFunction(type?.type) ? [type, 'type'] : isPlainFunction(type?.render) ? [type, 'render'] : null
+    patchedNameTypes.add(type)
+    if (!spot) return false
+    cleanup(
+        after(spot[0], spot[1], (args: any[], out: any) => {
+            const size = args?.[0]?.[SIZE_PROP]
+            if (size) {
+                try {
+                    if (resize(out, size, undefined)) rnStatus['channel names'] = 'patched, changing'
+                } catch {}
+            }
+            return out
+        }),
+    )
+    return true
+}
+function patchChannelNames(cleanup: (...f: any[]) => void) {
+    rnStatus['channel names'] = 'not loaded yet'
+    cleanup(
+        getModuleWithImportedPath('modules/guild_sidebar/native/BaseChannelItem.tsx', (mod: any) => {
+            if (!isPlainFunction(mod?.default)) {
+                rnStatus['channel names'] = 'nothing to patch'
+                return
+            }
+            rnStatus['channel names'] = 'patched'
+            cleanup(
+                instead(mod, 'default', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                    try {
+                        const p = args[0]
+                        const channel = p?.icon?.props?.channel ?? p?.channel
+                        const key = [2, 13].includes(channel?.type) ? 'voice' : [10, 11, 12].includes(channel?.type) ? 'thread' : 'channel'
+                        const size = sizes()[key]
+                        const name = p?.name
+                        if (size && name && typeof name === 'object' && name.props) {
+                            // 이름 컴포넌트가 함수면 감싸서 그린 결과를 고치고, memo, forwardRef 면 그 안을 패치한다
+                            if (isPlainFunction(name.type)) {
+                                const el = createElement(wrapName(name.type), { ...name.props, key: name.key, [SIZE_PROP]: size })
+                                return orig.apply(this, [{ ...p, name: el }, ...args.slice(1)])
+                            }
+                            patchNameType(name.type, cleanup)
+                            return orig.apply(this, [{ ...p, name: cloneElement(name, { [SIZE_PROP]: size }) }, ...args.slice(1)])
+                        }
+                    } catch {}
+                    return orig.apply(this, args)
+                }),
+            )
+        }) as any,
+    )
+}
+
+/** 함수 이름 컴포넌트를 감싼 것 (컴포넌트마다 하나, 매번 같은 것을 써야 다시 만들어지지 않는다) */
+const wrapped = new WeakMap<any, any>()
+function wrapName(Inner: any) {
+    let W = wrapped.get(Inner)
+    if (!W) {
+        W = (props: any) => {
+            const out = Inner(props)
+            const size = props?.[SIZE_PROP]
+            if (size) {
+                try {
+                    if (resize(out, size, undefined)) rnStatus['channel names'] = 'patched, changing'
+                } catch {}
+            }
+            return out
+        }
+        wrapped.set(Inner, W)
+    }
+    return W
 }
 
 type Sizes = Record<string, number>
