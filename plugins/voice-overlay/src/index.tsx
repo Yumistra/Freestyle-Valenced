@@ -365,7 +365,7 @@ function Card({ children }: { children: any }) {
                 borderRadius: 16,
                 borderWidth: 1,
                 borderColor: color(['BORDER_SUBTLE', 'BACKGROUND_MOD_SUBTLE'], '#ffffff14'),
-                backgroundColor: color(['CARD_PRIMARY_BG', 'BACKGROUND_BASE_LOWER', 'BACKGROUND_SECONDARY'], '#0f1012'),
+                backgroundColor: color(['CARD_PRIMARY_BG', 'BACKGROUND_BASE_LOWER'], '#0f1012'),
                 padding: 16,
                 gap: 18,
             }}
@@ -447,15 +447,11 @@ function SettingsPage() {
     }
     return (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 16 }}>
-            <Text variant="text-md/normal" color="text-muted">
-                When you are in a voice channel, the people in it show up over other apps, with a green ring on whoever is talking and a red LIVE on whoever is streaming. Drag the overlay to move it, long press it for mute, deafen, Go Live and leave, and long press the chat button to chat. All of this can be changed under Touch.
-            </Text>
 
             {heading('Permission')}
             <TableRowGroup>
                 <TableRow
                     label={allowed ? 'Display over other apps, allowed' : allowed === false ? 'Display over other apps, not allowed' : 'Checking'}
-                    subLabel={allowed ? 'The overlay shows over games and other apps.' : 'Tap to allow it. Without it, the overlay only shows inside Discord.'}
                     onPress={allowed ? undefined : () => native('requestOverlay').catch(() => toast('Could not open the settings'))}
                     arrow={!allowed}
                 />
@@ -463,18 +459,16 @@ function SettingsPage() {
 
             {heading('Overlay')}
             <TableRowGroup>
-                <TableSwitchRow label="Show the overlay" subLabel="Only while you are in a voice channel." value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
-                <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
-                <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+                <TableSwitchRow label="Show the overlay" value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
+                <TableSwitchRow label="Only people talking" value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
+                <TableSwitchRow label="Hide while Discord is open" value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
                 <TableSwitchRow
                     label="Use friend nicknames"
-                    subLabel="Show the nickname you gave a friend instead of their name, like on PC."
                     value={s.friendNicknames}
                     onValueChange={(v: boolean) => (save({ friendNicknames: v }), (lastSent = ''), push())}
                 />
                 <TableSwitchRow
                     label="Hide Discord's floating call"
-                    subLabel="Hides the small call window Discord shows in the corner while you are in a voice channel, so only this overlay shows. Open the call from the voice channel or the panel at the bottom instead."
                     value={s.hideDiscordOverlay}
                     onValueChange={(v: boolean) => save({ hideDiscordOverlay: v })}
                 />
@@ -482,33 +476,29 @@ function SettingsPage() {
 
             {heading('Touch')}
             <TableRowGroup>
-                <TableSwitchRow label="Lock position" subLabel="The overlay stays where it is and can't be dragged." value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
+                <TableSwitchRow label="Lock position" value={s.locked} onValueChange={(v: boolean) => save({ locked: v })} />
                 <TableSwitchRow
                     label="Touches go through"
-                    subLabel="Taps on the overlay reach the app under it, so it never gets in the way of games. Only the chat button still takes touches (tap or long press, as set below), and Android keeps the rest at most 80% visible."
                     value={s.passThrough}
                     onValueChange={(v: boolean) => save({ passThrough: v })}
                 />
             </TableRowGroup>
             {choose('Chat button', s.chatButton, [
-                ['long', 'Long press to open', 'A quick tap does nothing, so it is hard to open by mistake.'],
+                ['long', 'Long press to open'],
                 ['tap', 'Tap to open'],
                 ['hidden', 'Hidden'],
             ], v => save({ chatButton: v }))}
             {choose('Long press the overlay', s.longPress, [
-                ['menu', 'Menu', 'Mute, deafen, Go Live and leave.'],
+                ['menu', 'Menu'],
                 ['chat', 'Chat'],
                 ['off', 'Nothing'],
             ], v => save({ longPress: v }))}
 
             {heading('Appearance')}
-            <Text variant="text-md/normal" color="text-muted">
-                Type a percent. Changes apply right away.
-            </Text>
             <Card>
-                <PercentInput label="Size" description="How big the overlay is, 50 to 200." value={s.scale} min={50} max={200} onSave={v => save({ scale: v })} />
-                <PercentInput label="Opacity" description="How see-through the whole overlay is, 20 to 100." value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
-                <PercentInput label="People not talking" description="How faint people are while they are quiet, 10 to 100. Whoever talks is always fully shown." value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
+                <PercentInput label="Size" value={s.scale} min={50} max={200} onSave={v => save({ scale: v })} />
+                <PercentInput label="Opacity" value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
+                <PercentInput label="People not talking" value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
             </Card>
 
             {heading('More')}
