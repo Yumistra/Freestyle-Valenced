@@ -37,10 +37,12 @@ interface Settings {
     chatButton: 'tap' | 'long' | 'hidden'
     /** 디스코드가 직접 띄우는 오버레이를 막는다 */
     hideDiscordOverlay: boolean
+    /** 친구 별명이 있으면 그걸로 */
+    friendNicknames: boolean
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -68,6 +70,11 @@ function avatarOf(userId: string, guildId?: string | null): string {
 }
 function nameOf(userId: string, guildId?: string | null): string {
     try {
+        // PC 처럼 친구 별명이 먼저
+        if (settings().friendNicknames) {
+            const friend = S().RelationshipStore?.getNickname?.(userId)
+            if (friend) return friend
+        }
         const nick = guildId ? S().GuildMemberStore?.getNick?.(guildId, userId) : undefined
         const u = S().UserStore?.getUser?.(userId)
         return nick || u?.globalName || u?.global_name || u?.username || userId
@@ -138,10 +145,17 @@ function patchCallTile(cleanup: (...f: any[]) => void) {
 
 let timer: any
 let lastSent = ''
+let lastChannel: string | null | undefined
 function push() {
     clearTimeout(timer)
     timer = setTimeout(() => {
         try {
+            // 통화에 들어갈 때마다 설정을 다시 보낸다 (시작할 때 저장된 설정을 읽기 전에 기본값이 갔을 수 있다)
+            const ch = S().SelectedChannelStore?.getVoiceChannelId?.() ?? null
+            if (ch !== lastChannel) {
+                lastChannel = ch
+                if (ch) sendConfig()
+            }
             const json = JSON.stringify(snapshot())
             if (json === lastSent) return
             lastSent = json
@@ -453,6 +467,12 @@ function SettingsPage() {
                 <TableSwitchRow label="Only people talking" subLabel="The chat button stays, unless it is hidden." value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" subLabel="Show it only over other apps." value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
                 <TableSwitchRow
+                    label="Use friend nicknames"
+                    subLabel="Show the nickname you gave a friend instead of their name, like on PC."
+                    value={s.friendNicknames}
+                    onValueChange={(v: boolean) => (save({ friendNicknames: v }), (lastSent = ''), push())}
+                />
+                <TableSwitchRow
                     label="Hide Discord's floating call"
                     subLabel="Hides the small call window Discord shows in the corner while you are in a voice channel, so only this overlay shows. Open the call from the voice channel or the panel at the bottom instead."
                     value={s.hideDiscordOverlay}
@@ -506,6 +526,9 @@ export default plugin({
         storage = jsonStorage
         patchCallTile(cleanup)
         sendConfig()
+        // 저장된 설정을 읽어 오는 데 시간이 걸릴 수 있어서 조금 뒤에 한 번 더
+        const again = [setTimeout(sendConfig, 1500), setTimeout(sendConfig, 5000)]
+        cleanup(() => again.forEach(clearTimeout))
         for (const name of ['MediaEngineStore', 'ApplicationStreamingStore']) {
             const st = S()[name]
             if (!st?.addChangeListener) continue
@@ -513,7 +536,7 @@ export default plugin({
             cleanup(() => st.removeChangeListener?.(pushSelf))
         }
         pushSelf()
-        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore']
+        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore', 'RelationshipStore']
         for (const name of stores) {
             const st = S()[name]
             if (!st?.addChangeListener) continue
