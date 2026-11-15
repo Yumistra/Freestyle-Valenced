@@ -32,7 +32,9 @@ interface Settings {
     /** 터치가 오버레이를 지나 아래 앱(게임)으로 간다 */
     passThrough: boolean
     /** 오버레이를 길게 누르면 */
-    longPress: 'menu' | 'chat' | 'off'
+    longPress: 'menu' | 'chat' | 'discord' | 'off'
+    /** 디스코드가 눌러서 말하기 모드일 때 말하기 버튼 */
+    pttButton: boolean
     /** 채팅 버튼: 톡, 길게 누르기, 숨기기 */
     chatButton: 'tap' | 'long' | 'hidden'
     /** 디스코드가 직접 띄우는 오버레이를 막는다 */
@@ -42,7 +44,7 @@ interface Settings {
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true, pttButton: true }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -51,9 +53,28 @@ function save(patch: Partial<Settings>) {
     storage?.set?.({ ...settings(), ...patch }, true)
     sendConfig()
 }
+/** 디스코드 음성 입력이 눌러서 말하기 모드인지 */
+const isPttMode = () => {
+    try {
+        return S().MediaEngineStore?.getMode?.() === 'PUSH_TO_TALK'
+    } catch {
+        return false
+    }
+}
+
 function sendConfig() {
     const s = settings()
-    native('config', [JSON.stringify(s)]).catch(() => {})
+    native('config', [JSON.stringify({ ...s, ptt: s.pttButton && isPttMode() })]).catch(() => {})
+}
+
+/** 오버레이의 말하기 버튼: 누르는 동안 디스코드의 말하기 버튼을 누른 것과 같게 */
+function pushToTalk(on: boolean) {
+    try {
+        const engine = S().MediaEngineStore?.getMediaEngine?.()
+        find('setPushToTalkState')?.setPushToTalkState?.(engine, on)
+    } catch (e: any) {
+        toast(`Push to talk failed: ${e?.message ?? e}`)
+    }
 }
 
 // ── 음성 채널 사람들 ─────────────────────────────────────────────
@@ -146,14 +167,17 @@ function patchCallTile(cleanup: (...f: any[]) => void) {
 let timer: any
 let lastSent = ''
 let lastChannel: string | null | undefined
+let lastPtt: boolean | undefined
 function push() {
     clearTimeout(timer)
     timer = setTimeout(() => {
         try {
             // 통화에 들어갈 때마다 설정을 다시 보낸다 (시작할 때 저장된 설정을 읽기 전에 기본값이 갔을 수 있다)
             const ch = S().SelectedChannelStore?.getVoiceChannelId?.() ?? null
-            if (ch !== lastChannel) {
+            const ptt = isPttMode()
+            if (ch !== lastChannel || ptt !== lastPtt) {
                 lastChannel = ch
+                lastPtt = ptt
                 if (ch) sendConfig()
             }
             const json = JSON.stringify(snapshot())
@@ -328,7 +352,8 @@ async function takeEvents() {
         return
     }
     for (const e of list) {
-        if (e?.type === 'leave' || (e?.type === 'action' && e.name === 'leave')) leave()
+        if (e?.type === 'ptt') pushToTalk(!!e.on)
+        else if (e?.type === 'leave' || (e?.type === 'action' && e.name === 'leave')) leave()
         else if (e?.type === 'action' && (e.name === 'mute' || e.name === 'deafen')) toggle(e.name)
         else if (e?.type === 'action' && e.name === 'stream') stream()
         else if (e?.type === 'chatOpen') openChat()
@@ -462,6 +487,7 @@ function SettingsPage() {
                 <TableSwitchRow label="Show the overlay" value={s.enabled} onValueChange={(v: boolean) => save({ enabled: v })} />
                 <TableSwitchRow label="Only people talking" value={s.onlySpeaking} onValueChange={(v: boolean) => save({ onlySpeaking: v })} />
                 <TableSwitchRow label="Hide while Discord is open" value={s.hideInDiscord} onValueChange={(v: boolean) => save({ hideInDiscord: v })} />
+                <TableSwitchRow label="Push to talk button" value={s.pttButton} onValueChange={(v: boolean) => save({ pttButton: v })} />
                 <TableSwitchRow
                     label="Use friend nicknames"
                     value={s.friendNicknames}
@@ -491,6 +517,7 @@ function SettingsPage() {
             {choose('Long press the overlay', s.longPress, [
                 ['menu', 'Menu'],
                 ['chat', 'Chat'],
+                ['discord', 'Open Discord'],
                 ['off', 'Nothing'],
             ], v => save({ longPress: v }))}
 
@@ -526,7 +553,7 @@ export default plugin({
             cleanup(() => st.removeChangeListener?.(pushSelf))
         }
         pushSelf()
-        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore', 'RelationshipStore']
+        const stores = ['SpeakingStore', 'VoiceStateStore', 'SelectedChannelStore', 'UserStore', 'GuildMemberStore', 'ApplicationStreamingStore', 'RelationshipStore', 'MediaEngineStore']
         for (const name of stores) {
             const st = S()[name]
             if (!st?.addChangeListener) continue
@@ -541,10 +568,17 @@ export default plugin({
             cleanup(() => ms.removeChangeListener?.(pushChat))
         }
         // 오버레이에서 온 일 (음성 채널에 있을 때만 자주 본다)
-        const ev = setInterval(() => {
-            if (chatOn || S().SelectedChannelStore?.getVoiceChannelId?.()) takeEvents()
-        }, 250)
-        cleanup(() => clearInterval(ev))
+        // 말하기 버튼이 보이면 누름이 바로 전해지게 훨씬 자주 (0.04 초), 아니면 0.25 초마다
+        let ev: any
+        let fast = false
+        const loop = () => {
+            const inCall = !!S().SelectedChannelStore?.getVoiceChannelId?.()
+            if (chatOn || inCall) takeEvents()
+            fast = inCall && settings().pttButton && isPttMode()
+            ev = setTimeout(loop, fast ? 40 : 250)
+        }
+        ev = setTimeout(loop, 250)
+        cleanup(() => clearTimeout(ev))
         // 음성 채널을 나가면 채팅 창도 닫는다
         const sel = S().SelectedChannelStore
         const onSel = () => {

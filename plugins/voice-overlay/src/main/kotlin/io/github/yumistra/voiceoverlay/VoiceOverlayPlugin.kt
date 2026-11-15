@@ -157,6 +157,7 @@ private val ICONS = mapOf(
     "leave" to listOf("phonehangupicon", "phonecallendicon", "callendicon"),
     "close" to listOf("xsmallicon", "xlargeicon", "closesmallicon"),
     "send" to listOf("sendmessageicon", "sendicon", "arrowupicon"),
+    "discord" to listOf("cliydeicon", "discordicon", "clydeicon", "homeicon"),
 )
 private val ICON_WORDS = ICONS
 
@@ -448,6 +449,116 @@ private fun passTap(x: Float, y: Float) {
     }.start()
 }
 
+// ── 디스코드 열기, 눌러서 말하기 ───────────────────────────────────
+/** 디스코드 화면을 앞으로 (원래 디스코드 오버레이의 "디스코드 열기") */
+private fun openDiscord() {
+    val c = ctx() ?: return
+    try {
+        val i = c.packageManager.getLaunchIntentForPackage(c.packageName) ?: return
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        c.startActivity(i)
+    } catch (e: Throwable) {
+        lastError = "open discord: $e"
+    }
+}
+
+/** 눌러서 말하기 버튼을 보일지 (디스코드가 눌러서 말하기 모드이고 설정이 켜져 있을 때 JS 가 알려준다) */
+@Volatile private var pttOn = false
+private var pttWin: android.widget.FrameLayout? = null
+private var pttWm: WindowManager? = null
+private var pttDown = false
+private var builtPttScale = 0f
+private var builtPttSlot = false
+
+/** 말하기 버튼 자리: 채팅 버튼 오른쪽, 채팅 버튼을 숨겼으면 그 자리 */
+private fun pttX(c: Context, x: Int) = if (chatMode == "hidden") x else x + dp(c, 46f * scale)
+
+private fun detachPtt() {
+    val w = pttWin ?: return
+    try {
+        pttWm?.removeView(w)
+    } catch (e: Throwable) {
+    }
+    pttWm = null
+    if (pttDown) {
+        pttDown = false
+        emitEvent("ptt", mapOf("on" to false))
+    }
+}
+
+/** 오버레이를 끌면 따라온다 (채팅 버튼 오른쪽) */
+private fun movePtt(x: Int, y: Int) {
+    val w = pttWin ?: return
+    val wm = pttWm ?: return
+    val lp = w.layoutParams as? WindowManager.LayoutParams ?: return
+    val c = w.context
+    lp.x = pttX(c, x)
+    lp.y = y
+    try {
+        wm.updateViewLayout(w, lp)
+    } catch (e: Throwable) {
+    }
+}
+
+/** 눌러서 말하기 버튼: 누르고 있는 동안만 말이 나간다. 터치 통과일 때도 따로 창이라 눌린다 */
+@SuppressLint("ClickableViewAccessibility")
+private fun attachPtt(c: Context, wm: WindowManager, system: Boolean) {
+    val size = dp(c, 40f * scale)
+    if (pttWin == null || builtPttScale != scale) {
+        detachPtt()
+        val holder = android.widget.FrameLayout(c)
+        val b = LinearLayout(c)
+        b.gravity = Gravity.CENTER
+        val idle = Color.argb(235, 30, 31, 34)
+        val green = Color.rgb(35, 165, 90)
+        b.background = pill(c, idle, 99f)
+        b.elevation = dp(c, 4f).toFloat()
+        b.addView(iconView(c, "mic", 20f * scale, Color.WHITE, "PTT"))
+        b.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    pttDown = true
+                    (v.background as? GradientDrawable)?.setColor(green)
+                    v.animate().scaleX(1.12f).scaleY(1.12f).setDuration(90).start()
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    emitEvent("ptt", mapOf("on" to true))
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (pttDown) {
+                        pttDown = false
+                        emitEvent("ptt", mapOf("on" to false))
+                    }
+                    (v.background as? GradientDrawable)?.setColor(idle)
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                }
+            }
+            true
+        }
+        holder.addView(b, android.widget.FrameLayout.LayoutParams(size, size))
+        pttWin = holder
+        builtPttScale = scale
+    }
+    val holder = pttWin ?: return
+    if (pttWm != null) return
+    val lp = WindowManager.LayoutParams(
+        size,
+        size,
+        overlayType(system),
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT,
+    )
+    lp.gravity = Gravity.TOP or Gravity.START
+    lp.x = pttX(c, posX)
+    lp.y = posY
+    try {
+        holder.alpha = opacity
+        addOwn(wm, holder, lp)
+        pttWm = wm
+    } catch (e: Throwable) {
+        lastError = "ptt attach: $e"
+    }
+}
+
 private fun detachButton() {
     val b = btnWin ?: return
     try {
@@ -482,6 +593,10 @@ private fun ensureRoot(c: Context): LinearLayout {
                     l.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     toggleChat()
                 }
+                "discord" -> {
+                    l.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    openDiscord()
+                }
             }
         }
     }
@@ -510,6 +625,7 @@ private fun ensureRoot(c: Context): LinearLayout {
                         attachedTo?.updateViewLayout(v, lp)
                     } catch (x: Throwable) {
                     }
+                    movePtt(lp.x, lp.y)
                 }
                 true
             }
@@ -530,6 +646,7 @@ private fun ensureRoot(c: Context): LinearLayout {
 
 private fun detach() {
     detachButton()
+    detachPtt()
     val r = root ?: return
     try {
         attachedTo?.removeView(r)
@@ -624,7 +741,9 @@ private fun render() {
         return
     }
     val r = ensureRoot(c)
-    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton) {
+    // 채팅 버튼을 숨겼어도 말하기 버튼이 있으면 그 자리를 비워 둔다 (사람 줄과 겹치지 않게)
+    val pttSlot = chatMode == "hidden" && pttOn
+    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton || builtPttSlot != pttSlot) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
@@ -635,6 +754,7 @@ private fun render() {
         builtScale = scale
         builtChatMode = chatMode
         builtSplit = splitButton
+        builtPttSlot = pttSlot
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
@@ -684,6 +804,11 @@ private fun render() {
             r.addView(View(c), 0, lp)
         } else r.addView(b, 0, lp)
         chatBtn = b
+    }
+    if (pttSlot && r.childCount == 0) {
+        val lp = LinearLayout.LayoutParams(size, size)
+        lp.bottomMargin = gap
+        r.addView(View(c), 0, lp)
     }
     // 빠진 사람은 흐려지며 사라진다
     val ids = shown.map { it.id }.toSet()
@@ -766,6 +891,7 @@ private fun render() {
             lastError = "button attach: $e"
         }
     }
+    if (pttOn && attachedTo != null) attachPtt(c, wm, system) else detachPtt()
 }
 
 // ── 길게 누르기 메뉴 ─────────────────────────────────────────────
@@ -818,7 +944,7 @@ private fun showMenu() {
                 MotionEvent.ACTION_CANCEL -> (v.background as? GradientDrawable)?.setColor(Color.TRANSPARENT)
                 MotionEvent.ACTION_UP -> {
                     (v.background as? GradientDrawable)?.setColor(Color.TRANSPARENT)
-                    emitEvent("action", mapOf("name" to action))
+                    if (action == "open") openDiscord() else emitEvent("action", mapOf("name" to action))
                     hideMenu()
                 }
             }
@@ -829,6 +955,7 @@ private fun showMenu() {
     item(if (selfMute) "mic" else "micOff", if (selfMute) "Unmute" else "Mute", white, "M", "mute")
     item(if (selfDeaf) "headset" else "headsetOff", if (selfDeaf) "Undeafen" else "Deafen", white, "D", "deafen")
     item("stream", if (streaming) "Stop streaming" else "Go Live", white, "L", "stream")
+    item("discord", "Open Discord", white, "O", "open")
     item("leave", "Leave voice", red, "X", "leave")
     // 메뉴 바깥을 누르면 닫는다
     val lp = WindowManager.LayoutParams(
@@ -1170,6 +1297,7 @@ val voiceOverlayPlugin = plugin {
                 longAction = o.optString("longPress", longAction)
                 chatMode = o.optString("chatButton", chatMode)
                 hideDiscordOverlay = o.optBoolean("hideDiscordOverlay", hideDiscordOverlay)
+                pttOn = o.optBoolean("ptt", pttOn)
                 if (o.has("x")) posX = o.optInt("x", posX)
                 if (o.has("y")) posY = o.optInt("y", posY)
                 main.post {
