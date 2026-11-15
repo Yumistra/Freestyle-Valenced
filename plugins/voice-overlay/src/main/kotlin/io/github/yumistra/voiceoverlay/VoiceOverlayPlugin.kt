@@ -468,6 +468,10 @@ private var pttWin: android.widget.FrameLayout? = null
 private var pttWm: WindowManager? = null
 private var pttDown = false
 private var builtPttScale = 0f
+private var builtPttSlot = false
+
+/** 말하기 버튼 자리: 채팅 버튼 오른쪽, 채팅 버튼을 숨겼으면 그 자리 */
+private fun pttX(c: Context, x: Int) = if (chatMode == "hidden") x else x + dp(c, 46f * scale)
 
 private fun detachPtt() {
     val w = pttWin ?: return
@@ -488,7 +492,7 @@ private fun movePtt(x: Int, y: Int) {
     val wm = pttWm ?: return
     val lp = w.layoutParams as? WindowManager.LayoutParams ?: return
     val c = w.context
-    lp.x = x + dp(c, 46f * scale)
+    lp.x = pttX(c, x)
     lp.y = y
     try {
         wm.updateViewLayout(w, lp)
@@ -544,7 +548,7 @@ private fun attachPtt(c: Context, wm: WindowManager, system: Boolean) {
         PixelFormat.TRANSLUCENT,
     )
     lp.gravity = Gravity.TOP or Gravity.START
-    lp.x = posX + dp(c, 46f * scale)
+    lp.x = pttX(c, posX)
     lp.y = posY
     try {
         holder.alpha = opacity
@@ -737,7 +741,9 @@ private fun render() {
         return
     }
     val r = ensureRoot(c)
-    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton) {
+    // 채팅 버튼을 숨겼어도 말하기 버튼이 있으면 그 자리를 비워 둔다 (사람 줄과 겹치지 않게)
+    val pttSlot = chatMode == "hidden" && pttOn
+    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton || builtPttSlot != pttSlot) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
@@ -748,6 +754,7 @@ private fun render() {
         builtScale = scale
         builtChatMode = chatMode
         builtSplit = splitButton
+        builtPttSlot = pttSlot
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
@@ -797,6 +804,11 @@ private fun render() {
             r.addView(View(c), 0, lp)
         } else r.addView(b, 0, lp)
         chatBtn = b
+    }
+    if (pttSlot && r.childCount == 0) {
+        val lp = LinearLayout.LayoutParams(size, size)
+        lp.bottomMargin = gap
+        r.addView(View(c), 0, lp)
     }
     // 빠진 사람은 흐려지며 사라진다
     val ids = shown.map { it.id }.toSet()

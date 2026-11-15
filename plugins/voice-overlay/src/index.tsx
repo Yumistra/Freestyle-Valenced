@@ -568,10 +568,17 @@ export default plugin({
             cleanup(() => ms.removeChangeListener?.(pushChat))
         }
         // 오버레이에서 온 일 (음성 채널에 있을 때만 자주 본다)
-        const ev = setInterval(() => {
-            if (chatOn || S().SelectedChannelStore?.getVoiceChannelId?.()) takeEvents()
-        }, 250)
-        cleanup(() => clearInterval(ev))
+        // 말하기 버튼이 보이면 누름이 바로 전해지게 훨씬 자주 (0.04 초), 아니면 0.25 초마다
+        let ev: any
+        let fast = false
+        const loop = () => {
+            const inCall = !!S().SelectedChannelStore?.getVoiceChannelId?.()
+            if (chatOn || inCall) takeEvents()
+            fast = inCall && settings().pttButton && isPttMode()
+            ev = setTimeout(loop, fast ? 40 : 250)
+        }
+        ev = setTimeout(loop, 250)
+        cleanup(() => clearTimeout(ev))
         // 음성 채널을 나가면 채팅 창도 닫는다
         const sel = S().SelectedChannelStore
         const onSel = () => {
