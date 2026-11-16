@@ -154,8 +154,13 @@ function patchCallTile(cleanup: (...f: any[]) => void) {
                 cleanup(
                     instead(obj, key, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                         const out = orig.apply(this, args)
-                        // 훅 순서를 지키려고 원래 것은 그대로 부르고, 결과만 버린다
-                        return settings().hideDiscordOverlay ? null : out
+                        // 아예 안 그리면 통화가 끝날 때 디스코드가 이 타일을 찾다가 튕길 수 있다: 그대로 그리되 보이지 않고 눌리지 않게
+                        if (!settings().hideDiscordOverlay || out == null) return out
+                        return (
+                            <View style={{ opacity: 0 }} pointerEvents="none">
+                                {out}
+                            </View>
+                        )
                     }),
                 )
             }

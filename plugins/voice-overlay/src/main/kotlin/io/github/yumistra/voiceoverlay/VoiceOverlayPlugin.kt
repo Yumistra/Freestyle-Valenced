@@ -91,6 +91,9 @@ private val loading = ConcurrentHashMap.newKeySet<String>()
 private var builtChatMode = ""
 /** 디스코드가 직접 띄우는 오버레이 창을 막는다 */
 @Volatile private var hideDiscordOverlay = false
+/** 붙이지 않고 막은 디스코드 창. 나중에 디스코드가 떼거나 옮기려 하면 무시한다 (안 붙은 창을 떼면 앱이 튕긴다) */
+private val blocked = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+
 /** 우리 창을 붙이는 중 (막지 않게) */
 private var addingOwn = false
 /** 본 다른 오버레이 창 (로그용) */
@@ -306,7 +309,7 @@ private fun loadAvatar(url: String, into: AvatarView) {
             lastError = "avatar: $e"
         } finally {
             loading.remove(url)
-            main.post {
+            ui {
                 val b = bitmaps[url]
                 waiting.remove(url)?.forEach {
                     it.bmp = b
@@ -559,6 +562,17 @@ private fun attachPtt(c: Context, wm: WindowManager, system: Boolean) {
     }
 }
 
+/** 메인 스레드에서, 오류가 나도 앱이 튕기지 않게 */
+private fun ui(block: () -> Unit) {
+    main.post {
+        try {
+            block()
+        } catch (e: Throwable) {
+            lastError = "ui: $e"
+        }
+    }
+}
+
 private fun detachButton() {
     val b = btnWin ?: return
     try {
@@ -725,6 +739,15 @@ private fun setStatus(c: Context, r: Row, p: Person) {
 
 /** 지금 상태대로 다시 그린다 (메인 스레드). 줄은 다시 만들지 않고 고쳐서 바뀐 것만 부드럽게 */
 private fun render() {
+    try {
+        renderUnsafe()
+    } catch (e: Throwable) {
+        // 통화가 끝나는 중처럼 창이 사라지는 사이에 오류가 나도 디스코드가 튕기지 않게
+        lastError = "render: $e"
+    }
+}
+
+private fun renderUnsafe() {
     val c = ctx() ?: return
     val inDiscord = resumed != null
     val shown = people.filter { !onlySpeaking || it.speaking }
@@ -1006,6 +1029,15 @@ private fun toggleChat() {
 }
 
 private fun closeChat() {
+    try {
+        closeChatUnsafe()
+    } catch (e: Throwable) {
+        // 통화가 끝나는 중처럼 창이 사라지는 사이에 오류가 나도 디스코드가 튕기지 않게
+        lastError = "closeChat: $e"
+    }
+}
+
+private fun closeChatUnsafe() {
     if (!chatOpen) return
     chatOpen = false
     val box = chatRoot
@@ -1107,6 +1139,15 @@ private fun buildChat(c: Context): LinearLayout {
 }
 
 private fun openChat() {
+    try {
+        openChatUnsafe()
+    } catch (e: Throwable) {
+        // 통화가 끝나는 중처럼 창이 사라지는 사이에 오류가 나도 디스코드가 튕기지 않게
+        lastError = "openChat: $e"
+    }
+}
+
+private fun openChatUnsafe() {
     val c = ctx() ?: return
     val (wm, system) = windowManager(c) ?: return
     hideMenu()
@@ -1192,6 +1233,15 @@ private fun messageView(c: Context, m: ChatLine): View {
 }
 
 private fun renderChat() {
+    try {
+        renderChatUnsafe()
+    } catch (e: Throwable) {
+        // 통화가 끝나는 중처럼 창이 사라지는 사이에 오류가 나도 디스코드가 튕기지 않게
+        lastError = "renderChat: $e"
+    }
+}
+
+private fun renderChatUnsafe() {
     val c = ctx() ?: return
     val list = chatList ?: return
     chatTitleView?.text = chatTitle
@@ -1223,14 +1273,14 @@ val voiceOverlayPlugin = plugin {
             hooks += XposedHelpers.findAndHookMethod(Activity::class.java, "onResume", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     resumed = param.thisObject as Activity
-                    main.post { render() }
+                    ui { render() }
                 }
             })
             hooks += XposedHelpers.findAndHookMethod(Activity::class.java, "onPause", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (resumed === param.thisObject) resumed = null
-                    if (!attachedSystem) main.post { detach() }
-                    main.post { render() }
+                    if (!attachedSystem) ui { detach() }
+                    ui { render() }
                 }
             })
         } catch (e: Throwable) {
@@ -1253,12 +1303,30 @@ val voiceOverlayPlugin = plugin {
                         val what = "${v?.javaClass?.name} type=${lp.type}${if (hideDiscordOverlay) " (blocked)" else ""}"
                         foreignWindows.add(what)
                         while (foreignWindows.size > 8) foreignWindows.poll()
-                        if (hideDiscordOverlay) param.result = null
+                        if (hideDiscordOverlay && v != null) {
+                            synchronized(blocked) { blocked.add(v) }
+                            param.result = null
+                        }
                     }
                 },
             )
         } catch (e: Throwable) {
             lastError = "window hook: $e"
+        }
+        // 막은 창을 디스코드가 떼거나(removeView) 옮기려(updateViewLayout) 하면 아무것도 하지 않는다
+        try {
+            val skip = object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val v = param.args.getOrNull(0) as? View ?: return
+                    val was = synchronized(blocked) { if (param.method.name == "updateViewLayout") v in blocked else blocked.remove(v) }
+                    if (was) param.result = null
+                }
+            }
+            hooks += XposedHelpers.findAndHookMethod("android.view.WindowManagerImpl", null, "removeView", View::class.java, skip)
+            hooks += XposedHelpers.findAndHookMethod("android.view.WindowManagerImpl", null, "removeViewImmediate", View::class.java, skip)
+            hooks += XposedHelpers.findAndHookMethod("android.view.WindowManagerImpl", null, "updateViewLayout", View::class.java, android.view.ViewGroup.LayoutParams::class.java, skip)
+        } catch (e: Throwable) {
+            lastError = "window hook 2: $e"
         }
         unhooks = hooks
 
@@ -1269,7 +1337,7 @@ val voiceOverlayPlugin = plugin {
                     val o = arr.getJSONObject(it)
                     Person(o.optString("id"), o.optString("name"), o.optString("avatar").takeIf { s -> s.isNotBlank() }, o.optBoolean("speaking"), o.optBoolean("muted"), o.optBoolean("deafened"), o.optBoolean("live"))
                 }
-                main.post { render() }
+                ui { render() }
                 true
             } catch (e: Throwable) {
                 lastError = "update: $e"
@@ -1300,7 +1368,7 @@ val voiceOverlayPlugin = plugin {
                 pttOn = o.optBoolean("ptt", pttOn)
                 if (o.has("x")) posX = o.optInt("x", posX)
                 if (o.has("y")) posY = o.optInt("y", posY)
-                main.post {
+                ui {
                     detach()
                     render()
                 }
@@ -1330,7 +1398,7 @@ val voiceOverlayPlugin = plugin {
                     }
                     ChatLine(m.optString("author"), color, m.optString("avatar").takeIf { s -> s.isNotBlank() }, m.optString("time"), m.optString("content"), m.optBoolean("head", true))
                 }
-                main.post { renderChat() }
+                ui { renderChat() }
                 true
             } catch (e: Throwable) {
                 lastError = "chat: $e"
@@ -1338,7 +1406,7 @@ val voiceOverlayPlugin = plugin {
             }
         }
         registerNativeMethod("${manifest.id}.closeChat") {
-            main.post { closeChat() }
+            ui { closeChat() }
             true
         }
         registerNativeMethod("${manifest.id}.position") { listOf(posX, posY) }
@@ -1387,7 +1455,7 @@ val voiceOverlayPlugin = plugin {
         }
         unhooks = emptyList()
         overlayOn = false
-        main.post {
+        ui {
             closeChat()
             hideMenu()
             detach()
