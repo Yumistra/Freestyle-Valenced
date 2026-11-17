@@ -1,7 +1,6 @@
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Stores } from '@valenced/discord/flux'
-import { lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
+import { find } from './find'
 import { cloneElement } from 'react'
 import { Image, Text, View } from 'react-native'
 import { EMOJI_COLORS } from './colors'
@@ -30,11 +29,6 @@ const icon = (name: string): any => {
  */
 
 const S = () => Stores as any
-const find = (...props: string[]): any => {
-    try {
-        return (lookupModule(withProps(...props) as any) as any)?.[0]
-    } catch {}
-}
 
 export const ChannelTypes = { TEXT: 0, VOICE: 2, ANNOUNCEMENT: 5, STAGE: 13, FORUM: 15, MEDIA: 16 }
 const ICON_TYPES = new Set([0, 2, 5, 13, 15, 16])
