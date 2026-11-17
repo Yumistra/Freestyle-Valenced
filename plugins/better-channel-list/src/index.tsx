@@ -3,14 +3,13 @@ import { Dispatcher } from '@valenced/discord/common/flux'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { cloneElement, Component, forwardRef, useEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, Text, View } from 'react-native'
 import { patchBaseChannelItem, activePosts, channelEmoji, ChannelTypes, EmojiTile, extraHeight, redesignTree, SIZES, status as rstatus } from './redesign'
 import { patchSheet } from './sheet'
-import { bind, DEFAULTS, settings, update, useSettings } from './store'
+import { find } from './find'
+import { bind, DEFAULTS, settings, settingsVersion, update, useSettings } from './store'
 
 /**
  * Better Channel List (BetterDiscord BetterChannelList 를 옮긴 것).
@@ -25,11 +24,35 @@ const S = () => Stores as any
 
 /** 설정 화면 Status */
 const status = { variant: '', names: 'Not found yet', split: 'Not found yet', hook: 'Not found yet', rows: 0, withMessage: 0, asked: 0, received: 0, lastError: '' }
-const find = (...props: string[]): any => {
-    try {
-        return (lookupModule(withProps(...props) as any) as any)?.[0]
-    } catch {}
+
+// ── 바뀐 채널만 알리기 ─────────────────────────────────────────────────────
+/**
+ * 채널 줄마다 MessageStore 를 통째로 지켜보면 어느 메시지가 바뀌어도 모든 줄이 다시 읽는다 (줄 수 × 바뀐 수).
+ * 그래서 채널별로 등록받고, 메시지 이벤트가 가리키는 채널에만 알린다.
+ */
+const watchers = new Map<string, Set<() => void>>()
+function watch(channelId: string, fn: () => void) {
+    let set = watchers.get(channelId)
+    if (!set) watchers.set(channelId, (set = new Set()))
+    set.add(fn)
+    return () => {
+        set!.delete(fn)
+        if (!set!.size) watchers.delete(channelId)
+    }
 }
+function notify(channelId: string | undefined) {
+    if (!channelId) return
+    const set = watchers.get(channelId)
+    if (!set?.size) return
+    // 메시지 저장소가 이 이벤트를 다 처리한 뒤에 읽게
+    setTimeout(() => set.forEach(f => f()), 0)
+}
+
+/** 서버 멤버나 사용자 정보가 바뀌면 늘어난다 (미리보기의 이름, 색이 바뀔 수 있다) */
+let memberVersion = 0
+
+/** 숨기기 플러그인(HideMessages 등)이 지운 것처럼 만든 메시지. 다시 넣지 않는다 */
+const localDeleted = new Set<string>()
 
 // ── 마지막 메시지 받아 오기 ────────────────────────────────────────────────
 function socket(): any {
@@ -81,7 +104,7 @@ function onPreviews({ messages }: any) {
     status.received += messages.length
     for (const m of messages) {
         try {
-            if (!m?.channel_id || S().MessageStore?.getMessage?.(m.channel_id, m.id)) continue
+            if (!m?.channel_id || localDeleted.has(m.id) || S().MessageStore?.getMessage?.(m.channel_id, m.id)) continue
             Dispatcher.dispatch({ type: 'LOAD_MESSAGES_SUCCESS', channelId: m.channel_id, hasMoreAfter: false, hasMoreBefore: true, isAfter: true, isBefore: false, isStale: true, limit: 1, messages: [m] } as any)
         } catch {}
     }
@@ -405,11 +428,9 @@ function useLastMessage(channelId: string | undefined) {
     const [v, setV] = useState(read)
     useEffect(() => {
         if (!channelId) return
-        const store = S().MessageStore
         const f = () => setV(read())
-        store?.addChangeListener?.(f)
         f()
-        return () => store?.removeChangeListener?.(f)
+        return watch(channelId, f)
     }, [channelId])
     return v
 }
@@ -493,6 +514,11 @@ function wrapRow(el: any, depth = 0): any {
     return kids === props.children ? el : { ...el, props: { ...props, children: kids } }
 }
 
+/**
+ * 미리보기는 채널마다 기억한다. 한 줄을 그릴 때 크기 재기, 그리기, 줄 컴포넌트에서 세 번 만들던 것을
+ * 마지막 메시지(ID, 수정 시각, 글 길이), 설정, 멤버 정보가 그대로면 다시 쓴다.
+ */
+const previews = new Map<string, { sig: string; pv: Preview | undefined }>()
 function preview(channel: any): Preview | undefined {
     const s = settings()
     if (!s.lastMessage) return
@@ -502,6 +528,15 @@ function preview(channel: any): Preview | undefined {
         m = list?.last?.() ?? list?._array?.[(list?._array?.length ?? 0) - 1]
     } catch {}
     if (!m) return
+    const sig = `${m.id}|${m.editedTimestamp ?? m.edited_timestamp ?? ''}|${m.content?.length ?? 0}|${settingsVersion}|${memberVersion}|${!!usernameWithEffects}`
+    const hit = previews.get(channel.id)
+    if (hit?.sig === sig) return hit.pv
+    const pv = buildPreview(channel, m, s)
+    previews.set(channel.id, { sig, pv })
+    return pv
+}
+
+function buildPreview(channel: any, m: any, s: ReturnType<typeof settings>): Preview | undefined {
     const authorId = m.author?.id
     try {
         if (authorId && S().RelationshipStore?.isBlocked?.(authorId)) return { key: 'blocked', node: 'Blocked message' }
@@ -513,7 +548,9 @@ function preview(channel: any): Preview | undefined {
     if (!name) return { key: body, node: body }
     // 이름은 서버 별명, 역할 색으로 굵게 (메시지의 이름처럼)
     const styled = s.nameStyle ? nameStyle(authorId, channel.guild_id, m.author) : {}
-    const color = styled.color ?? (s.roleColor ? colorOf(authorId, channel.guild_id) : undefined)
+    // 역할 색은 한 번만 읽는다
+    const role = s.roleColor ? colorOf(authorId, channel.guild_id) : undefined
+    const color = styled.color ?? role
     const colors = styled.color ? styled.colors : s.roleColor ? roleColors(authorId, channel.guild_id) : undefined
     const rest = system ? ` ${body}` : `: ${body}`
     const base = styled.fontFamily ? { fontFamily: styled.fontFamily } : { fontWeight: '700' as const }
@@ -521,10 +558,10 @@ function preview(channel: any): Preview | undefined {
         key: `${name}|${color}|${colors?.join(',')}|${styled.fontFamily}|${rest}|${!!usernameWithEffects}`,
         // 표시 이름 스타일이 있으면 디스코드가 DM 목록에서 쓰는 이름 컴포넌트(UsernameWithEffects)로 똑같이 그린다
         // 이름은 언제나 디스코드 이름 컴포넌트로 (스타일이 없는 사람은 역할 색으로)
-        split: s.nameStyle && usernameWithEffects ? { name, colors: [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: !nameStyle(authorId, channel.guild_id, m.author).styled && s.roleColor ? colorOf(authorId, channel.guild_id) : undefined } : undefined,
+        split: s.nameStyle && usernameWithEffects ? { name, colors: [], style: {}, rest, userId: authorId, guildId: channel.guild_id, real: true, color: !styled.styled ? role : undefined } : undefined,
         node: (
             <>
-                <Text style={{ fontWeight: '700', ...(s.roleColor && colorOf(authorId, channel.guild_id) ? { color: colorOf(authorId, channel.guild_id) } : null) }}>{name}</Text>
+                <Text style={{ fontWeight: '700', ...(role ? { color: role } : null) }}>{name}</Text>
                 {rest}
             </>
         ),
@@ -623,11 +660,6 @@ function patchChannelList(cleanup: (...f: any[]) => void) {
 function SettingsPage() {
     const { Stack, TableRowGroup, TableSwitchRow, TableRow, TableRadioGroup, TableRadioRow } = Design as any
     const s = useSettings()
-    const [, tick] = useState(0)
-    useEffect(() => {
-        const t = setInterval(() => tick(n => n + 1), 1000)
-        return () => clearInterval(t)
-    }, [])
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 160 }}>
             <Stack spacing={24}>
@@ -658,16 +690,49 @@ export default plugin({
         bind(jsonStorage)
         // 저장 파일을 확실히 읽고 나서 다시 그린다 (바꾼 이모지가 처음부터 보이게)
         Promise.resolve(jsonStorage?.get?.()).then(() => redraw()).catch(() => {})
+        const bumpMembers = () => {
+            memberVersion++
+            redraw()
+        }
         const subs: Array<[string, (e: any) => void]> = [
             ['MESSAGE_PREVIEWS_LOADED', onPreviews],
-            ['MESSAGE_CREATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
-            ['MESSAGE_UPDATE', (e: any) => e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()],
+            [
+                'MESSAGE_CREATE',
+                (e: any) => {
+                    notify(e?.channelId ?? e?.message?.channel_id)
+                    e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()
+                },
+            ],
+            [
+                'MESSAGE_UPDATE',
+                (e: any) => {
+                    notify(e?.message?.channel_id ?? e?.channelId)
+                    e?.guildId && e.guildId === S().SelectedGuildStore?.getGuildId?.() && redraw()
+                },
+            ],
+            ['MESSAGE_DELETE_BULK', (e: any) => notify(e?.channelId)],
+            ['LOAD_MESSAGES_SUCCESS', (e: any) => notify(e?.channelId)],
+            // 이름, 역할 색이 바뀌면 미리보기를 새로 만든다
+            ['GUILD_MEMBER_UPDATE', bumpMembers],
+            ['GUILD_MEMBERS_CHUNK', bumpMembers],
+            ['GUILD_MEMBER_ADD', bumpMembers],
+            ['GUILD_ROLE_UPDATE', bumpMembers],
+            ['USER_UPDATE', bumpMembers],
+            ['RELATIONSHIP_ADD', bumpMembers],
+            ['RELATIONSHIP_REMOVE', bumpMembers],
+            ['RELATIONSHIP_UPDATE', bumpMembers],
             ['CHANNEL_SELECT', (e: any) => request(e?.guildId)],
             ['CHANNEL_UPDATES', (e: any) => e?.channels?.some?.((c: any) => c?.guild_id === S().SelectedGuildStore?.getGuildId?.()) && request(S().SelectedGuildStore?.getGuildId?.(), undefined, true)],
             ['GUILD_MEMBER_UPDATE', (e: any) => e?.user?.id === S().UserStore?.getCurrentUser?.()?.id && request(e?.guildId, undefined, true)],
             [
                 'MESSAGE_DELETE',
                 (e: any) => {
+                    notify(e?.channelId)
+                    // 다른 플러그인이 화면에서만 숨긴 것(HideMessages, Message Logger 등): 다시 받아 와서 되살리지 않는다
+                    if (e?.otherPluginBypass || e?.mlDeleted) {
+                        if (e?.id) localDeleted.add(e.id)
+                        return
+                    }
                     const g = S().ChannelStore?.getChannel?.(e?.channelId)?.guild_id
                     if (g && g === S().SelectedGuildStore?.getGuildId?.()) request(g, [e.channelId])
                 },
@@ -700,6 +765,9 @@ export default plugin({
                     delete ch.subtitle
                 } catch {}
             touched.clear()
+            previews.clear()
+            watchers.clear()
+            localDeleted.clear()
         })
     },
     SettingsComponent: SettingsPage,

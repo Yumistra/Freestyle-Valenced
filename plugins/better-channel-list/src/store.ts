@@ -25,14 +25,27 @@ export interface Settings {
     icons: Record<string, string>
     /** 서버 이모지 바탕색 (이모지 ID → 색) */
     colors?: Record<string, string>
-    /** 어느 채널에 미리보기를 보일지 */
-    mode: 'all' | 'unreads' | 'default'
 }
-export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, mode: 'all', redesign: true, autoEmoji: true, iconSize: 'medium', icons: {} }
+export const DEFAULTS: Settings = { lastMessage: true, roleColor: true, nameStyle: true, realGradient: true, showAuthor: true, redesign: true, autoEmoji: true, iconSize: 'medium', icons: {} }
 
 let storage: any
 export const bind = (s: any) => (storage = s)
-export const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
+/**
+ * 설정은 저장된 값이 바뀔 때만 새로 만든다 (그릴 때마다 DEFAULTS 를 펼치지 않게).
+ * version 은 바뀔 때마다 1 씩 늘어서, 미리보기 캐시가 설정이 바뀐 걸 알 수 있다.
+ */
+let raw: any
+let snap: Settings = { ...DEFAULTS }
+export let settingsVersion = 0
+export const settings = (): Settings => {
+    const cache = storage?.cache
+    if (cache !== raw) {
+        raw = cache
+        snap = { ...DEFAULTS, ...(cache ?? {}) }
+        settingsVersion++
+    }
+    return snap
+}
 export function useSettings(): Settings {
     storage?.use?.()
     return settings()
