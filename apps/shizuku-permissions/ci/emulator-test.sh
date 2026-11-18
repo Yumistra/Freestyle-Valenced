@@ -169,7 +169,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe $X $Y2 $X $Y1 200; done
 tap '(?i)^back$'
 sleep 2
 adb shell dumpsys activity activities | grep -E "topResumedActivity|ResumedActivity" >> "$OUT/steps.txt"
-check "back closes the helper" "! adb shell dumpsys activity activities | grep -q 'topResumedActivity.*shizukuperms'"
+check "back returns to Discord" "adb shell dumpsys activity activities | grep 'topResumedActivity' | grep -q com.discord"
 
 adb logcat -d > "$OUT/logcat.txt"
 check "no crash" "! grep -E 'FATAL EXCEPTION' -A5 '$OUT/logcat.txt' | grep -q shizukuperms"
