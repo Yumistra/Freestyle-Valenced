@@ -287,15 +287,6 @@ export default plugin({
             }) as any,
         )
 
-        // 원본처럼 채널 정보 가리기 실험을 끈다 (앱을 다시 켜야 적용)
-        for (const key of ['isChannelMetadataObfuscationEnabled', 'isChannelMetadataIntegrityCheckEnabled']) {
-            const mod = find(key)
-            if (typeof mod?.[key] !== 'function') continue
-            try {
-                cleanup(instead(mod, key, () => false))
-            } catch {}
-        }
-
         // 이미 만들어진 목록에 반영
         try {
             const gid = S().SelectedGuildStore?.getGuildId?.() ?? Object.keys(S().GuildStore?.getGuilds?.() ?? {})[0]
