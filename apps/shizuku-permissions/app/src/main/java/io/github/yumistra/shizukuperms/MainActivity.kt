@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -330,6 +331,7 @@ class MainActivity : Activity() {
                 } catch (e: Throwable) {
                     -1 to (e.cause?.message ?: e.message ?: e.toString())
                 }
+                Log.i("ShizukuPerms", "$c -> $code $out")
                 if (code != 0) {
                     failed++
                     last = out.lineSequence().firstOrNull { it.isNotBlank() } ?: "exit $code"

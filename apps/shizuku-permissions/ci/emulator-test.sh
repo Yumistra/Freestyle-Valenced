@@ -40,6 +40,10 @@ PY
 granted() { adb shell dumpsys package com.discord | grep -E "$1: granted=true" > /dev/null; }
 
 adb logcat -c
+# 화면 크기에 맞춰 내리기 좌표
+read W H < <(adb shell wm size | tr -d '\r' | sed -n 's/.*: \([0-9]*\)x\([0-9]*\)/\1 \2/p' | tail -1)
+X=$((W / 2)); Y1=$((H * 8 / 10)); Y2=$((H * 3 / 10))
+echo "screen $W x $H" >> "$OUT/steps.txt"
 log "install"
 adb install -r -g "$SHIZUKU" | tee -a "$OUT/steps.txt"
 adb install -r "$APP" | tee -a "$OUT/steps.txt"
@@ -101,6 +105,9 @@ check "background allowed" "adb shell appops get com.discord RUN_ANY_IN_BACKGROU
 check "DND access" "adb shell settings get secure enabled_notification_policy_access_packages | grep -q com.discord"
 adb shell dumpsys package com.discord | sed -n '/requested permissions/,/User 0/p' > "$OUT/dumpsys-perms.txt" 2>&1
 adb shell appops get com.discord > "$OUT/appops.txt" 2>&1
+for op in MANAGE_EXTERNAL_STORAGE WRITE_SETTINGS SCHEDULE_EXACT_ALARM REQUEST_INSTALL_PACKAGES; do echo "$op: $(adb shell appops get com.discord $op | tr -d '\r')" >> "$OUT/appops-special.txt"; done
+adb shell settings get secure enabled_notification_policy_access_packages >> "$OUT/appops-special.txt"
+adb logcat -d -s ShizukuPerms > "$OUT/commands.txt"
 
 # 목록을 내리며 글자를 찾는다
 find_text() {
@@ -108,7 +115,7 @@ find_text() {
         adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
         adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
         grep -q "$1" /tmp/ui.xml && return 0
-        adb shell input swipe 540 1600 540 700 300
+        adb shell input swipe $X $Y1 $X $Y2 300
         sleep 1
     done
     return 1
@@ -117,7 +124,7 @@ log "all groups are shown"
 check "unknown permission is listed" "find_text 'UNKNOWN_PERMISSION'"
 check "signature permission is listed" "find_text 'INSTALL_PACKAGES'"
 check "unavailable items are listed" "find_text 'Not available for Discord'"
-for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe 540 700 540 1600 200; done
+for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe $X $Y2 $X $Y1 200; done
 
 log "turn camera off with its switch"
 find_text 'text="Camera"'
@@ -141,6 +148,7 @@ check "camera revoked" "! granted android.permission.CAMERA"
 log "back to Discord"
 tap '(?i)^back$'
 sleep 2
+adb shell dumpsys activity activities | grep -E "topResumedActivity|ResumedActivity" >> "$OUT/steps.txt"
 check "back closes the helper" "! adb shell dumpsys activity activities | grep -q 'topResumedActivity.*shizukuperms'"
 
 adb logcat -d > "$OUT/logcat.txt"
