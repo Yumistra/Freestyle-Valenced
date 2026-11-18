@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var statusView: TextView
     private lateinit var shizukuButton: Button
+    private lateinit var allButton: Button
 
     private var target: String = ""
 
@@ -150,6 +151,7 @@ class MainActivity : Activity() {
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
         val all = Button(this)
+        allButton = all
         all.text = "Grant all"
         all.setOnClickListener { grantAll() }
         val back = Button(this)
@@ -254,6 +256,8 @@ class MainActivity : Activity() {
         shizukuButton.visibility = if (state == Ready.READY) View.GONE else View.VISIBLE
         shizukuButton.text = if (state == Ready.NOT_RUNNING) "Open Shizuku" else "Allow Shizuku"
         list.removeAllViews()
+        // 디스코드가 아니면 모두 허용할 것이 없다
+        allButton.visibility = if (target.isBlank()) View.GONE else View.VISIBLE
         if (target.isBlank()) {
             list.addView(text("Open this from the Shizuku Permissions plugin in Discord.", 15f), matchWidth(top = 12f))
             return

@@ -93,7 +93,7 @@ log "open from the shell (not Discord)"
 adb shell am start -W -a android.intent.action.VIEW -d freestyleperms://open > /dev/null
 sleep 3
 shot 01-from-shell
-check "shell sees only the message" "grep -q 'Open this from the Shizuku Permissions plugin' '$OUT/01-from-shell.xml' && ! grep -q 'Camera' '$OUT/01-from-shell.xml'"
+check "shell sees only the message" "grep -q 'Open this from the Shizuku Permissions plugin' '$OUT/01-from-shell.xml' && ! grep -q 'Camera' '$OUT/01-from-shell.xml' && ! grep -qi 'text=\"grant all\"' '$OUT/01-from-shell.xml'"
 adb shell am force-stop io.github.yumistra.shizukuperms
 
 log "open with a faked referrer"
