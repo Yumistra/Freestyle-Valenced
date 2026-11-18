@@ -790,6 +790,7 @@ val betterAnimationsPlugin = plugin {
                 "version" to manifest.version.toString(),
                 "screens" to (screenHook != null),
                 "played" to (screens?.played ?: 0),
+                "stuck" to (screens?.stuck ?: 0),
                 "chat" to chatReady,
                 "problems" to problems.joinToString("\n"),
             )

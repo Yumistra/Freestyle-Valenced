@@ -22,7 +22,7 @@ import { withProps } from '@valenced/modules/finders/filters'
  * (실험 버전: 무엇이 되고 안 되는지 Copy log 에 자세히 남긴다)
  */
 
-const VERSION = '1.0.0'
+const VERSION = '1.2.8'
 const SCREEN_PATH = 'modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx'
 const TOAST_PATH = 'modules/toast/native/AppToastContainer.tsx'
 const SHEET_PATH = 'modules/channel/native/ChannelLongPressActionSheet.tsx'

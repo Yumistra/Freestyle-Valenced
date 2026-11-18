@@ -89,6 +89,9 @@ private val loading = ConcurrentHashMap.newKeySet<String>()
 /** 채팅 버튼: tap, long, hidden */
 @Volatile private var chatMode = "long"
 private var builtChatMode = ""
+/** 이름 자리: right (아바타 오른쪽), left (아바타 왼쪽), hidden (이름 숨김) */
+@Volatile private var nameMode = "right"
+private var builtNameMode = ""
 /** 디스코드가 직접 띄우는 오버레이 창을 막는다 */
 @Volatile private var hideDiscordOverlay = false
 /** 붙이지 않고 막은 디스코드 창. 나중에 디스코드가 떼거나 옮기려 하면 무시한다 (안 붙은 창을 떼면 앱이 튕긴다) */
@@ -685,7 +688,6 @@ private fun makeRow(c: Context, p: Person): Row {
     val av = AvatarView(c)
     av.initial = p.name.take(1).uppercase()
     p.avatar?.let { loadAvatar(it, av) }
-    row.addView(av, LinearLayout.LayoutParams(size, size))
     val box = LinearLayout(c)
     box.orientation = LinearLayout.HORIZONTAL
     box.gravity = Gravity.CENTER_VERTICAL
@@ -698,14 +700,23 @@ private fun makeRow(c: Context, p: Person): Row {
     name.ellipsize = TextUtils.TruncateAt.END
     name.maxWidth = dp(c, 170f * scale)
     name.setTextColor(Color.WHITE)
+    if (nameMode == "hidden") name.visibility = View.GONE
     box.addView(name)
     val status = LinearLayout(c)
     status.orientation = LinearLayout.HORIZONTAL
     status.gravity = Gravity.CENTER_VERTICAL
     box.addView(status)
     val blp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    blp.leftMargin = gap
-    row.addView(box, blp)
+    if (nameMode == "left") {
+        // 이름 상자를 아바타 왼쪽에
+        blp.rightMargin = gap
+        row.addView(box, blp)
+        row.addView(av, LinearLayout.LayoutParams(size, size))
+    } else {
+        blp.leftMargin = gap
+        row.addView(av, LinearLayout.LayoutParams(size, size))
+        row.addView(box, blp)
+    }
     return Row(row, av, name, status)
 }
 
@@ -723,7 +734,7 @@ private fun setStatus(c: Context, r: Row, p: Person) {
         live.background = pill(c, red, 4f * scale)
         live.setPadding(dp(c, 5f * scale), dp(c, 1f * scale), dp(c, 5f * scale), dp(c, 1f * scale))
         val llp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        llp.leftMargin = dp(c, 6f * scale)
+        if (nameMode != "hidden") llp.leftMargin = dp(c, 6f * scale)
         r.status.addView(live, llp)
     }
     val key = when {
@@ -733,8 +744,20 @@ private fun setStatus(c: Context, r: Row, p: Person) {
     } ?: return
     val v: View = iconView(c, key, 15f * scale, red, if (key == "headsetOff") "D" else "M")
     val lp = LinearLayout.LayoutParams(dp(c, 15f * scale), dp(c, 15f * scale))
-    lp.leftMargin = dp(c, 6f * scale)
+    // 이름이 없으면 첫 아이콘 앞에 띄우지 않는다
+    if (nameMode != "hidden" || r.status.childCount > 0) lp.leftMargin = dp(c, 6f * scale)
     r.status.addView(v, lp)
+}
+
+/** 이름을 숨기면 상태 표시(LIVE, 마이크, 헤드셋)가 있을 때만 상자를 보여 준다 */
+private fun fitBox(c: Context, r: Row) {
+    val box = r.status.parent as? View ?: return
+    if (nameMode != "hidden") {
+        box.visibility = View.VISIBLE
+        return
+    }
+    box.visibility = if (r.status.childCount > 0) View.VISIBLE else View.GONE
+    box.setPadding(dp(c, 7f * scale), dp(c, 5f * scale), dp(c, 7f * scale), dp(c, 5f * scale))
 }
 
 /** 지금 상태대로 다시 그린다 (메인 스레드). 줄은 다시 만들지 않고 고쳐서 바뀐 것만 부드럽게 */
@@ -766,7 +789,7 @@ private fun renderUnsafe() {
     val r = ensureRoot(c)
     // 채팅 버튼을 숨겼어도 말하기 버튼이 있으면 그 자리를 비워 둔다 (사람 줄과 겹치지 않게)
     val pttSlot = chatMode == "hidden" && pttOn
-    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton || builtPttSlot != pttSlot) {
+    if (builtScale != scale || builtChatMode != chatMode || builtSplit != splitButton || builtPttSlot != pttSlot || builtNameMode != nameMode) {
         // 크기가 바뀌면 처음부터
         r.removeAllViews()
         rows.clear()
@@ -778,6 +801,7 @@ private fun renderUnsafe() {
         builtChatMode = chatMode
         builtSplit = splitButton
         builtPttSlot = pttSlot
+        builtNameMode = nameMode
     }
     val size = dp(c, 40f * scale)
     val gap = dp(c, 6f * scale)
@@ -849,6 +873,8 @@ private fun renderUnsafe() {
             rows[p.id] = row
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.bottomMargin = gap
+            // 이름이 왼쪽이면 아바타가 오른쪽 끝에 맞춰 줄 선다
+            if (nameMode == "left") lp.gravity = Gravity.END
             row.view.alpha = 0f
             row.view.translationX = -dp(c, 12f).toFloat()
             r.addView(row.view, minOf(index, r.childCount), lp)
@@ -860,6 +886,7 @@ private fun renderUnsafe() {
         row.name.text = p.name
         row.avatar.setSpeaking(p.speaking, !fresh)
         setStatus(c, row, p)
+        fitBox(c, row)
         // 말하는 사람은 뚜렷하게, 조용한 사람은 반투명하게
         val to = if (p.speaking) 1f else idleAlpha
         if (fresh) row.view.animate().alpha(to).translationX(0f).setDuration(200).setInterpolator(DecelerateInterpolator()).start()
@@ -1366,6 +1393,7 @@ val voiceOverlayPlugin = plugin {
                 chatMode = o.optString("chatButton", chatMode)
                 hideDiscordOverlay = o.optBoolean("hideDiscordOverlay", hideDiscordOverlay)
                 pttOn = o.optBoolean("ptt", pttOn)
+                nameMode = o.optString("names", nameMode).takeIf { it == "left" || it == "right" || it == "hidden" } ?: nameMode
                 if (o.has("x")) posX = o.optInt("x", posX)
                 if (o.has("y")) posY = o.optInt("y", posY)
                 ui {

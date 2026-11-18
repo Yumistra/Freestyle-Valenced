@@ -5,7 +5,7 @@
 	"description": "Quick actions for your own messages.",
 	"author": "Yumistra",
 	"icon": "PencilIcon",
-	"version": "1.0.6",
+	"version": "1.0.7",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

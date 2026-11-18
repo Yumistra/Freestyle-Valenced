@@ -301,7 +301,7 @@ function buttonRadius() {
 const ICON = (name: string) => `design_components_icon_native_redesign_generated_images_${name}`
 
 /** 네이티브가 없거나 메시지 줄을 못 찾으면 null */
-const VERSION = '1.0.6'
+const VERSION = '1.0.9'
 
 /** 버튼을 못 띄우면 오류 로그를 복사해 두고 알려 준다 */
 function reportFailure(reason: string) {

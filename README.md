@@ -20,6 +20,9 @@ Plugins for Valenced.
 | Commands | `yumistra.commands` |
 | Mini Chat | `yumistra.mini-chat` |
 | Voice Overlay | `yumistra.voice-overlay` |
+| Better Font Scale | `yumistra.better-font-scale` |
+| Server Count | `yumistra.server-count` |
+| Show Hidden Channels | `yumistra.show-hidden-channels` |
 
 ## Install
 

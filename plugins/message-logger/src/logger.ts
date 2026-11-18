@@ -280,6 +280,24 @@ export function clearAll() {
     save(true)
 }
 
+/**
+ * "조용히 지우기"(SilentDelete 등) 막기: 새 메시지의 nonce 를 지울 메시지의 ID 로 보내면,
+ * 디스코드는 그 새 메시지를 "내가 보낸 메시지가 확인됐다"로 착각해 원래 메시지를 새 메시지로 갈아 끼운다.
+ * 그러면 원래 메시지가 화면, 저장소에서 사라져서, 나중에 원래 메시지가 지워져도 로거가 내용을 모른다.
+ * 이미 보내진(SENT) 다른 사람 메시지 ID 를 nonce 로 단 메시지가 오면 nonce 를 떼어 따로 넣는다.
+ * (내가 보내는 중인 메시지는 상태가 SENDING 이라 건드리지 않는다)
+ */
+function keepReplaced(p: any) {
+    const m = p?.message
+    const n = m?.nonce
+    if (!settings().logDeletes || !m?.id || typeof n !== 'string' || n === m.id || p.optimistic) return p
+    const old = getMessage(m.channel_id, n)
+    if (!old || old.id !== n || (old.state && old.state !== 'SENT')) return p
+    if (!shouldLog(old)) return p
+    // 원래 메시지는 그대로 두고 새 메시지는 따로 들어간다. 나중에 원래 메시지가 지워지면 평소처럼 기록된다
+    return { ...p, message: { ...m, nonce: undefined } }
+}
+
 export function intercept() {
     return [
         onFluxEventDispatched('MESSAGE_DELETE', (p: any) => {
@@ -302,17 +320,32 @@ export function intercept() {
             if (!u?.id || bypassed.has(u.id) || !settings().logEdits) return p
             // 화면에 없는 채널의 메시지는 기억해 둔 것과 비교한다
             const record = getMessage(u.channel_id, u.id) ?? (seen()[u.id] && !seen()[u.id].p ? seen()[u.id].m : undefined) ?? pushedComparable(u)
-            if (!record || typeof u.content !== 'string' || !record.content || u.content === record.content || !shouldLog(record)) return p
+            if (!record || !shouldLog(record)) return p
+            const before = typeof record.content === 'string' ? record.content : ''
+            const textChanged = typeof u.content === 'string' && u.content !== before
+            // 첨부파일을 뺀 수정 (그림만 보낸 뒤 글로 바꿔 놓고 지우는 식으로 기록을 피한다): 뺀 파일은 남겨 둔다
+            const prevFiles: any[] = Array.isArray(record.attachments) ? record.attachments : []
+            const removed = Array.isArray(u.attachments) ? prevFiles.filter(a => a?.id && !u.attachments.some((b: any) => b?.id === a.id)) : []
+            if (!textChanged && !removed.length) return p
             const e = entryOf(record, p.guildId ?? u.guild_id)
-            ;(e.e ??= []).push({ t: record.content, at: Date.now() })
+            const files = removed.map(a => a.filename ?? 'file').join(', ')
+            const label = before || (files ? `[${files}]` : '[no text]')
+            ;(e.e ??= []).push({ t: removed.length && before ? `${before} [${files}]` : label, at: Date.now() })
             e.at = Date.now()
             changed.add(u.id)
             save()
+            if (removed.length) {
+                const plain = (a: any) => (typeof a?.toJS === 'function' ? a.toJS() : { ...a })
+                return { ...p, message: { ...u, attachments: [...u.attachments, ...removed.map(plain)] } }
+            }
             return p
         }),
         onFluxEventDispatched('MESSAGE_CREATE', (p: any) => {
             try {
                 if (settings().logDeletes || settings().logEdits) p = unsilence(p)
+            } catch {}
+            try {
+                p = keepReplaced(p)
             } catch {}
             try {
                 if (!p?.optimistic && p?.message && !p.isPushNotification) remember([{ ...p.message, guild_id: p.message.guild_id ?? p.guildId }], myId())

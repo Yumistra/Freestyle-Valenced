@@ -135,6 +135,10 @@ internal class ScreenTransitions(private val config: () -> StackConfig?) {
     var played = 0
         private set
 
+    /** 안 끝나서 강제로 끝낸 화면 전환 수 */
+    var stuck = 0
+        private set
+
     /**
      * Fragment 는 화면을 열고 닫을 때 setCustomAnimations 로 받은 애니메이션 리소스를 AnimationUtils.loadAnimation 으로 읽는다
      * (RNS 의 onCreateAnimation/onCreateAnimator 가 null 일 때. 시트가 아닌 화면은 늘 그렇다).
@@ -172,6 +176,21 @@ internal class ScreenTransitions(private val config: () -> StackConfig?) {
                     val anim = param.args[0] as? Animation ?: return
                     if (!isOurs(anim)) return
                     val view = param.thisObject as? View ?: return
+                    // 안전장치: 화면이 그려지지 않으면(가려졌거나 떨어졌으면) 애니메이션이 끝나지 않아
+                    // 화면 전환이 멈춘 채 회색 빈 화면이 남는다. 시간이 지나도 안 끝났으면 강제로 끝낸다
+                    // (clearAnimation 이 끝났다는 알림을 보내서 Fragment 가 전환을 마무리한다)
+                    try {
+                        view.postDelayed({
+                            try {
+                                if (view.animation === anim && !anim.hasEnded()) {
+                                    view.clearAnimation()
+                                    stuck++
+                                }
+                            } catch (e: Throwable) {
+                            }
+                        }, anim.duration + anim.startOffset + 400L)
+                    } catch (e: Throwable) {
+                    }
                     try {
                         if (view.layerType != View.LAYER_TYPE_HARDWARE) {
                             view.setLayerType(View.LAYER_TYPE_HARDWARE, null)

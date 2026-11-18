@@ -40,6 +40,9 @@ function nested(): boolean {
 
 const one = new Animated.Value(1)
 
+/** 뒤로 가기를 가로채 나가는 효과를 JS 로 재생할지 (꺼 둠, 아래 Enter 참고) */
+const JS_BACK_EXIT = false
+
 /** 꽉 찬 모달 (설정 화면 등). 투명 모달·폼 시트는 창/시트라 빼 둔다 */
 const FULL_MODALS = new Set(['modal', 'fullScreenModal', 'containedModal', 'pageSheet'])
 
@@ -151,8 +154,13 @@ function Enter({ children, presentation, screenId }: { children?: any; presentat
                 })
             },
         }
-        mounted.push(handle)
-        ensureBackHandler()
+        // 뒤로 가기를 먼저 받아 나가는 효과를 재생하던 건 뺐다. 루트 내비게이션으로 대신 닫다 보니
+        // 설정 안 화면(플러그인 목록 등)에서 엉뚱한 화면이 닫혀 회색 빈 화면이 남거나 화면이 되돌아왔다.
+        // 이제 닫기는 늘 디스코드가 하고, 안드로이드 페이드로 나간다
+        if (JS_BACK_EXIT) {
+            mounted.push(handle)
+            ensureBackHandler()
+        }
         return () => {
             run.stop()
             const i = mounted.indexOf(handle)
