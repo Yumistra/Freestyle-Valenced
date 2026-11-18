@@ -1,17 +1,18 @@
 import Page from '@valenced/components/Page'
+import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { useState } from 'react'
-import { bind, DEFAULTS, update, useSettings } from './store'
+import { bind, DEFAULTS, update, useSettings, type Settings } from './store'
 
 export default function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const s = useSettings()
-    const { Stack, TextInput, Text } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TextInput } = Design as any
     const [name, setName] = useState(s.name)
 
     return (
         <Page>
-            <Stack spacing={16}>
+            <Stack spacing={24}>
                 <TextInput
                     label="Hidden channel name"
                     value={name}
@@ -22,9 +23,24 @@ export default function SettingsPage({ api }: { api?: any }) {
                     }}
                     size="md"
                 />
-                <Text variant="text-sm/medium" color="text-muted">
-                    Discord no longer sends the real name, topic or allowed roles of hidden channels. Only where they are, their type and who is in hidden voice channels are left.
-                </Text>
+                <TableRadioGroup title="Show hidden channels as" defaultValue={s.showMode} onChange={(showMode: Settings['showMode']) => update({ showMode })}>
+                    <TableRadioRow label="Plain, with Discord's lock icon" value="lock" />
+                    <TableRadioRow label="Muted, with an eye icon on the right" value="muted" />
+                </TableRadioGroup>
+                <TableRowGroup>
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="EyeSlashIcon" />}
+                        label="Hide unreads"
+                        value={s.hideUnreads}
+                        onValueChange={(hideUnreads: boolean) => update({ hideUnreads })}
+                    />
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="ShieldUserIcon" />}
+                        label="Open allowed roles and users by default"
+                        value={s.rolesOpen}
+                        onValueChange={(rolesOpen: boolean) => update({ rolesOpen })}
+                    />
+                </TableRowGroup>
             </Stack>
         </Page>
     )

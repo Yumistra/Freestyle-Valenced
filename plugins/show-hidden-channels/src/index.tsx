@@ -1,84 +1,35 @@
 import { ToastActionCreators } from '@valenced/discord/actions'
-import { Stores } from '@valenced/discord/flux'
-import { getModules, lookupModule } from '@valenced/modules/finders'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import LockScreen from './LockScreen'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, onChange, settings } from './store'
+import { channelOf, find, isHidden, S, samePerm } from './util'
 
 /**
  * Show Hidden Channels: ShowHiddenChannelsLite (Vencord, CyberKird) 를 옮긴 것.
  *
  * 디스코드는 볼 수 없는 채널도 보내 주지만 이름은 ___hidden___, 주제는 비우고 권한은 가짜로 바꿔 보낸다.
- * 채널 목록(ChannelListState)은 채널마다 computeState 에서 PermissionStore.can(VIEW_CHANNEL, 채널) 을 보고
- * 못 보면 CannotShow 로 빼 버린다. 그 순간에만 can 이 true 를 돌려주게 해서 목록에 남긴다.
- * 들어가서 메시지를 받아 오거나 음성에 들어가는 건 막는다 (어차피 서버가 거절한다).
+ * - 채널 목록(ChannelListState)은 채널마다 computeState 에서 can(VIEW_CHANNEL) 을 보고 못 보면 뺀다.
+ *   그 순간에만 can 이 true 를 돌려주게 해서 목록에 남긴다.
+ * - 이름: 앱은 가려진 채널(OBFUSCATED 플래그)을 computeChannelName 에서 "액세스 권한 없음" 으로 바꾼다. 거기서 고른 이름을 준다.
+ * - 들어가면 채팅 대신 잠금 화면 (NSFW 확인 화면과 같은 자리, useChannelContentGate)
  */
 
-const S = () => Stores as any
-const REDACTED = '___hidden___'
-
-function find(...props: string[]): any {
-    try {
-        return (lookupModule(withProps(...props) as any) as any)?.[0]
-    } catch {}
-}
-
-let VIEW: any
-/** 디스코드의 VIEW_CHANNEL 권한 값 (못 찾으면 1 << 10) */
-function view() {
-    if (VIEW == null) VIEW = find('Permissions', 'ChannelTypes')?.Permissions?.VIEW_CHANNEL ?? 1024n
-    return VIEW
-}
-
-const isView = (perm: unknown) => {
-    if (perm === view()) return true
-    try {
-        return BigInt(perm as any) === 1024n
-    } catch {
-        return false
-    }
-}
+const GATE = 'SHOW_HIDDEN_CHANNELS'
 
 /** 지금 목록 상태를 계산 중인 숨겨진 채널. 이 채널에 대한 VIEW_CHANNEL 검사만 통과시킨다 */
 let listing: any
+/** #채널 자동완성을 찾는 중 */
+let querying = 0
 
-function isHidden(channel: any): boolean {
-    try {
-        if (!channel?.guild_id || channel.id == null) return false
-        if (typeof channel.isDM === 'function' && (channel.isDM() || channel.isGroupDM?.())) return false
-        const ps = S().PermissionStore
-        return !!ps?.can && !ps.can(view(), channel)
-    } catch {
-        return false
-    }
-}
+/** 목록에 보여 준 숨겨진 채널 (안 읽음 숨기기에 쓴다) */
+const hiddenIds = new Set<string>()
+const hiddenId = (id: unknown) => typeof id === 'string' && hiddenIds.has(id) && isHidden(channelOf(id))
 
-function isHiddenId(channelId: unknown): boolean {
-    if (typeof channelId !== 'string') return false
-    return isHidden(S().ChannelStore?.getChannel?.(channelId))
-}
-
-// ── 이름 ─────────────────────────────────────────────────────────────────
-/** 이름을 바꿔 둔 채널 (끌 때 되돌린다) */
-const renamed = new Map<string, any>()
-function rename(rec: any) {
-    if (rec?.name !== REDACTED && !renamed.has(rec?.id)) return
-    try {
-        rec.name = settings().name || DEFAULTS.name
-        renamed.set(rec.id, rec)
-    } catch {}
-}
-function restoreNames() {
-    for (const rec of renamed.values()) {
-        try {
-            rec.name = REDACTED
-        } catch {}
-    }
-    renamed.clear()
-}
-
-// ── 채널 목록 다시 만들기 ────────────────────────────────────────────────
 /** ChannelListStore 안의 ChannelListStates (서버별 목록을 들고 있다) */
 let states: any
 function rebuild() {
@@ -95,21 +46,44 @@ function toast(text: string) {
     } catch {}
 }
 
+/** 숨겨진 채널 화면으로 간다 (음성 채널을 눌렀을 때) */
+let routers: any[] = []
+function openChannel(channel: any) {
+    for (const r of routers) {
+        try {
+            // transitionToGuild(서버, 채널, 메시지) 쪽만 쓴다
+            if (typeof r?.transitionToGuild === 'function' && r.transitionToGuild.length >= 3) {
+                r.transitionToGuild(channel.guild_id, channel.id)
+                return true
+            }
+        } catch {}
+    }
+    return false
+}
+
+const eye = (key: string) => {
+    const Eye = lookupGeneratedIconComponent('EyeSlashIcon') as any
+    return Eye ? <Eye key={key} size="xs" color="icon-muted" /> : null
+}
+
 export default plugin({
     jsonStorage: { load: true, default: DEFAULTS },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
 
-        // 목록 계산 중인 숨겨진 채널만 볼 수 있다고 답한다
+        // 목록 계산 중인 숨겨진 채널, 자동완성 중에만 볼 수 있다고 답한다
         const ps = S().PermissionStore
         if (ps?.can)
             cleanup(
                 instead(ps, 'can', function (this: any, args: any[], orig: any) {
-                    if (listing && args[1] === listing && isView(args[0])) return true
+                    if ((listing && args[1] === listing) || querying) {
+                        if (samePerm(args[0], 'VIEW_CHANNEL')) return true
+                    }
                     return orig.apply(this, args)
                 }),
             )
 
+        // ── 채널 목록 ──
         let channelProto: any
         const patchChannel = (impl: any) => {
             if (channelProto) return false
@@ -128,7 +102,7 @@ export default plugin({
                         instead(p, 'computeState', function (this: any, args: any[], orig: any) {
                             const rec = this?.record
                             if (!isHidden(rec)) return orig.apply(this, args)
-                            rename(rec)
+                            hiddenIds.add(rec.id)
                             // 온보딩을 쓰는 서버는 고른 채널만 보여 주는데, 숨겨진 채널은 고를 수가 없다
                             const opted = this?.category?.guild?.optInEnabled ? this.category.guild.optedInChannels : undefined
                             let added = false
@@ -158,8 +132,7 @@ export default plugin({
         }
 
         // ChannelListStates 를 잡고, 채널 클래스를 처음 보면 그 서버 목록을 다시 만든다
-        const statesMod = find('computeThreadIds', 'ChannelListSections')
-        const proto = statesMod?.default?.prototype
+        const proto = find('computeThreadIds', 'ChannelListSections')?.default?.prototype
         if (proto?.getGuild)
             cleanup(
                 instead(proto, 'getGuild', function (this: any, args: any[], orig: any) {
@@ -175,13 +148,87 @@ export default plugin({
                 }),
             )
 
-        // 이미 만들어진 목록에 반영
-        try {
-            const store = S().ChannelListStore
-            const gid = S().SelectedGuildStore?.getGuildId?.() ?? Object.keys(S().GuildStore?.getGuilds?.() ?? {})[0]
-            if (gid) store?.getGuild?.(gid)
-        } catch {}
-        rebuild()
+        // ── 이름 ──
+        cleanup(
+            getModules(withProps('computeChannelName') as any, (mod: any) => {
+                if (typeof mod?.computeChannelName !== 'function') return
+                cleanup(
+                    instead(mod, 'computeChannelName', function (this: any, args: any[], orig: any) {
+                        const ch = args[0]
+                        // 카테고리는 디스코드의 "액세스 권한 없음" 그대로 (원본과 같다)
+                        if (ch?.type !== 4 && isHidden(ch)) return settings().name || DEFAULTS.name
+                        return orig.apply(this, args)
+                    }),
+                )
+            }) as any,
+        )
+
+        // ── 줄 모양: 흐리게 + 눈 아이콘, 안 읽음 숨기기 ──
+        cleanup(
+            getModuleWithImportedPath('modules/guild_sidebar/native/BaseChannelItem.tsx', (mod: any) => {
+                if (typeof mod?.default !== 'function' || mod.default.prototype?.isReactComponent) return
+                cleanup(
+                    instead(mod, 'default', function (this: any, args: any[], orig: any) {
+                        const p = args[0]
+                        const channel = p?.icon?.props?.channel ?? p?.channel
+                        if (!channel || !isHidden(channel)) return orig.apply(this, args)
+                        try {
+                            const s = settings()
+                            const next: any = { ...p }
+                            // ChannelModes: Selected, Locked, Muted, Relevant, UnreadLessImportant, UnreadImportant, Default
+                            if (s.hideUnreads) {
+                                next.unread = false
+                                if (typeof p.mode === 'string' && p.mode.startsWith('Unread')) next.mode = 'Default'
+                            }
+                            if (s.showMode === 'muted') {
+                                if (p.mode !== 'Selected') next.mode = 'Muted'
+                                const info = p.channelInfo
+                                next.channelInfo = [...(Array.isArray(info) ? info : info != null ? [info] : []), eye('shc-eye')]
+                            }
+                            return orig.apply(this, [next, ...args.slice(1)])
+                        } catch {
+                            return orig.apply(this, args)
+                        }
+                    }),
+                )
+            }) as any,
+        )
+
+        // 안 읽음 수, 멘션 수 (목록 아래 "신규" 표시, 서버 아이콘 표시)
+        const rs = S().ReadStateStore
+        for (const key of ['hasUnread', 'hasUnreadOrMentions', 'getMentionCount', 'getUnreadCount']) {
+            if (typeof rs?.[key] !== 'function') continue
+            cleanup(
+                instead(rs, key, function (this: any, args: any[], orig: any) {
+                    if (settings().hideUnreads && hiddenId(args[0])) return key.startsWith('has') ? false : 0
+                    return orig.apply(this, args)
+                }),
+            )
+        }
+
+        // ── 들어갔을 때: 채팅 대신 잠금 화면 ──
+        cleanup(
+            getModuleWithImportedPath('modules/chat/native/useChannelContentGate.tsx', (mod: any) => {
+                if (typeof mod?.useChannelContentGate === 'function')
+                    cleanup(
+                        instead(mod, 'useChannelContentGate', function (this: any, args: any[], orig: any) {
+                            // 훅이라 원래 것은 항상 부른다
+                            const gate = orig.apply(this, args)
+                            const channel = args[1]
+                            if (isHidden(channel, true)) return { kind: GATE, guildId: args[0], channelId: channel.id }
+                            return gate
+                        }),
+                    )
+                if (typeof mod?.renderChannelContentGate === 'function')
+                    cleanup(
+                        instead(mod, 'renderChannelContentGate', function (this: any, args: any[], orig: any) {
+                            const gate = args[0]
+                            if (gate?.kind === GATE) return <LockScreen channel={channelOf(gate.channelId)} />
+                            return orig.apply(this, args)
+                        }),
+                    )
+            }) as any,
+        )
 
         // 메시지를 받아 오지 않는다 (서버가 거절한다)
         cleanup(
@@ -190,24 +237,51 @@ export default plugin({
                 cleanup(
                     instead(mod, 'fetchMessages', function (this: any, args: any[], orig: any) {
                         const a = args[0]
-                        if (isHiddenId(typeof a === 'string' ? a : a?.channelId)) return Promise.resolve()
+                        if (isHidden(channelOf(typeof a === 'string' ? a : a?.channelId))) return Promise.resolve()
                         return orig.apply(this, args)
                     }),
                 )
             }) as any,
         )
 
-        // 숨겨진 음성, 스테이지 채널에 들어가지 않는다
+        // 숨겨진 음성, 스테이지 채널은 들어가지 않고 잠금 화면을 연다
+        cleanup(
+            getModules(
+                withProps('transitionToGuild') as any,
+                (mod: any) => {
+                    routers.push(mod)
+                },
+                { max: 10 } as any,
+            ) as any,
+        )
         cleanup(
             getModules(withProps('selectVoiceChannel') as any, (mod: any) => {
                 if (typeof mod?.selectVoiceChannel !== 'function') return
                 cleanup(
                     instead(mod, 'selectVoiceChannel', function (this: any, args: any[], orig: any) {
-                        if (isHiddenId(args[0])) {
-                            toast("You can't join a hidden channel")
+                        const ch = channelOf(args[0])
+                        if (isHidden(ch)) {
+                            if (!openChannel(ch)) toast("You can't join a hidden channel")
                             return
                         }
                         return orig.apply(this, args)
+                    }),
+                )
+            }) as any,
+        )
+
+        // #채널 자동완성에 숨겨진 채널도 나오게
+        cleanup(
+            getModules(withProps('queryChannels') as any, (mod: any) => {
+                if (typeof mod?.queryChannels !== 'function') return
+                cleanup(
+                    instead(mod, 'queryChannels', function (this: any, args: any[], orig: any) {
+                        querying++
+                        try {
+                            return orig.apply(this, args)
+                        } finally {
+                            querying--
+                        }
                     }),
                 )
             }) as any,
@@ -222,22 +296,18 @@ export default plugin({
             } catch {}
         }
 
-        // 이름을 바꾸면 바로 반영
-        cleanup(
-            onChange(() => {
-                const name = settings().name || DEFAULTS.name
-                for (const rec of renamed.values()) {
-                    try {
-                        rec.name = name
-                    } catch {}
-                }
-                rebuild()
-            }),
-        )
+        // 이미 만들어진 목록에 반영
+        try {
+            const gid = S().SelectedGuildStore?.getGuildId?.() ?? Object.keys(S().GuildStore?.getGuilds?.() ?? {})[0]
+            if (gid) S().ChannelListStore?.getGuild?.(gid)
+        } catch {}
+        rebuild()
 
+        cleanup(onChange(rebuild))
         cleanup(() => {
-            restoreNames()
             channelProto = undefined
+            routers = []
+            hiddenIds.clear()
             // 패치가 풀린 뒤에 다시 만들어지게
             setTimeout(rebuild, 0)
         })
