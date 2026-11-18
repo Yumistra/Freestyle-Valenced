@@ -1,13 +1,16 @@
 import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
+import { ToastActionCreators } from '@valenced/discord/actions'
 import { useState } from 'react'
+import { report } from './log'
 import { bind, DEFAULTS, update, useSettings, type Settings } from './store'
 
 export default function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
     const s = useSettings()
-    const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TextInput } = Design as any
+    const { Stack, TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TextInput, Button } = Design as any
     const [name, setName] = useState(s.name)
 
     return (
@@ -41,6 +44,17 @@ export default function SettingsPage({ api }: { api?: any }) {
                         onValueChange={(rolesOpen: boolean) => update({ rolesOpen })}
                     />
                 </TableRowGroup>
+                <Button
+                    size="lg"
+                    variant="secondary"
+                    text="Copy log"
+                    onPress={() => {
+                        try {
+                            Clipboard.setString(report())
+                            ToastActionCreators.open(`show-hidden-channels-log-${Date.now()}`, { text: 'Copied' } as any)
+                        } catch {}
+                    }}
+                />
             </Stack>
         </Page>
     )
