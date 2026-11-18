@@ -13,13 +13,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -31,7 +29,7 @@ import java.util.concurrent.Executors
 /**
  * Shizuku Permissions: Shizuku(셸 권한)로 다른 앱(디스코드)에 권한을 준다.
  *
- * Valenced 플러그인이 freestyleperms://open 으로 연다. 연 앱(referrer) 이 대상이 된다.
+ * Valenced 플러그인이 freestyleperms://open 으로 연다. 홈 화면에는 없고, 연 앱이 디스코드일 때만 그 앱의 권한을 보여 준다.
  * - 런타임 권한, 개발용 권한: pm grant / pm revoke
  * - 앱 작업(appop) 권한 (다른 앱 위에 표시, 모든 파일 접근 등): appops set
  * - 배터리 최적화 제외, 백그라운드 제한 없음
@@ -45,7 +43,6 @@ class MainActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var statusView: TextView
     private lateinit var shizukuButton: Button
-    private lateinit var packageInput: EditText
 
     private var target: String = ""
 
@@ -65,11 +62,7 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val t = pickTarget(intent)
-        if (t.isNotBlank()) {
-            target = t
-            packageInput.setText(t)
-        }
+        target = pickTarget(intent)
         refresh()
     }
 
@@ -87,16 +80,32 @@ class MainActivity : Activity() {
     }
 
     // ── 대상 앱 ───────────────────────────────────────────────────────────
-    /** ?package= 가 있으면 그것, 없으면 이 화면을 연 앱 */
+    /** 이 화면을 연 앱. 디스코드(패키지 이름을 바꾼 것 포함)가 아니면 빈 값 */
+    @Suppress("UNUSED_PARAMETER")
     private fun pickTarget(i: Intent?): String {
-        i?.data?.getQueryParameter("package")?.takeIf { it.isNotBlank() }?.let { return it }
         val ref = try {
             referrer
         } catch (_: Throwable) {
             null
         }
-        if (ref?.scheme == "android-app") ref.host?.takeIf { it.isNotBlank() && it != packageName }?.let { return it }
-        return if (::packageInput.isInitialized) packageInput.text.toString().trim() else ""
+        val pkg = if (ref?.scheme == "android-app") ref.host else null
+        if (pkg.isNullOrBlank() || pkg == packageName) return ""
+        return if (isDiscord(pkg)) pkg else ""
+    }
+
+    /** 디스코드 앱인지: 디스코드의 화면(com.discord.…)을 가지고 있다 */
+    private fun isDiscord(pkg: String): Boolean {
+        if (pkg == "com.discord") return true
+        return try {
+            val info = if (Build.VERSION.SDK_INT >= 33) {
+                packageManager.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(PackageManager.GET_ACTIVITIES.toLong()))
+            } else {
+                @Suppress("DEPRECATION") packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+            }
+            info.activities?.any { it.name.startsWith("com.discord.") } == true
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     // ── 화면 ──────────────────────────────────────────────────────────────
@@ -129,34 +138,15 @@ class MainActivity : Activity() {
         shizukuButton.setOnClickListener { requestShizuku() }
         root.addView(shizukuButton, margins(top = 8f))
 
-        root.addView(text("App", 13f, bold = true, dim = true), margins(top = 18f))
-        packageInput = EditText(this)
-        packageInput.setSingleLine()
-        packageInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        packageInput.hint = "com.discord"
-        packageInput.setText(target)
-        packageInput.setOnEditorActionListener { _, _, _ ->
-            target = packageInput.text.toString().trim()
-            refresh()
-            false
-        }
-        root.addView(packageInput, matchWidth())
-
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
-        val load = Button(this)
-        load.text = "Load"
-        load.setOnClickListener {
-            target = packageInput.text.toString().trim()
-            refresh()
-        }
         val all = Button(this)
         all.text = "Grant all"
         all.setOnClickListener { grantAll() }
         val back = Button(this)
         back.text = "Back"
         back.setOnClickListener { goBack() }
-        for (b in listOf(load, all, back)) buttons.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        for (b in listOf(all, back)) buttons.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons, matchWidth(top = 6f))
 
         list = LinearLayout(this)
@@ -242,12 +232,15 @@ class MainActivity : Activity() {
             Ready.NOT_RUNNING -> "Shizuku isn't running"
             Ready.NO_PERMISSION -> "Shizuku is running, allow this app to use it"
             Ready.OLD -> "Shizuku is too old, update it"
-            Ready.READY -> if (target.isBlank()) "Shizuku ready, enter an app" else "Shizuku ready, $target"
+            Ready.READY -> if (target.isBlank()) "Shizuku ready" else "Shizuku ready, $target"
         }
         shizukuButton.visibility = if (state == Ready.READY) View.GONE else View.VISIBLE
         shizukuButton.text = if (state == Ready.NOT_RUNNING) "Open Shizuku" else "Allow Shizuku"
         list.removeAllViews()
-        if (target.isBlank()) return
+        if (target.isBlank()) {
+            list.addView(text("Open this from the Shizuku Permissions plugin in Discord.", 15f), matchWidth(top = 12f))
+            return
+        }
         val items = try {
             items(target)
         } catch (e: PackageManager.NameNotFoundException) {

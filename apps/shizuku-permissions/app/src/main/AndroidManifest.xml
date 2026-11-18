@@ -12,11 +12,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true">
+            <!-- 홈 화면에는 없다. 플러그인 설정에서만 연다 -->
             <!-- 플러그인이 freestyleperms://open 으로 연다 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
