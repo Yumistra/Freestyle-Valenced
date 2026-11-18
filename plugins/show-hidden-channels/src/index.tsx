@@ -1,5 +1,4 @@
 import { ToastActionCreators } from '@valenced/discord/actions'
-import { Dispatcher } from '@valenced/discord/common/flux'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -41,34 +40,6 @@ function rebuild() {
     } catch {}
 }
 
-
-/**
- * 앱에 저장된 채널 목록에 숨겨진 채널이 빠져 있을 수 있다 (앱은 접속할 때 저장된 버전을 보내고 바뀐 것만 받는다).
- * 서버마다 한 번, 채널 목록을 직접 받아 와서 앱에 없는 채널을 넣는다.
- */
-const filled = new Set<string>()
-let http: any
-async function fill(guildId: string | undefined) {
-    if (!guildId || filled.has(guildId)) return
-    filled.add(guildId)
-    try {
-        if (!http) {
-            const a = find('HTTP')?.HTTP
-            http = a?.get ? a : find('getAPIBaseURL', 'get')
-        }
-        const res = await http?.get?.({ url: `/guilds/${guildId}/channels` })
-        const list: any[] = Array.isArray(res?.body) ? res.body : []
-        const missing = list.filter(c => c?.id && !channelOf(c.id)).map(c => ({ ...c, guild_id: c.guild_id ?? guildId }))
-        status.fill = { guild: guildId, api: list.length, missing: missing.length, hiddenNames: list.filter(c => c?.name === '___hidden___').length }
-        if (missing.length) {
-            Dispatcher.dispatch({ type: 'CHANNEL_UPDATES', channels: missing } as any)
-            rebuild()
-        }
-    } catch (e) {
-        filled.delete(guildId)
-        err('fill', e)
-    }
-}
 
 let seq = 0
 function toast(text: string) {
@@ -164,25 +135,39 @@ export default plugin({
             return false
         }
 
-        // ChannelListStates 를 잡고, 채널 클래스를 처음 보면 그 서버 목록을 다시 만든다
-        const proto = find('computeThreadIds', 'ChannelListSections')?.default?.prototype
-        status['PermissionStore.can'] = !!ps?.can
-        status['ChannelListStates.getGuild'] = !!proto?.getGuild
-        if (proto?.getGuild)
-            cleanup(
-                instead(proto, 'getGuild', function (this: any, args: any[], orig: any) {
-                    states = this
-                    count('getGuild calls')
-                    const impl = orig.apply(this, args)
-                    if (!channelProto && patchChannel(impl)) {
-                        try {
-                            delete this.guilds?.[args[0]]
-                        } catch {}
-                        return orig.apply(this, args)
-                    }
-                    return impl
-                }),
-            )
+        // ChannelListStates 를 잡고, 채널 클래스를 처음 보면 목록을 전부 다시 만든다.
+        // 앱이 켜질 때는 이 모듈이 아직 안 불려 있어서, 불릴 때까지 기다린다
+        status['ChannelListStates.getGuild'] = 'waiting'
+        cleanup(
+            getModules(withProps('computeThreadIds', 'ChannelListSections') as any, (mod: any) => {
+                const proto = mod?.default?.prototype
+                status['ChannelListStates.getGuild'] = !!proto?.getGuild
+                if (!proto?.getGuild) return
+                cleanup(
+                    instead(proto, 'getGuild', function (this: any, args: any[], orig: any) {
+                        states = this
+                        count('getGuild calls')
+                        const impl = orig.apply(this, args)
+                        if (!channelProto && patchChannel(impl)) {
+                            try {
+                                this.clear?.()
+                            } catch {}
+                            setTimeout(() => S().ChannelListStore?.emitChange?.(), 0)
+                            return orig.apply(this, args)
+                        }
+                        return impl
+                    }),
+                )
+                // 이미 만들어진 목록에 반영
+                try {
+                    const gid = S().SelectedGuildStore?.getGuildId?.() ?? Object.keys(S().GuildStore?.getGuilds?.() ?? {})[0]
+                    if (gid) S().ChannelListStore?.getGuild?.(gid)
+                } catch (e) {
+                    err('first build', e)
+                }
+                rebuild()
+            }) as any,
+        )
 
         // ── 이름 ──
         cleanup(
@@ -323,28 +308,11 @@ export default plugin({
             }) as any,
         )
 
-        // 이미 만들어진 목록에 반영
-        try {
-            const gid = S().SelectedGuildStore?.getGuildId?.() ?? Object.keys(S().GuildStore?.getGuilds?.() ?? {})[0]
-            if (gid) S().ChannelListStore?.getGuild?.(gid)
-        } catch (e) {
-            err('first build', e)
-        }
-        rebuild()
-
-        // 들어간 서버마다 앱에 빠진 채널을 채운다
-        const sel = S().SelectedGuildStore
-        const onSelect = () => fill(sel?.getGuildId?.())
-        sel?.addChangeListener?.(onSelect)
-        cleanup(() => sel?.removeChangeListener?.(onSelect))
-        onSelect()
-
         cleanup(onChange(rebuild))
         cleanup(() => {
             channelProto = undefined
             routers = []
             hiddenIds.clear()
-            filled.clear()
             // 패치가 풀린 뒤에 다시 만들어지게
             setTimeout(rebuild, 0)
         })

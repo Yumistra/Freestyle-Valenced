@@ -13,8 +13,9 @@ export function find(...props: string[]): any {
 let perms: any
 /** 디스코드의 권한 값 (못 찾으면 직접 계산한 값) */
 export function perm(name: 'VIEW_CHANNEL' | 'CONNECT'): any {
-    perms ??= find('Permissions', 'ChannelTypes')?.Permissions ?? {}
-    return perms[name] ?? (name === 'CONNECT' ? 1n << 20n : 1n << 10n)
+    // 아직 안 불렸으면 다음에 다시 찾는다
+    perms ??= find('Permissions', 'ChannelTypes')?.Permissions
+    return perms?.[name] ?? (name === 'CONNECT' ? 1n << 20n : 1n << 10n)
 }
 
 export function samePerm(a: unknown, name: 'VIEW_CHANNEL' | 'CONNECT') {
