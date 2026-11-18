@@ -47,6 +47,11 @@ class MainActivity : Activity() {
 
     private var target: String = ""
 
+    /** 명령은 성공했는데 안드로이드가 유지하지 않은 것 (앱이 그 권한을 요청하지 않으면 그렇다) */
+    private val notKept = mutableSetOf<String>()
+    /** 안드로이드가 거절한 것과 이유 */
+    private val refused = mutableMapOf<String, String>()
+
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { _, _ -> main.post { refresh() } }
     private val binderListener = Shizuku.OnBinderReceivedListener { main.post { refresh() } }
     private val deadListener = Shizuku.OnBinderDeadListener { main.post { refresh() } }
@@ -233,7 +238,9 @@ class MainActivity : Activity() {
         val revoke: String?,
         /** 이름 아래 덧붙이는 설명 (왜 못 바꾸는지 등) */
         val note: String? = null,
-    )
+    ) {
+        val key get() = "$kind/$name"
+    }
 
     private fun refresh() {
         if (!::statusView.isInitialized) return
@@ -284,7 +291,12 @@ class MainActivity : Activity() {
         texts.orientation = LinearLayout.VERTICAL
         texts.addView(text(item.title, 15f))
         if (item.name != item.title) texts.addView(text(item.name, 12f, dim = true))
-        item.note?.let { texts.addView(text(it, 12f, dim = true)) }
+        val extra = when {
+            refused.containsKey(item.key) -> "Android refused: ${refused[item.key]}"
+            item.key in notKept -> "Android didn't keep this, Discord doesn't ask for this permission"
+            else -> item.note
+        }
+        extra?.let { texts.addView(text(it, 12f, dim = true)) }
         r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val sw = Switch(this)
         sw.isChecked = item.granted
@@ -296,7 +308,7 @@ class MainActivity : Activity() {
                 sw.isChecked = !sw.isChecked
                 return@setOnClickListener
             }
-            run(listOf(cmd))
+            run(listOf(item to sw.isChecked))
         }
         r.addView(sw)
         return r
@@ -308,38 +320,63 @@ class MainActivity : Activity() {
             return
         }
         if (target.isBlank()) return
-        val cmds = items(target).filter { !it.granted && it.grant != null && it.kind != Kind.AUTO }.mapNotNull { it.grant }
-        if (cmds.isEmpty()) {
+        // 한 번 거절되거나 유지되지 않은 것은 다시 하지 않는다
+        val todo = items(target).filter { !it.granted && it.grant != null && it.key !in notKept && !refused.containsKey(it.key) }
+        if (todo.isEmpty()) {
             toast("Everything is already granted")
             return
         }
-        run(cmds)
+        run(todo.map { it to true })
     }
 
-    private fun run(cmds: List<String>) {
+    /** 바꾸고 나서 실제로 바뀌었는지 다시 읽어 확인한다 */
+    private fun run(changes: List<Pair<Item, Boolean>>) {
         if (shizukuState() != Ready.READY) {
             requestShizuku()
             refresh()
             return
         }
         io.execute {
+            val ok = mutableListOf<Pair<Item, Boolean>>()
             var failed = 0
-            var last = ""
-            for (c in cmds) {
+            for ((item, on) in changes) {
+                val c = (if (on) item.grant else item.revoke) ?: continue
                 val (code, out) = try {
                     shell(c)
                 } catch (e: Throwable) {
                     -1 to (e.cause?.message ?: e.message ?: e.toString())
                 }
                 Log.i("ShizukuPerms", "$c -> $code $out")
-                if (code != 0) {
+                if (code == 0) {
+                    ok += item to on
+                    refused.remove(item.key)
+                } else {
                     failed++
-                    last = out.lineSequence().firstOrNull { it.isNotBlank() } ?: "exit $code"
+                    // 첫 줄은 "Exception occurred …" 라서 그다음 줄의 이유를 쓴다
+                    val reason = out.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() && !it.startsWith("Exception occurred") } ?: "exit $code"
+                    refused[item.key] = reason.substringAfter(": ").take(120)
                 }
             }
             main.post {
-                if (failed == 0) toast(if (cmds.size == 1) "Done" else "Done, ${cmds.size} changes")
-                else toast("$failed failed, $last")
+                val now = try {
+                    items(target).associateBy { it.key }
+                } catch (_: Throwable) {
+                    emptyMap()
+                }
+                var lost = 0
+                for ((item, on) in ok) {
+                    val state = now[item.key]?.granted ?: continue
+                    if (state != on) {
+                        lost++
+                        notKept += item.key
+                    } else notKept -= item.key
+                }
+                val parts = mutableListOf<String>()
+                val done = ok.size - lost
+                if (done > 0) parts += if (changes.size == 1) "Done" else "Done, $done changes"
+                if (failed > 0) parts += "$failed refused"
+                if (lost > 0) parts += "$lost not kept by Android"
+                toast(parts.joinToString(", ").ifBlank { "Nothing changed" })
                 refresh()
             }
         }
@@ -360,6 +397,18 @@ class MainActivity : Activity() {
         } catch (_: Throwable) {
             AppOpsManager.MODE_DEFAULT
         }
+    }
+
+    /** 방해 금지 접근을 받은 앱인지. 안드로이드 버전마다 저장하는 곳이 달라서 둘 다 본다 */
+    private fun dndAllowed(pkg: String): Boolean {
+        val secure = shell("settings get secure enabled_notification_policy_access_packages").second
+        if (secure.split(':').any { it.trim() == pkg }) return true
+        // 새 버전: dumpsys notification 의 "Allowed condition providers" 아래에 나온다
+        val dump = shell("dumpsys notification").second.lines()
+        val start = dump.indexOfFirst { it.contains("Allowed condition providers", ignoreCase = true) }
+        if (start < 0) return false
+        val tokens = Regex("[^A-Za-z0-9_.]+")
+        return dump.drop(start + 1).take(12).any { line -> tokens.split(line).any { it == pkg } }
     }
 
     private fun items(pkg: String): List<Item> {
@@ -460,7 +509,7 @@ class MainActivity : Activity() {
         // 방해 금지 접근: 앱이 요청만 하면 셸로 줄 수 있다
         // 다른 앱의 방해 금지 접근 상태는 앱이 읽을 수 없어서 셸로 읽는다
         val dndOn = shizukuState() == Ready.READY && try {
-            shell("settings get secure enabled_notification_policy_access_packages").second.split(':').any { it.trim() == pkg }
+            dndAllowed(pkg)
         } catch (_: Throwable) {
             false
         }

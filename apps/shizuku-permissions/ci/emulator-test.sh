@@ -37,6 +37,32 @@ PY
     log "tap '$1' at $xy"
     adb shell input tap $xy
 }
+# 목록을 내리며 글자를 찾는다
+find_text() {
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
+        adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
+        grep -q "$1" /tmp/ui.xml && return 0
+        adb shell input swipe $X $Y1 $X $Y2 300
+        sleep 1
+    done
+    return 1
+}
+# 맨 위로 올린 뒤 찾는다
+find_text_top() {
+    for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe $X $Y2 $X $Y1 200; done
+    find_text "$1"
+}
+# 글자 다음에 오는 스위치가 켜져 있는지 (/tmp/ui.xml)
+switch_on() {
+    python3 - "$1" <<'PY'
+import re, sys
+s = open('/tmp/ui.xml', encoding='utf-8').read()
+i = s.find(sys.argv[1])
+m = re.search(r'<node [^>]*class="android.widget.Switch"[^>]*>', s[i:]) if i >= 0 else None
+raise SystemExit(0 if m and 'checked="true"' in m.group(0) else 1)
+PY
+}
 granted() { adb shell dumpsys package com.discord | grep -E "$1: granted=true" > /dev/null; }
 
 adb logcat -c
@@ -102,25 +128,18 @@ check "read logs (development) granted" "granted android.permission.READ_LOGS"
 check "overlay appop allowed" "adb shell appops get com.discord SYSTEM_ALERT_WINDOW | grep -q allow"
 check "battery whitelist" "adb shell dumpsys deviceidle whitelist | grep -q com.discord"
 check "background allowed" "adb shell appops get com.discord RUN_ANY_IN_BACKGROUND | grep -q allow"
-check "DND access" "adb shell settings get secure enabled_notification_policy_access_packages | grep -q com.discord"
+adb shell dumpsys notification | grep -n -i -B2 -A2 "discord" > "$OUT/dnd-dump.txt" 2>&1
+check "DND access" "adb shell dumpsys notification | grep -A12 -i 'Allowed condition providers' | grep -q com.discord"
+check "DND shown as on" "find_text_top 'Do Not Disturb access' && switch_on 'Do Not Disturb access'"
 adb shell dumpsys package com.discord | sed -n '/requested permissions/,/User 0/p' > "$OUT/dumpsys-perms.txt" 2>&1
 adb shell appops get com.discord > "$OUT/appops.txt" 2>&1
 for op in MANAGE_EXTERNAL_STORAGE WRITE_SETTINGS SCHEDULE_EXACT_ALARM REQUEST_INSTALL_PACKAGES; do echo "$op: $(adb shell appops get com.discord $op | tr -d '\r')" >> "$OUT/appops-special.txt"; done
 adb shell settings get secure enabled_notification_policy_access_packages >> "$OUT/appops-special.txt"
 adb logcat -d -s ShizukuPerms > "$OUT/commands.txt"
 
-# 목록을 내리며 글자를 찾는다
-find_text() {
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
-        adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
-        grep -q "$1" /tmp/ui.xml && return 0
-        adb shell input swipe $X $Y1 $X $Y2 300
-        sleep 1
-    done
-    return 1
-}
 log "all groups are shown"
+check "not kept items are explained" "find_text \"didn't keep this\""
+for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe $X $Y2 $X $Y1 200; done
 check "unknown permission is listed" "find_text 'UNKNOWN_PERMISSION'"
 check "signature permission is listed" "find_text 'INSTALL_PACKAGES'"
 check "unavailable items are listed" "find_text 'Not available for Discord'"
@@ -146,6 +165,7 @@ shot 07-camera-off
 check "camera revoked" "! granted android.permission.CAMERA"
 
 log "back to Discord"
+for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe $X $Y2 $X $Y1 200; done
 tap '(?i)^back$'
 sleep 2
 adb shell dumpsys activity activities | grep -E "topResumedActivity|ResumedActivity" >> "$OUT/steps.txt"
