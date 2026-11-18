@@ -87,4 +87,5 @@ jobs:
           git add -A && git commit -qm "Shizuku Permissions test from $GITHUB_REF_NAME $SHA"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" helper-test
       - name: Fail if a check failed
-        run: grep -q '^fails: 0$' test-out/result.txt
+        run: |
+          grep -q '^fails: 0$' test-out/result.txt
