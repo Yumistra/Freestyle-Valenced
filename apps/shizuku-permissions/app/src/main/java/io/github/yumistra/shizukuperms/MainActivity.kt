@@ -81,8 +81,10 @@ class MainActivity : Activity() {
 
     // ── 대상 앱 ───────────────────────────────────────────────────────────
     /** 이 화면을 연 앱. 디스코드(패키지 이름을 바꾼 것 포함)가 아니면 빈 값 */
-    @Suppress("UNUSED_PARAMETER")
     private fun pickTarget(i: Intent?): String {
+        // 여는 쪽이 인텐트에 넣은 referrer 는 지운다. 그래야 getReferrer 가 시스템이 정한 진짜 여는 앱을 준다
+        i?.removeExtra(Intent.EXTRA_REFERRER)
+        i?.removeExtra(Intent.EXTRA_REFERRER_NAME)
         val ref = try {
             referrer
         } catch (_: Throwable) {
@@ -201,6 +203,9 @@ class MainActivity : Activity() {
             else -> refresh()
         }
     }
+
+    /** 셸 인자 하나로 감싼다 */
+    private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     /** Shizuku 로 셸 명령을 실행한다. (종료 코드, 출력) */
     private fun shell(cmd: String): Pair<Int, String> {
@@ -361,6 +366,7 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION") pm.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS)
         }
         val uid = info.applicationInfo?.uid ?: 0
+        val qp = q(pkg)
         val out = mutableListOf<Item>()
         val names = info.requestedPermissions ?: emptyArray()
         val flags = info.requestedPermissionsFlags ?: IntArray(0)
@@ -373,7 +379,7 @@ class MainActivity : Activity() {
             }
             if (pi == null) {
                 // 이 기기에 없는 권한 (다른 앱이 만들었거나 더 새 안드로이드 것). 줘 보기는 할 수 있다
-                out += Item(short(name), name, Kind.UNKNOWN, granted, "pm grant $pkg $name", "pm revoke $pkg $name", "May fail, Android doesn't know this permission")
+                out += Item(short(name), name, Kind.UNKNOWN, granted, "pm grant $qp ${q(name)}", "pm revoke $qp ${q(name)}", "May fail, Android doesn't know this permission")
                 continue
             }
             @Suppress("DEPRECATION") val level = pi.protectionLevel
@@ -383,14 +389,14 @@ class MainActivity : Activity() {
             val op = AppOpsManager.permissionToOp(name)
             when {
                 base == PermissionInfo.PROTECTION_DANGEROUS ->
-                    out += Item(short(name), name, Kind.RUNTIME, granted, "pm grant $pkg $name", "pm revoke $pkg $name")
+                    out += Item(short(name), name, Kind.RUNTIME, granted, "pm grant $qp ${q(name)}", "pm revoke $qp ${q(name)}")
                 appop && op != null -> {
                     val mode = opMode(op, uid, pkg)
                     val on = mode == AppOpsManager.MODE_ALLOWED || (mode == AppOpsManager.MODE_DEFAULT && granted)
-                    out += Item(short(name), name, Kind.APPOP, on, "appops set $pkg ${opName(op)} allow", "appops set $pkg ${opName(op)} default")
+                    out += Item(short(name), name, Kind.APPOP, on, "appops set $qp ${opName(op)} allow", "appops set $qp ${opName(op)} default")
                 }
                 development ->
-                    out += Item(short(name), name, Kind.DEVELOPMENT, granted, "pm grant $pkg $name", "pm revoke $pkg $name")
+                    out += Item(short(name), name, Kind.DEVELOPMENT, granted, "pm grant $qp ${q(name)}", "pm revoke $qp ${q(name)}")
                 base == PermissionInfo.PROTECTION_NORMAL ->
                     out += Item(short(name), name, Kind.AUTO, granted, null, null)
                 else ->
@@ -404,8 +410,8 @@ class MainActivity : Activity() {
             "deviceidle whitelist",
             Kind.SPECIAL,
             power.isIgnoringBatteryOptimizations(pkg),
-            "dumpsys deviceidle whitelist +$pkg",
-            "dumpsys deviceidle whitelist -$pkg",
+            "dumpsys deviceidle whitelist +$qp",
+            "dumpsys deviceidle whitelist -$qp",
         )
         val bg = opMode("android:run_any_in_background", uid, pkg)
         out += Item(
@@ -413,8 +419,8 @@ class MainActivity : Activity() {
             "RUN_ANY_IN_BACKGROUND",
             Kind.SPECIAL,
             bg == AppOpsManager.MODE_ALLOWED || bg == AppOpsManager.MODE_DEFAULT,
-            "appops set $pkg RUN_ANY_IN_BACKGROUND allow",
-            "appops set $pkg RUN_ANY_IN_BACKGROUND ignore",
+            "appops set $qp RUN_ANY_IN_BACKGROUND allow",
+            "appops set $qp RUN_ANY_IN_BACKGROUND ignore",
         )
         // 설정의 "특별한 앱 접근" 항목들. 디스코드가 요청한 권한으로 이미 나온 건 빼고
         val declaredOps = names.mapNotNull { n -> AppOpsManager.permissionToOp(n) }.toSet()
@@ -433,7 +439,7 @@ class MainActivity : Activity() {
         for ((title, op, api) in ops) {
             if (Build.VERSION.SDK_INT < api || op in declaredOps) continue
             val mode = opMode(op, uid, pkg)
-            out += Item(title, opName(op), Kind.SPECIAL, mode == AppOpsManager.MODE_ALLOWED, "appops set $pkg ${opName(op)} allow", "appops set $pkg ${opName(op)} default")
+            out += Item(title, opName(op), Kind.SPECIAL, mode == AppOpsManager.MODE_ALLOWED, "appops set $qp ${opName(op)} allow", "appops set $qp ${opName(op)} default")
         }
         if (Build.VERSION.SDK_INT >= 30) {
             // 안 쓰는 앱이면 권한을 자동으로 거두는 것
@@ -443,18 +449,18 @@ class MainActivity : Activity() {
                 "AUTO_REVOKE_PERMISSIONS_IF_UNUSED",
                 Kind.SPECIAL,
                 mode == AppOpsManager.MODE_IGNORED,
-                "appops set $pkg AUTO_REVOKE_PERMISSIONS_IF_UNUSED ignore",
-                "appops set $pkg AUTO_REVOKE_PERMISSIONS_IF_UNUSED default",
+                "appops set $qp AUTO_REVOKE_PERMISSIONS_IF_UNUSED ignore",
+                "appops set $qp AUTO_REVOKE_PERMISSIONS_IF_UNUSED default",
             )
         }
         // 방해 금지 접근: 앱이 요청만 하면 셸로 줄 수 있다
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        val dndOn = try {
-            nm.javaClass.getMethod("isNotificationPolicyAccessGrantedForPackage", String::class.java).invoke(nm, pkg) as Boolean
+        // 다른 앱의 방해 금지 접근 상태는 앱이 읽을 수 없어서 셸로 읽는다
+        val dndOn = shizukuState() == Ready.READY && try {
+            shell("settings get secure enabled_notification_policy_access_packages").second.split(':').any { it.trim() == pkg }
         } catch (_: Throwable) {
             false
         }
-        out += Item("Do Not Disturb access", "notification policy", Kind.SPECIAL, dndOn, "cmd notification allow_dnd $pkg", "cmd notification disallow_dnd $pkg")
+        out += Item("Do Not Disturb access", "notification policy", Kind.SPECIAL, dndOn, "cmd notification allow_dnd $qp", "cmd notification disallow_dnd $qp")
         // 앱 안에 그 기능용 부분(서비스, 수신기)이 있어야 켤 수 있는 것. 디스코드에는 없다
         val needs = "Discord has no part for this, so it can't be turned on"
         for (t in listOf("Accessibility", "Notification access", "Device admin", "Default apps")) {

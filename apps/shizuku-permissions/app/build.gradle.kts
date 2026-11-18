@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.yumistra.shizukuperms"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
     }
 
     // 업데이트가 덮어써지게 늘 같은 키로 서명한다
