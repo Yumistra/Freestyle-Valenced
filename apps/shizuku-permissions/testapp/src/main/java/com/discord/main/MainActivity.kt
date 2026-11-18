@@ -9,12 +9,10 @@ import android.os.Bundle
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (opened) return
-        opened = true
+        // 권한을 거두면 안드로이드가 앱을 껐다 켜서, 기억은 파일에 둔다
+        val prefs = getSharedPreferences("test", MODE_PRIVATE)
+        if (prefs.getBoolean("opened", false)) return
+        prefs.edit().putBoolean("opened", true).commit()
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("freestyleperms://open")))
-    }
-
-    companion object {
-        private var opened = false
     }
 }
