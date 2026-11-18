@@ -41,6 +41,52 @@ function rebuild() {
 }
 
 
+// ── 이름 (채널 기록) ─────────────────────────────────────────────────────
+/**
+ * 채팅 채널 줄은 computeChannelName 의 다른 사본을 불러서 위의 패치가 안 닿는다.
+ * computeChannelName 은 channel.name 을 읽고 channel.isObfuscated() 가 참이면 "액세스 권한 없음" 을 준다.
+ * 그래서 숨겨진 채널 기록의 name 을 바꾸고, computeChannelName 안에서 부른 isObfuscated 만 거짓으로 답한다.
+ */
+const REDACTED = '___hidden___'
+const renamed = new Map<string, any>()
+function rename(rec: any) {
+    if (!rec || rec.type === 4) return
+    if (rec.name !== REDACTED && renamed.get(rec.id) !== rec) return
+    try {
+        rec.name = settings().name || DEFAULTS.name
+        renamed.set(rec.id, rec)
+    } catch (e) {
+        err('rename', e)
+    }
+}
+function restoreNames() {
+    for (const rec of renamed.values()) {
+        try {
+            rec.name = REDACTED
+        } catch {}
+    }
+    renamed.clear()
+}
+const recordProtos = new Set<any>()
+function patchRecord(rec: any, cleanup: (...f: any[]) => void) {
+    let p = rec && Object.getPrototypeOf(rec)
+    while (p && !Object.prototype.hasOwnProperty.call(p, 'isObfuscated')) p = Object.getPrototypeOf(p)
+    if (!p || recordProtos.has(p)) return
+    recordProtos.add(p)
+    status['record classes'] = recordProtos.size
+    cleanup(
+        instead(p, 'isObfuscated', function (this: any, args: any[], orig: any) {
+            const out = orig.apply(this, args)
+            if (!out || this?.type === 4 || renamed.get(this?.id) !== this) return out
+            try {
+                // computeChannelName 이 부른 것만
+                if (/computeChannelName/.test(String(new Error().stack))) return false
+            } catch {}
+            return out
+        }),
+    )
+}
+
 let seq = 0
 function toast(text: string) {
     try {
@@ -107,6 +153,8 @@ export default plugin({
                             if (!isHidden(rec)) return orig.apply(this, args)
                             hiddenIds.add(rec.id)
                             count('hidden computeState')
+                            patchRecord(rec, cleanup)
+                            rename(rec)
                             // 온보딩을 쓰는 서버는 고른 채널만 보여 주는데, 숨겨진 채널은 고를 수가 없다
                             const opted = this?.category?.guild?.optInEnabled ? this.category.guild.optedInChannels : undefined
                             let added = false
@@ -303,6 +351,28 @@ export default plugin({
             }, { max: 10 } as any) as any,
         )
 
+        // 숨겨진 음성 채널의 "참가하기" 는 디스코드가 권한 없음 창을 띄운다. 대신 토스트로 알린다
+        cleanup(
+            getModules(withProps('openAlert', 'dismissAlert') as any, (mod: any) => {
+                if (typeof mod?.openAlert !== 'function') return
+                cleanup(
+                    instead(mod, 'openAlert', function (this: any, args: any[], orig: any) {
+                        const el = args[1]
+                        const name = el?.type?.name ?? el?.type?.displayName ?? ''
+                        if (String(args[0]).includes('NoJoinPermissions') || name === 'VoicePanelNoJoinPermissionsAlert') {
+                            count('join alert')
+                            const ch = channelOf(S().SelectedChannelStore?.getChannelId?.()) ?? channelOf(S().SelectedChannelStore?.getVoiceChannelId?.())
+                            if (!ch || isHidden(ch)) {
+                                toast("You can't join a hidden channel")
+                                return
+                            }
+                        }
+                        return orig.apply(this, args)
+                    }),
+                )
+            }) as any,
+        )
+
         // #채널 자동완성에 숨겨진 채널도 나오게
         cleanup(
             getModules(withProps('queryChannels') as any, (mod: any) => {
@@ -320,11 +390,23 @@ export default plugin({
             }) as any,
         )
 
-        cleanup(onChange(rebuild))
+        cleanup(
+            onChange(() => {
+                const name = settings().name || DEFAULTS.name
+                for (const rec of renamed.values()) {
+                    try {
+                        rec.name = name
+                    } catch {}
+                }
+                rebuild()
+            }),
+        )
         cleanup(() => {
             channelProto = undefined
             routers = []
             hiddenIds.clear()
+            restoreNames()
+            recordProtos.clear()
             // 패치가 풀린 뒤에 다시 만들어지게
             setTimeout(rebuild, 0)
         })
