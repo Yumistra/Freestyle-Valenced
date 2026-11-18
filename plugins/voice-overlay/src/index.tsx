@@ -41,10 +41,12 @@ interface Settings {
     hideDiscordOverlay: boolean
     /** 친구 별명이 있으면 그걸로 */
     friendNicknames: boolean
+    /** 이름 자리: 아바타 오른쪽, 왼쪽, 숨기기 */
+    names: 'right' | 'left' | 'hidden'
     x?: number
     y?: number
 }
-const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true, pttButton: true }
+const DEFAULTS: Settings = { enabled: true, onlySpeaking: false, hideInDiscord: true, scale: 1, opacity: 1, idleAlpha: 0.45, locked: false, passThrough: false, longPress: 'menu', chatButton: 'long', hideDiscordOverlay: false, friendNicknames: true, pttButton: true, names: 'right' }
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
 const native = (name: string, args: any[] = []) => Promise.resolve((callNativeMethod as any)(`${NATIVE}.${name}`, args))
@@ -532,6 +534,12 @@ function SettingsPage() {
                 <PercentInput label="Opacity" value={s.opacity} min={20} max={100} onSave={v => save({ opacity: v })} />
                 <PercentInput label="People not talking" value={s.idleAlpha} min={10} max={100} onSave={v => save({ idleAlpha: v })} />
             </Card>
+
+            {choose('Names', s.names, [
+                ['right', 'Right of the avatar'],
+                ['left', 'Left of the avatar'],
+                ['hidden', 'Hidden'],
+            ], v => save({ names: v }))}
 
             {heading('More')}
             <View style={{ gap: 10 }}>
