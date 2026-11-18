@@ -171,17 +171,27 @@ export default plugin({
 
         // ── 이름 ──
         cleanup(
-            getModules(withProps('computeChannelName') as any, (mod: any) => {
-                if (typeof mod?.computeChannelName !== 'function') return
-                cleanup(
-                    instead(mod, 'computeChannelName', function (this: any, args: any[], orig: any) {
-                        const ch = args[0]
-                        // 카테고리는 디스코드의 "액세스 권한 없음" 그대로 (원본과 같다)
-                        if (ch?.type !== 4 && isHidden(ch)) return settings().name || DEFAULTS.name
-                        return orig.apply(this, args)
-                    }),
-                )
-            }) as any,
+            getModules(
+                withProps('computeChannelName') as any,
+                (mod: any) => {
+                    // useChannelName 은 같은 모듈 안에서 computeChannelName 을 바로 불러서 따로 바꾼다 (채팅 채널 줄이 이걸 쓴다)
+                    for (const key of ['computeChannelName', 'useChannelName']) {
+                        if (typeof mod?.[key] !== 'function') continue
+                        status[key] = true
+                        cleanup(
+                            instead(mod, key, function (this: any, args: any[], orig: any) {
+                                // 훅이라 원래 것은 항상 부른다
+                                const out = orig.apply(this, args)
+                                const ch = args[0]
+                                // 카테고리는 디스코드의 "액세스 권한 없음" 그대로 (원본과 같다)
+                                if (ch?.type !== 4 && isHidden(ch)) return settings().name || DEFAULTS.name
+                                return out
+                            }),
+                        )
+                    }
+                },
+                { max: 5 } as any,
+            ) as any,
         )
 
         // ── 줄 모양: 흐리게 + 눈 아이콘, 안 읽음 숨기기 ──
@@ -236,6 +246,7 @@ export default plugin({
                             // 훅이라 원래 것은 항상 부른다
                             const gate = orig.apply(this, args)
                             const channel = args[1]
+                            if (isHidden(channel, true)) count('lock screen')
                             if (isHidden(channel, true)) return { kind: GATE, guildId: args[0], channelId: channel.id }
                             return gate
                         }),
@@ -262,7 +273,7 @@ export default plugin({
                         return orig.apply(this, args)
                     }),
                 )
-            }) as any,
+            }, { max: 10 } as any) as any,
         )
 
         // 숨겨진 음성, 스테이지 채널은 들어가지 않고 잠금 화면을 연다
@@ -281,6 +292,7 @@ export default plugin({
                 cleanup(
                     instead(mod, 'selectVoiceChannel', function (this: any, args: any[], orig: any) {
                         const ch = channelOf(args[0])
+                        count('selectVoiceChannel calls')
                         if (isHidden(ch)) {
                             if (!openChannel(ch)) toast("You can't join a hidden channel")
                             return
@@ -288,7 +300,7 @@ export default plugin({
                         return orig.apply(this, args)
                     }),
                 )
-            }) as any,
+            }, { max: 10 } as any) as any,
         )
 
         // #채널 자동완성에 숨겨진 채널도 나오게
