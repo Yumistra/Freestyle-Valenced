@@ -3,6 +3,7 @@ import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { useContext, useEffect } from 'react'
 import LockScreen from './LockScreen'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, onChange, settings } from './store'
@@ -86,6 +87,25 @@ function patchRecord(rec: any, cleanup: (...f: any[]) => void) {
     )
 }
 
+
+// ── 음성 채널 화면 ──────────────────────────────────────────────────────
+/** 지금 열린 음성 채널 화면의 채널 (VoicePanelStateContext 에서 읽는다) */
+let panelChannelId: string | undefined
+let panelContext: any
+/** 음성 채널 화면의 채팅 탭을 연다. 숨겨진 채널이면 거기에 잠금 화면이 나온다 */
+function openLockTab() {
+    try {
+        const cd = find('ComponentDispatch')?.ComponentDispatch
+        if (cd?.dispatch) {
+            cd.dispatch('VOICE_PANEL_OPEN_CHAT_TAB')
+            count('open lock tab')
+            return true
+        }
+    } catch (e) {
+        err('open lock tab', e)
+    }
+    return false
+}
 
 /** 숨겨진 채널 화면으로 간다 (음성 채널을 눌렀을 때) */
 let routers: any[] = []
@@ -340,7 +360,7 @@ export default plugin({
                         const ch = channelOf(args[0])
                         count('selectVoiceChannel calls')
                         if (isHidden(ch)) {
-                            openChannel(ch)
+                            if (!openLockTab()) openChannel(ch)
                             return
                         }
                         return orig.apply(this, args)
@@ -359,11 +379,67 @@ export default plugin({
                         const name = el?.type?.name ?? el?.type?.displayName ?? ''
                         if (String(args[0]).includes('NoJoinPermissions') || name === 'VoicePanelNoJoinPermissionsAlert') {
                             count('join alert')
-                            const ch = channelOf(S().SelectedChannelStore?.getChannelId?.()) ?? channelOf(S().SelectedChannelStore?.getVoiceChannelId?.())
-                            // 원본처럼 아무것도 띄우지 않는다
-                            if (!ch || isHidden(ch)) return
+                            const ch = channelOf(panelChannelId) ?? channelOf(S().SelectedChannelStore?.getChannelId?.())
+                            // 권한 없음 창 대신 잠금 화면
+                            if (!ch || isHidden(ch)) {
+                                openLockTab()
+                                return
+                            }
                         }
                         return orig.apply(this, args)
+                    }),
+                )
+            }) as any,
+        )
+
+        // 숨겨진 음성 채널 화면이 열리면 바로 채팅 탭(잠금 화면)을 연다
+        cleanup(
+            getModuleWithImportedPath('modules/voice_panel/native/VoicePanelStateContext.tsx', (mod: any) => {
+                panelContext = mod?.default
+                status['voice panel context'] = !!panelContext
+            }) as any,
+        )
+        cleanup(
+            getModuleWithImportedPath('modules/voice_panel/native/header/VoicePanelHeader.tsx', (mod: any) => {
+                const memo = mod?.default
+                const spot: [any, string] | null = typeof memo === 'function' ? [mod, 'default'] : typeof memo?.type === 'function' ? [memo, 'type'] : null
+                status['voice panel header'] = !!spot
+                if (!spot) return
+                cleanup(
+                    instead(spot[0], spot[1], function (this: any, args: any[], orig: any) {
+                        // 훅은 항상 같은 순서로 부른다
+                        const ctx: any = panelContext ? useContext(panelContext) : undefined
+                        const id = typeof ctx?.channelId === 'string' ? ctx.channelId : undefined
+                        if (id) panelChannelId = id
+                        useEffect(() => {
+                            if (!id || !isHidden(channelOf(id))) return
+                            const t = setTimeout(openLockTab, 300)
+                            return () => clearTimeout(t)
+                        }, [id])
+                        return orig.apply(this, args)
+                    }),
+                )
+            }) as any,
+        )
+        // 참가하기를 눌러 뜨는 권한 없음 창: 숨겨진 채널이면 닫고 잠금 화면을 연다
+        cleanup(
+            getModuleWithImportedPath('modules/voice_panel/native/alerts/VoicePanelNoJoinPermissionsAlert.tsx', (mod: any) => {
+                if (typeof mod?.default !== 'function') return
+                status['join alert patch'] = true
+                const dm = find('useDismissModalCallback')
+                cleanup(
+                    instead(mod, 'default', function (this: any, args: any[], orig: any) {
+                        const dismiss = typeof dm?.useDismissModalCallback === 'function' ? dm.useDismissModalCallback() : undefined
+                        const hidden = isHidden(channelOf(panelChannelId))
+                        useEffect(() => {
+                            if (!hidden) return
+                            count('join alert')
+                            try {
+                                dismiss?.()
+                            } catch {}
+                            openLockTab()
+                        }, [hidden])
+                        return hidden ? null : orig.apply(this, args)
                     }),
                 )
             }) as any,
