@@ -137,6 +137,7 @@ class MainActivity : Activity() {
 
         shizukuButton = Button(this)
         shizukuButton.text = "Allow Shizuku"
+        shizukuButton.isAllCaps = false
         shizukuButton.setOnClickListener { requestShizuku() }
         root.addView(shizukuButton, margins(top = 8f))
 
@@ -148,6 +149,7 @@ class MainActivity : Activity() {
         val back = Button(this)
         back.text = "Back"
         back.setOnClickListener { goBack() }
+        for (b in listOf(all, back)) b.isAllCaps = false
         for (b in listOf(all, back)) buttons.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons, matchWidth(top = 6f))
 
@@ -239,8 +241,8 @@ class MainActivity : Activity() {
             Ready.NOT_RUNNING -> "Shizuku isn't running"
             Ready.NO_PERMISSION -> "Shizuku is running, allow this app to use it"
             Ready.OLD -> "Shizuku is too old, update it"
-            Ready.READY -> if (target.isBlank()) "Shizuku ready" else "Shizuku ready, $target"
-        }
+            Ready.READY -> "Shizuku ready"
+        } + if (target.isBlank()) "" else "\n$target"
         shizukuButton.visibility = if (state == Ready.READY) View.GONE else View.VISIBLE
         shizukuButton.text = if (state == Ready.NOT_RUNNING) "Open Shizuku" else "Allow Shizuku"
         list.removeAllViews()

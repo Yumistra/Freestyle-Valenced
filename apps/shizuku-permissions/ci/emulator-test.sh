@@ -77,20 +77,19 @@ log "open from fake Discord"
 adb shell am start -W -n com.discord/com.discord.main.MainActivity > /dev/null
 sleep 4
 shot 03-from-discord
-check "shows Discord's list" "grep -q 'com.discord' '$OUT/03-from-discord.xml' && grep -q 'Camera' '$OUT/03-from-discord.xml'"
-check "unknown permission is listed" "grep -q 'UNKNOWN_PERMISSION' '$OUT/03-from-discord.xml' || true"
+check "shows Discord's list" "grep -q 'com.discord' '$OUT/03-from-discord.xml' && grep -q 'Special access' '$OUT/03-from-discord.xml'"
 
 log "allow Shizuku"
-tap '^Allow Shizuku$'
+tap '(?i)^allow shizuku$'
 sleep 3
 shot 04-shizuku-dialog
-tap '(?i)allow all the time|^allow$|always allow' || tap '(?i)allow'
+tap '(?i)^(allow all the time|allow|always allow|grant)$'
 sleep 4
 shot 05-ready
 check "Shizuku ready" "grep -q 'Shizuku ready' '$OUT/05-ready.xml'"
 
 log "grant all"
-tap '^Grant all$'
+tap '(?i)^grant all$'
 sleep 10
 shot 06-granted
 check "camera granted" "granted android.permission.CAMERA"
@@ -103,7 +102,25 @@ check "DND access" "adb shell settings get secure enabled_notification_policy_ac
 adb shell dumpsys package com.discord | sed -n '/requested permissions/,/User 0/p' > "$OUT/dumpsys-perms.txt" 2>&1
 adb shell appops get com.discord > "$OUT/appops.txt" 2>&1
 
+# 목록을 내리며 글자를 찾는다
+find_text() {
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
+        adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
+        grep -q "$1" /tmp/ui.xml && return 0
+        adb shell input swipe 540 1600 540 700 300
+        sleep 1
+    done
+    return 1
+}
+log "all groups are shown"
+check "unknown permission is listed" "find_text 'UNKNOWN_PERMISSION'"
+check "signature permission is listed" "find_text 'INSTALL_PACKAGES'"
+check "unavailable items are listed" "find_text 'Not available for Discord'"
+for i in 1 2 3 4 5 6 7 8 9 10; do adb shell input swipe 540 700 540 1600 200; done
+
 log "turn camera off with its switch"
+find_text 'text="Camera"'
 # 카메라 줄의 스위치: 화면 구조에서 Camera 다음의 스위치
 adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
 adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
@@ -122,7 +139,7 @@ shot 07-camera-off
 check "camera revoked" "! granted android.permission.CAMERA"
 
 log "back to Discord"
-tap '^Back$'
+tap '(?i)^back$'
 sleep 2
 check "back closes the helper" "! adb shell dumpsys activity activities | grep -q 'topResumedActivity.*shizukuperms'"
 
