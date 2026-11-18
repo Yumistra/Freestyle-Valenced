@@ -1,4 +1,3 @@
-import { ToastActionCreators } from '@valenced/discord/actions'
 import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -50,7 +49,7 @@ function rebuild() {
 const REDACTED = '___hidden___'
 const renamed = new Map<string, any>()
 function rename(rec: any) {
-    if (!rec || rec.type === 4) return
+    if (!rec) return
     if (rec.name !== REDACTED && renamed.get(rec.id) !== rec) return
     try {
         rec.name = settings().name || DEFAULTS.name
@@ -77,7 +76,7 @@ function patchRecord(rec: any, cleanup: (...f: any[]) => void) {
     cleanup(
         instead(p, 'isObfuscated', function (this: any, args: any[], orig: any) {
             const out = orig.apply(this, args)
-            if (!out || this?.type === 4 || renamed.get(this?.id) !== this) return out
+            if (!out || renamed.get(this?.id) !== this) return out
             try {
                 // computeChannelName 이 부른 것만
                 if (/computeChannelName/.test(String(new Error().stack))) return false
@@ -87,12 +86,6 @@ function patchRecord(rec: any, cleanup: (...f: any[]) => void) {
     )
 }
 
-let seq = 0
-function toast(text: string) {
-    try {
-        ToastActionCreators.open(`show-hidden-channels-${Date.now()}-${seq++}`, { text } as any)
-    } catch {}
-}
 
 /** 숨겨진 채널 화면으로 간다 (음성 채널을 눌렀을 때) */
 let routers: any[] = []
@@ -155,6 +148,12 @@ export default plugin({
                             count('hidden computeState')
                             patchRecord(rec, cleanup)
                             rename(rec)
+                            // 숨겨진 카테고리도
+                            const parent = channelOf(rec.parent_id)
+                            if (parent && isHidden(parent)) {
+                                patchRecord(parent, cleanup)
+                                rename(parent)
+                            }
                             // 온보딩을 쓰는 서버는 고른 채널만 보여 주는데, 숨겨진 채널은 고를 수가 없다
                             const opted = this?.category?.guild?.optInEnabled ? this.category.guild.optedInChannels : undefined
                             let added = false
@@ -231,8 +230,7 @@ export default plugin({
                                 // 훅이라 원래 것은 항상 부른다
                                 const out = orig.apply(this, args)
                                 const ch = args[0]
-                                // 카테고리는 디스코드의 "액세스 권한 없음" 그대로 (원본과 같다)
-                                if (ch?.type !== 4 && isHidden(ch)) return settings().name || DEFAULTS.name
+                                if (isHidden(ch)) return settings().name || DEFAULTS.name
                                 return out
                             }),
                         )
@@ -342,7 +340,7 @@ export default plugin({
                         const ch = channelOf(args[0])
                         count('selectVoiceChannel calls')
                         if (isHidden(ch)) {
-                            if (!openChannel(ch)) toast("You can't join a hidden channel")
+                            openChannel(ch)
                             return
                         }
                         return orig.apply(this, args)
@@ -351,7 +349,7 @@ export default plugin({
             }, { max: 10 } as any) as any,
         )
 
-        // 숨겨진 음성 채널의 "참가하기" 는 디스코드가 권한 없음 창을 띄운다. 대신 토스트로 알린다
+        // 숨겨진 음성 채널의 "참가하기" 는 디스코드가 권한 없음 창을 띄운다. 원본처럼 아무것도 띄우지 않는다
         cleanup(
             getModules(withProps('openAlert', 'dismissAlert') as any, (mod: any) => {
                 if (typeof mod?.openAlert !== 'function') return
@@ -362,10 +360,8 @@ export default plugin({
                         if (String(args[0]).includes('NoJoinPermissions') || name === 'VoicePanelNoJoinPermissionsAlert') {
                             count('join alert')
                             const ch = channelOf(S().SelectedChannelStore?.getChannelId?.()) ?? channelOf(S().SelectedChannelStore?.getVoiceChannelId?.())
-                            if (!ch || isHidden(ch)) {
-                                toast("You can't join a hidden channel")
-                                return
-                            }
+                            // 원본처럼 아무것도 띄우지 않는다
+                            if (!ch || isHidden(ch)) return
                         }
                         return orig.apply(this, args)
                     }),
