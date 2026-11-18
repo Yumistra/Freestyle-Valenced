@@ -214,7 +214,7 @@ class MainActivity : Activity() {
     }
 
     // ── 권한 목록 ─────────────────────────────────────────────────────────
-    private enum class Kind { RUNTIME, DEVELOPMENT, APPOP, SPECIAL, AUTO, NO }
+    private enum class Kind { RUNTIME, DEVELOPMENT, APPOP, SPECIAL, UNKNOWN, AUTO, NO, UNAVAILABLE }
 
     private class Item(
         val title: String,
@@ -223,6 +223,8 @@ class MainActivity : Activity() {
         val granted: Boolean,
         val grant: String?,
         val revoke: String?,
+        /** 이름 아래 덧붙이는 설명 (왜 못 바꾸는지 등) */
+        val note: String? = null,
     )
 
     private fun refresh() {
@@ -253,7 +255,9 @@ class MainActivity : Activity() {
             Kind.RUNTIME to "Runtime",
             Kind.DEVELOPMENT to "Development",
             Kind.AUTO to "Always granted",
+            Kind.UNKNOWN to "Unknown to this device",
             Kind.NO to "Can't be granted (signature or system)",
+            Kind.UNAVAILABLE to "Not available for Discord",
         )
         for ((kind, title) in groups) {
             val g = items.filter { it.kind == kind }
@@ -272,6 +276,7 @@ class MainActivity : Activity() {
         texts.orientation = LinearLayout.VERTICAL
         texts.addView(text(item.title, 15f))
         if (item.name != item.title) texts.addView(text(item.name, 12f, dim = true))
+        item.note?.let { texts.addView(text(it, 12f, dim = true)) }
         r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val sw = Switch(this)
         sw.isChecked = item.granted
@@ -366,7 +371,11 @@ class MainActivity : Activity() {
             } catch (_: Throwable) {
                 null
             }
-            if (pi == null) continue
+            if (pi == null) {
+                // 이 기기에 없는 권한 (다른 앱이 만들었거나 더 새 안드로이드 것). 줘 보기는 할 수 있다
+                out += Item(short(name), name, Kind.UNKNOWN, granted, "pm grant $pkg $name", "pm revoke $pkg $name", "May fail, Android doesn't know this permission")
+                continue
+            }
             @Suppress("DEPRECATION") val level = pi.protectionLevel
             val base = level and PermissionInfo.PROTECTION_MASK_BASE
             val development = level and PermissionInfo.PROTECTION_FLAG_DEVELOPMENT != 0
@@ -407,16 +416,49 @@ class MainActivity : Activity() {
             "appops set $pkg RUN_ANY_IN_BACKGROUND allow",
             "appops set $pkg RUN_ANY_IN_BACKGROUND ignore",
         )
-        if (names.none { it == "android.permission.SYSTEM_ALERT_WINDOW" }) {
-            val mode = opMode("android:system_alert_window", uid, pkg)
+        // 설정의 "특별한 앱 접근" 항목들. 디스코드가 요청한 권한으로 이미 나온 건 빼고
+        val declaredOps = names.mapNotNull { n -> AppOpsManager.permissionToOp(n) }.toSet()
+        val ops = mutableListOf(
+            Triple("Display over other apps", "android:system_alert_window", 1),
+            Triple("All files access", "android:manage_external_storage", 30),
+            Triple("Install unknown apps", "android:request_install_packages", 26),
+            Triple("Modify system settings", "android:write_settings", 23),
+            Triple("Usage access", "android:get_usage_stats", 21),
+            Triple("Picture in picture", "android:picture_in_picture", 26),
+            Triple("Alarms and reminders", "android:schedule_exact_alarm", 31),
+            Triple("Media management", "android:manage_media", 31),
+            Triple("Full screen notifications", "android:use_full_screen_intent", 34),
+            Triple("Turn screen on", "android:turn_screen_on", 34),
+        )
+        for ((title, op, api) in ops) {
+            if (Build.VERSION.SDK_INT < api || op in declaredOps) continue
+            val mode = opMode(op, uid, pkg)
+            out += Item(title, opName(op), Kind.SPECIAL, mode == AppOpsManager.MODE_ALLOWED, "appops set $pkg ${opName(op)} allow", "appops set $pkg ${opName(op)} default")
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            // 안 쓰는 앱이면 권한을 자동으로 거두는 것
+            val mode = opMode("android:auto_revoke_permissions_if_unused", uid, pkg)
             out += Item(
-                "Display over other apps",
-                "SYSTEM_ALERT_WINDOW",
+                "Keep permissions when unused",
+                "AUTO_REVOKE_PERMISSIONS_IF_UNUSED",
                 Kind.SPECIAL,
-                mode == AppOpsManager.MODE_ALLOWED,
-                "appops set $pkg SYSTEM_ALERT_WINDOW allow",
-                "appops set $pkg SYSTEM_ALERT_WINDOW default",
+                mode == AppOpsManager.MODE_IGNORED,
+                "appops set $pkg AUTO_REVOKE_PERMISSIONS_IF_UNUSED ignore",
+                "appops set $pkg AUTO_REVOKE_PERMISSIONS_IF_UNUSED default",
             )
+        }
+        // 방해 금지 접근: 앱이 요청만 하면 셸로 줄 수 있다
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val dndOn = try {
+            nm.javaClass.getMethod("isNotificationPolicyAccessGrantedForPackage", String::class.java).invoke(nm, pkg) as Boolean
+        } catch (_: Throwable) {
+            false
+        }
+        out += Item("Do Not Disturb access", "notification policy", Kind.SPECIAL, dndOn, "cmd notification allow_dnd $pkg", "cmd notification disallow_dnd $pkg")
+        // 앱 안에 그 기능용 부분(서비스, 수신기)이 있어야 켤 수 있는 것. 디스코드에는 없다
+        val needs = "Discord has no part for this, so it can't be turned on"
+        for (t in listOf("Accessibility", "Notification access", "Device admin", "Default apps")) {
+            out += Item(t, t, Kind.UNAVAILABLE, false, null, null, needs)
         }
         return out
     }
