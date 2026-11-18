@@ -392,7 +392,7 @@ export default plugin({
             }) as any,
         )
 
-        // 숨겨진 음성 채널 화면이 열리면 바로 채팅 탭(잠금 화면)을 연다
+        // 열린 음성 채널 화면의 채널을 기억한다 (참가하기를 눌렀을 때 쓴다)
         cleanup(
             getModuleWithImportedPath('modules/voice_panel/native/VoicePanelStateContext.tsx', (mod: any) => {
                 panelContext = mod?.default
@@ -411,11 +411,6 @@ export default plugin({
                         const ctx: any = panelContext ? useContext(panelContext) : undefined
                         const id = typeof ctx?.channelId === 'string' ? ctx.channelId : undefined
                         if (id) panelChannelId = id
-                        useEffect(() => {
-                            if (!id || !isHidden(channelOf(id))) return
-                            const t = setTimeout(openLockTab, 300)
-                            return () => clearTimeout(t)
-                        }, [id])
                         return orig.apply(this, args)
                     }),
                 )
