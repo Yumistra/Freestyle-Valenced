@@ -1,0 +1,430 @@
+package io.github.yumistra.shizukuperms
+
+import android.app.Activity
+import android.app.AppOpsManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.content.pm.PermissionInfo
+import android.graphics.Typeface
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.text.InputType
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Switch
+import android.widget.TextView
+import android.widget.Toast
+import rikka.shizuku.Shizuku
+import java.util.concurrent.Executors
+
+/**
+ * Shizuku Permissions: Shizuku(셸 권한)로 다른 앱(디스코드)에 권한을 준다.
+ *
+ * Valenced 플러그인이 freestyleperms://open 으로 연다. 연 앱(referrer) 이 대상이 된다.
+ * - 런타임 권한, 개발용 권한: pm grant / pm revoke
+ * - 앱 작업(appop) 권한 (다른 앱 위에 표시, 모든 파일 접근 등): appops set
+ * - 배터리 최적화 제외, 백그라운드 제한 없음
+ * 서명, 시스템 권한은 Shizuku 로도 줄 수 없어서 끌 수 없게 보여 준다.
+ */
+class MainActivity : Activity() {
+
+    private val io = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+
+    private lateinit var list: LinearLayout
+    private lateinit var statusView: TextView
+    private lateinit var shizukuButton: Button
+    private lateinit var packageInput: EditText
+
+    private var target: String = ""
+
+    private val permissionListener = Shizuku.OnRequestPermissionResultListener { _, _ -> main.post { refresh() } }
+    private val binderListener = Shizuku.OnBinderReceivedListener { main.post { refresh() } }
+    private val deadListener = Shizuku.OnBinderDeadListener { main.post { refresh() } }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        target = pickTarget(intent)
+        buildUi()
+        Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderReceivedListenerSticky(binderListener)
+        Shizuku.addBinderDeadListener(deadListener)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val t = pickTarget(intent)
+        if (t.isNotBlank()) {
+            target = t
+            packageInput.setText(t)
+        }
+        refresh()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refresh()
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(permissionListener)
+        Shizuku.removeBinderReceivedListener(binderListener)
+        Shizuku.removeBinderDeadListener(deadListener)
+        io.shutdown()
+        super.onDestroy()
+    }
+
+    // ── 대상 앱 ───────────────────────────────────────────────────────────
+    /** ?package= 가 있으면 그것, 없으면 이 화면을 연 앱 */
+    private fun pickTarget(i: Intent?): String {
+        i?.data?.getQueryParameter("package")?.takeIf { it.isNotBlank() }?.let { return it }
+        val ref = try {
+            referrer
+        } catch (_: Throwable) {
+            null
+        }
+        if (ref?.scheme == "android-app") ref.host?.takeIf { it.isNotBlank() && it != packageName }?.let { return it }
+        return if (::packageInput.isInitialized) packageInput.text.toString().trim() else ""
+    }
+
+    // ── 화면 ──────────────────────────────────────────────────────────────
+    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
+
+    private fun text(s: String, size: Float, bold: Boolean = false, dim: Boolean = false): TextView {
+        val t = TextView(this)
+        t.text = s
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
+        if (bold) t.typeface = Typeface.DEFAULT_BOLD
+        if (dim) t.alpha = 0.7f
+        return t
+    }
+
+    private fun buildUi() {
+        val scroll = ScrollView(this)
+        scroll.isFillViewport = true
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(dp(20f), dp(28f), dp(20f), dp(28f))
+        scroll.addView(root)
+
+        root.addView(text("Shizuku Permissions", 24f, bold = true))
+
+        statusView = text("", 14f, dim = true)
+        root.addView(statusView, margins(top = 6f))
+
+        shizukuButton = Button(this)
+        shizukuButton.text = "Allow Shizuku"
+        shizukuButton.setOnClickListener { requestShizuku() }
+        root.addView(shizukuButton, margins(top = 8f))
+
+        root.addView(text("App", 13f, bold = true, dim = true), margins(top = 18f))
+        packageInput = EditText(this)
+        packageInput.setSingleLine()
+        packageInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        packageInput.hint = "com.discord"
+        packageInput.setText(target)
+        packageInput.setOnEditorActionListener { _, _, _ ->
+            target = packageInput.text.toString().trim()
+            refresh()
+            false
+        }
+        root.addView(packageInput, matchWidth())
+
+        val buttons = LinearLayout(this)
+        buttons.orientation = LinearLayout.HORIZONTAL
+        val load = Button(this)
+        load.text = "Load"
+        load.setOnClickListener {
+            target = packageInput.text.toString().trim()
+            refresh()
+        }
+        val all = Button(this)
+        all.text = "Grant all"
+        all.setOnClickListener { grantAll() }
+        val back = Button(this)
+        back.text = "Back"
+        back.setOnClickListener { goBack() }
+        for (b in listOf(load, all, back)) buttons.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(buttons, matchWidth(top = 6f))
+
+        list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        root.addView(list, matchWidth(top = 12f))
+
+        setContentView(scroll)
+    }
+
+    private fun margins(top: Float = 0f): LinearLayout.LayoutParams {
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(top)
+        return lp
+    }
+
+    private fun matchWidth(top: Float = 0f): LinearLayout.LayoutParams {
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(top)
+        return lp
+    }
+
+    private fun goBack() {
+        // 대상 앱(디스코드)으로 돌아간다
+        val launch = if (target.isNotBlank()) packageManager.getLaunchIntentForPackage(target) else null
+        if (launch != null) {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                startActivity(launch)
+            } catch (_: Throwable) {
+            }
+        }
+        finish()
+    }
+
+    // ── Shizuku ───────────────────────────────────────────────────────────
+    private enum class Ready { NOT_RUNNING, NO_PERMISSION, OLD, READY }
+
+    private fun shizukuState(): Ready {
+        if (!Shizuku.pingBinder()) return Ready.NOT_RUNNING
+        if (Shizuku.isPreV11()) return Ready.OLD
+        return if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) Ready.READY else Ready.NO_PERMISSION
+    }
+
+    private fun requestShizuku() {
+        when (shizukuState()) {
+            Ready.NO_PERMISSION -> Shizuku.requestPermission(1)
+            Ready.NOT_RUNNING -> {
+                // Shizuku 앱을 열어서 켜게 한다
+                val open = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                if (open != null) startActivity(open) else toast("Install and start Shizuku first")
+            }
+            else -> refresh()
+        }
+    }
+
+    /** Shizuku 로 셸 명령을 실행한다. (종료 코드, 출력) */
+    private fun shell(cmd: String): Pair<Int, String> {
+        val m = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+        m.isAccessible = true
+        val p = m.invoke(null, arrayOf("sh", "-c", cmd), null, null) as Process
+        val out = p.inputStream.bufferedReader().readText()
+        val err = p.errorStream.bufferedReader().readText()
+        val code = p.waitFor()
+        return code to (out + err).trim()
+    }
+
+    // ── 권한 목록 ─────────────────────────────────────────────────────────
+    private enum class Kind { RUNTIME, DEVELOPMENT, APPOP, SPECIAL, AUTO, NO }
+
+    private class Item(
+        val title: String,
+        val name: String,
+        val kind: Kind,
+        val granted: Boolean,
+        val grant: String?,
+        val revoke: String?,
+    )
+
+    private fun refresh() {
+        if (!::statusView.isInitialized) return
+        val state = shizukuState()
+        statusView.text = when (state) {
+            Ready.NOT_RUNNING -> "Shizuku isn't running"
+            Ready.NO_PERMISSION -> "Shizuku is running, allow this app to use it"
+            Ready.OLD -> "Shizuku is too old, update it"
+            Ready.READY -> if (target.isBlank()) "Shizuku ready, enter an app" else "Shizuku ready, $target"
+        }
+        shizukuButton.visibility = if (state == Ready.READY) View.GONE else View.VISIBLE
+        shizukuButton.text = if (state == Ready.NOT_RUNNING) "Open Shizuku" else "Allow Shizuku"
+        list.removeAllViews()
+        if (target.isBlank()) return
+        val items = try {
+            items(target)
+        } catch (e: PackageManager.NameNotFoundException) {
+            list.addView(text("App not found: $target", 14f, dim = true))
+            return
+        }
+        val groups = listOf(
+            Kind.SPECIAL to "Special access",
+            Kind.APPOP to "App operations",
+            Kind.RUNTIME to "Runtime",
+            Kind.DEVELOPMENT to "Development",
+            Kind.AUTO to "Always granted",
+            Kind.NO to "Can't be granted (signature or system)",
+        )
+        for ((kind, title) in groups) {
+            val g = items.filter { it.kind == kind }
+            if (g.isEmpty()) continue
+            list.addView(text(title, 13f, bold = true, dim = true), matchWidth(top = 16f))
+            for (it in g) list.addView(row(it, state == Ready.READY), matchWidth(top = 2f))
+        }
+    }
+
+    private fun row(item: Item, ready: Boolean): View {
+        val r = LinearLayout(this)
+        r.orientation = LinearLayout.HORIZONTAL
+        r.gravity = Gravity.CENTER_VERTICAL
+        r.setPadding(0, dp(6f), 0, dp(6f))
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        texts.addView(text(item.title, 15f))
+        if (item.name != item.title) texts.addView(text(item.name, 12f, dim = true))
+        r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val sw = Switch(this)
+        sw.isChecked = item.granted
+        val canChange = ready && (if (item.granted) item.revoke != null else item.grant != null)
+        sw.isEnabled = canChange
+        sw.setOnClickListener {
+            val cmd = if (sw.isChecked) item.grant else item.revoke
+            if (cmd == null) {
+                sw.isChecked = !sw.isChecked
+                return@setOnClickListener
+            }
+            run(listOf(cmd))
+        }
+        r.addView(sw)
+        return r
+    }
+
+    private fun grantAll() {
+        if (shizukuState() != Ready.READY) {
+            requestShizuku()
+            return
+        }
+        if (target.isBlank()) return
+        val cmds = items(target).filter { !it.granted && it.grant != null && it.kind != Kind.AUTO }.mapNotNull { it.grant }
+        if (cmds.isEmpty()) {
+            toast("Everything is already granted")
+            return
+        }
+        run(cmds)
+    }
+
+    private fun run(cmds: List<String>) {
+        if (shizukuState() != Ready.READY) {
+            requestShizuku()
+            refresh()
+            return
+        }
+        io.execute {
+            var failed = 0
+            var last = ""
+            for (c in cmds) {
+                val (code, out) = try {
+                    shell(c)
+                } catch (e: Throwable) {
+                    -1 to (e.cause?.message ?: e.message ?: e.toString())
+                }
+                if (code != 0) {
+                    failed++
+                    last = out.lineSequence().firstOrNull { it.isNotBlank() } ?: "exit $code"
+                }
+            }
+            main.post {
+                if (failed == 0) toast(if (cmds.size == 1) "Done" else "Done, ${cmds.size} changes")
+                else toast("$failed failed, $last")
+                refresh()
+            }
+        }
+    }
+
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+
+    // ── 권한 읽기 ─────────────────────────────────────────────────────────
+    private fun short(name: String) = name.substringAfterLast('.').replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+
+    /** appop 이름 (android:system_alert_window → SYSTEM_ALERT_WINDOW) */
+    private fun opName(op: String) = op.removePrefix("android:").uppercase()
+
+    private fun opMode(op: String, uid: Int, pkg: String): Int {
+        val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) ops.unsafeCheckOpNoThrow(op, uid, pkg) else @Suppress("DEPRECATION") ops.checkOpNoThrow(op, uid, pkg)
+        } catch (_: Throwable) {
+            AppOpsManager.MODE_DEFAULT
+        }
+    }
+
+    private fun items(pkg: String): List<Item> {
+        val pm = packageManager
+        val info: PackageInfo = if (Build.VERSION.SDK_INT >= 33) {
+            pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()))
+        } else {
+            @Suppress("DEPRECATION") pm.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS)
+        }
+        val uid = info.applicationInfo?.uid ?: 0
+        val out = mutableListOf<Item>()
+        val names = info.requestedPermissions ?: emptyArray()
+        val flags = info.requestedPermissionsFlags ?: IntArray(0)
+        for ((i, name) in names.withIndex()) {
+            val granted = (flags.getOrNull(i) ?: 0) and PackageInfo.REQUESTED_PERMISSION_GRANTED != 0
+            val pi: PermissionInfo? = try {
+                pm.getPermissionInfo(name, 0)
+            } catch (_: Throwable) {
+                null
+            }
+            if (pi == null) continue
+            @Suppress("DEPRECATION") val level = pi.protectionLevel
+            val base = level and PermissionInfo.PROTECTION_MASK_BASE
+            val development = level and PermissionInfo.PROTECTION_FLAG_DEVELOPMENT != 0
+            val appop = level and PermissionInfo.PROTECTION_FLAG_APPOP != 0
+            val op = AppOpsManager.permissionToOp(name)
+            when {
+                base == PermissionInfo.PROTECTION_DANGEROUS ->
+                    out += Item(short(name), name, Kind.RUNTIME, granted, "pm grant $pkg $name", "pm revoke $pkg $name")
+                appop && op != null -> {
+                    val mode = opMode(op, uid, pkg)
+                    val on = mode == AppOpsManager.MODE_ALLOWED || (mode == AppOpsManager.MODE_DEFAULT && granted)
+                    out += Item(short(name), name, Kind.APPOP, on, "appops set $pkg ${opName(op)} allow", "appops set $pkg ${opName(op)} default")
+                }
+                development ->
+                    out += Item(short(name), name, Kind.DEVELOPMENT, granted, "pm grant $pkg $name", "pm revoke $pkg $name")
+                base == PermissionInfo.PROTECTION_NORMAL ->
+                    out += Item(short(name), name, Kind.AUTO, granted, null, null)
+                else ->
+                    out += Item(short(name), name, Kind.NO, granted, null, null)
+            }
+        }
+        // 매니페스트와 상관없이 줄 수 있는 것
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        out += Item(
+            "Ignore battery optimizations",
+            "deviceidle whitelist",
+            Kind.SPECIAL,
+            power.isIgnoringBatteryOptimizations(pkg),
+            "dumpsys deviceidle whitelist +$pkg",
+            "dumpsys deviceidle whitelist -$pkg",
+        )
+        val bg = opMode("android:run_any_in_background", uid, pkg)
+        out += Item(
+            "Unrestricted background",
+            "RUN_ANY_IN_BACKGROUND",
+            Kind.SPECIAL,
+            bg == AppOpsManager.MODE_ALLOWED || bg == AppOpsManager.MODE_DEFAULT,
+            "appops set $pkg RUN_ANY_IN_BACKGROUND allow",
+            "appops set $pkg RUN_ANY_IN_BACKGROUND ignore",
+        )
+        if (names.none { it == "android.permission.SYSTEM_ALERT_WINDOW" }) {
+            val mode = opMode("android:system_alert_window", uid, pkg)
+            out += Item(
+                "Display over other apps",
+                "SYSTEM_ALERT_WINDOW",
+                Kind.SPECIAL,
+                mode == AppOpsManager.MODE_ALLOWED,
+                "appops set $pkg SYSTEM_ALERT_WINDOW allow",
+                "appops set $pkg SYSTEM_ALERT_WINDOW default",
+            )
+        }
+        return out
+    }
+}

@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.shizuku-permissions",
+	"name": "Shizuku Permissions",
+	"description": "Grant Discord any permission Shizuku can give, through a small helper app.",
+	"author": "Yumistra",
+	"icon": "LockIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
