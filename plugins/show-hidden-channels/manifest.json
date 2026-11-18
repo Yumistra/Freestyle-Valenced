@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.show-hidden-channels",
+	"name": "Show Hidden Channels",
+	"description": "Shows channels you can't view in the channel list. Port of ShowHiddenChannelsLite by CyberKird.",
+	"author": "Yumistra",
+	"icon": "EyeIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
