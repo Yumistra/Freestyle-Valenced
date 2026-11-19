@@ -5,7 +5,7 @@
 	"description": "Mute, unmute, deafen, undeafen, move or disconnect everyone in a voice channel at once, from the channel's long-press menu, when you have the permissions.",
 	"author": "Yumistra",
 	"icon": "VoiceNormalIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

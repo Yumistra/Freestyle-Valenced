@@ -116,9 +116,25 @@ const ACTIONS: Action[] = [
     { key: 'disconnect', label: 'Disconnect everyone', icon: 'PhoneHangUpIcon', perm: 'MOVE_MEMBERS', needs: () => true, body: { channel_id: null }, done: 'Disconnected', danger: true },
 ]
 
+/** 하나가 끝나기 전에 다른 것을 시작하지 않는다 */
+let busy = false
+
 /** 한 명씩 바꾼다. 너무 빠르면(429) 기다렸다 다시 */
 async function apply(channel: any, action: Action) {
     if (action.pick && !('channel_id' in action.body)) return
+    if (busy) {
+        toast('Still working on the last one')
+        return
+    }
+    busy = true
+    try {
+        await run(channel, action)
+    } finally {
+        busy = false
+    }
+}
+
+async function run(channel: any, action: Action) {
     const targets = people(channel.id).filter(action.needs)
     if (!targets.length) {
         toast('Nobody to change')
@@ -150,7 +166,7 @@ async function apply(channel: any, action: Action) {
                 break
             }
         }
-        await sleep(120)
+        if (t !== targets[targets.length - 1]) await sleep(120)
     }
     toast(failed ? `${action.done} ${ok}, ${failed} failed, ${reason}` : `${action.done} ${ok}`)
 }
@@ -242,7 +258,8 @@ function confirm(channel: any, action: Action, count: number) {
             />,
         )
     } catch {
-        void apply(channel, action)
+        // 확인 없이 끊지 않는다
+        toast("Couldn't open the confirmation")
     }
 }
 
