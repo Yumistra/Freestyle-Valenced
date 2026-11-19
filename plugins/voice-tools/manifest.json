@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.voice-tools",
+	"name": "Voice Tools",
+	"description": "Mute, unmute, deafen, undeafen or disconnect everyone in a voice channel at once, from the channel's long-press menu, when you have the permissions.",
+	"author": "Yumistra",
+	"icon": "VoiceNormalIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
