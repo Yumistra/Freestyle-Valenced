@@ -1,0 +1,48 @@
+screen 320 x 640
+== install
+Performing Streamed Install
+Success
+Performing Streamed Install
+Success
+Performing Streamed Install
+Success
+== start Shizuku
+/data/app/~~3CkKT82rm4kRozsVN2HNQw==/moe.shizuku.privileged.api-dpNuFVR1qWhzCJtSZHVsEw==:
+base.apk
+lib
+oat
+
+/data/app/~~3CkKT82rm4kRozsVN2HNQw==/moe.shizuku.privileged.api-dpNuFVR1qWhzCJtSZHVsEw==/lib:
+x86_64
+
+/data/app/~~3CkKT82rm4kRozsVN2HNQw==/moe.shizuku.privileged.api-dpNuFVR1qWhzCJtSZHVsEw==/lib/x86_64:
+libadb.so
+librish.so
+libshizuku.so
+ls: oat: Permission denied
+info: starter begin
+info: killing old process...
+info: apk path is /data/app/~~3CkKT82rm4kRozsVN2HNQw==/moe.shizuku.privileged.api-dpNuFVR1qWhzCJtSZHVsEw==/base.apk
+info: starting server...
+info: shizuku_server pid is 4244
+info: shizuku_starter exit with 0
+u0_a192       3539   336   14121684 129144 0                   0 S moe.shizuku.privileged.api
+shell         4244     1   13226352 121892 do_epoll_wait       0 S shizuku_server
+u0_a193       4281   336   14071904  68980 0                   0 S io.github.yumistra.shizukuperms
+shell         4244     1   13226352 121892 do_epoll_wait       0 S shizuku_server
+u0_a193       4281   336   14071904  68980 0                   0 S io.github.yumistra.shizukuperms
+== home screen has no icon
+== open from the shell (not Discord)
+== open with a faked referrer
+== open from fake Discord
+== allow Shizuku
+== tap '(?i)^allow shizuku$' at 76 158
+== tap '(?i)^(allow all the time|allow|always allow|grant)$' at 160 372
+== grant all
+== tap '(?i)^grant all$' at 90 156
+== all groups are shown
+== turn camera off with its switch
+== back to Discord
+== tap '(?i)^back$' at 230 156
+    topResumedActivity=ActivityRecord{d3736c8 u0 com.discord/.main.MainActivity t11}
+  ResumedActivity: ActivityRecord{d3736c8 u0 com.discord/.main.MainActivity t11}

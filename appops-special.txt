@@ -1,0 +1,8 @@
+MANAGE_EXTERNAL_STORAGE: No operations.
+Default mode: default
+WRITE_SETTINGS: No operations.
+Default mode: default
+SCHEDULE_EXACT_ALARM: No operations.
+Default mode: default
+REQUEST_INSTALL_PACKAGES: REQUEST_INSTALL_PACKAGES: allow
+null

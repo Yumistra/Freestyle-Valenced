@@ -1,0 +1,33 @@
+--------- beginning of main
+11-19 10:36:49.604  5124  6069 I ShizukuPerms: pm grant 'com.discord' 'android.permission.CAMERA' -> 0 
+11-19 10:36:49.636  5124  6069 I ShizukuPerms: pm grant 'com.discord' 'android.permission.POST_NOTIFICATIONS' -> 0 
+11-19 10:36:49.658  5124  6069 I ShizukuPerms: appops set 'com.discord' SYSTEM_ALERT_WINDOW allow -> 0 
+11-19 10:36:49.703  5124  6069 I ShizukuPerms: pm grant 'com.discord' 'android.permission.READ_LOGS' -> 0 
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: pm grant 'com.discord' 'com.example.UNKNOWN_PERMISSION' -> 255 Exception occurred while executing 'grant':
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: java.lang.IllegalArgumentException: Unknown permission: com.example.UNKNOWN_PERMISSION
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.permission.PermissionManagerServiceImpl.grantRuntimePermissionInternal(PermissionManagerServiceImpl.java:1380)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.permission.PermissionManagerServiceImpl.grantRuntimePermission(PermissionManagerServiceImpl.java:1337)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.permission.PermissionManagerService.grantRuntimePermission(PermissionManagerService.java:551)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.permission.PermissionManager.grantRuntimePermission(PermissionManager.java:609)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.PackageManagerShellCommand.runGrantRevokePermission(PackageManagerShellCommand.java:2672)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.PackageManagerShellCommand.onCommand(PackageManagerShellCommand.java:291)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.os.ShellCommand.exec(ShellCommand.java:38)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.PackageManagerService$IPackageManagerImpl.onShellCommand(PackageManagerService.java:6350)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.os.Binder.shellCommand(Binder.java:1068)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.os.Binder.onTransact(Binder.java:888)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.content.pm.IPackageManager$Stub.onTransact(IPackageManager.java:4352)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at com.android.server.pm.PackageManagerService$IPackageManagerImpl.onTransact(PackageManagerService.java:6334)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.os.Binder.execTransactInternal(Binder.java:1344)
+11-19 10:36:49.775  5124  6069 I ShizukuPerms: 	at android.os.Binder.execTransact(Binder.java:1275)
+11-19 10:36:49.812  5124  6069 I ShizukuPerms: dumpsys deviceidle whitelist +'com.discord' -> 0 Added: com.discord
+11-19 10:36:49.843  5124  6069 I ShizukuPerms: appops set 'com.discord' MANAGE_EXTERNAL_STORAGE allow -> 0 
+11-19 10:36:49.871  5124  6069 I ShizukuPerms: appops set 'com.discord' REQUEST_INSTALL_PACKAGES allow -> 0 
+11-19 10:36:49.887  5124  6069 I ShizukuPerms: appops set 'com.discord' WRITE_SETTINGS allow -> 0 
+11-19 10:36:49.901  5124  6069 I ShizukuPerms: appops set 'com.discord' GET_USAGE_STATS allow -> 0 
+11-19 10:36:49.916  5124  6069 I ShizukuPerms: appops set 'com.discord' SCHEDULE_EXACT_ALARM allow -> 0 
+11-19 10:36:49.930  5124  6069 I ShizukuPerms: appops set 'com.discord' MANAGE_MEDIA allow -> 0 
+11-19 10:36:49.945  5124  6069 I ShizukuPerms: appops set 'com.discord' USE_FULL_SCREEN_INTENT allow -> 0 
+11-19 10:36:49.962  5124  6069 I ShizukuPerms: appops set 'com.discord' TURN_SCREEN_ON allow -> 0 
+11-19 10:36:49.998  5124  6069 I ShizukuPerms: appops set 'com.discord' AUTO_REVOKE_PERMISSIONS_IF_UNUSED ignore -> 0 
+11-19 10:36:50.015  5124  6069 I ShizukuPerms: cmd notification allow_dnd 'com.discord' -> 0 

@@ -1,0 +1,16 @@
+    requested permissions:
+      android.permission.CAMERA
+      android.permission.POST_NOTIFICATIONS
+      android.permission.SYSTEM_ALERT_WINDOW
+      android.permission.READ_LOGS
+      android.permission.INTERNET
+      android.permission.INSTALL_PACKAGES
+      com.example.UNKNOWN_PERMISSION
+      android.permission.ACCESS_NOTIFICATION_POLICY
+    install permissions:
+      android.permission.ACCESS_NOTIFICATION_POLICY: granted=true
+      android.permission.SYSTEM_ALERT_WINDOW: granted=false
+      android.permission.INSTALL_PACKAGES: granted=false
+      android.permission.INTERNET: granted=true
+      android.permission.READ_LOGS: granted=true
+    User 0: ceDataInode=320466 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false
