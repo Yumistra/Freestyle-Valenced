@@ -12,13 +12,17 @@ export function find(...props: string[]): any {
 
 let perms: any
 /** 디스코드의 권한 값 (못 찾으면 직접 계산한 값) */
-export function perm(name: 'VIEW_CHANNEL' | 'CONNECT'): any {
+const FALLBACK = { VIEW_CHANNEL: 1n << 10n, CONNECT: 1n << 20n, VIEW_AUDIT_LOG: 1n << 7n }
+export function perm(name: keyof typeof FALLBACK): any {
     // 아직 안 불렸으면 다음에 다시 찾는다
     perms ??= find('Permissions', 'ChannelTypes')?.Permissions
-    return perms?.[name] ?? (name === 'CONNECT' ? 1n << 20n : 1n << 10n)
+    return perms?.[name] ?? FALLBACK[name]
 }
 
-export function samePerm(a: unknown, name: 'VIEW_CHANNEL' | 'CONNECT') {
+/** 잠금 화면이 진짜 읽음 기록을 읽는 동안에는 안 읽음 숨기기를 건너뛴다 */
+export const reads = { real: false }
+
+export function samePerm(a: unknown, name: keyof typeof FALLBACK) {
     const b = perm(name)
     if (a === b) return true
     try {

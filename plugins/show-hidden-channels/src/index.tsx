@@ -8,7 +8,7 @@ import LockScreen from './LockScreen'
 import SettingsPage from './Settings'
 import { bind, DEFAULTS, onChange, settings } from './store'
 import { count, err, status } from './log'
-import { channelOf, find, isHidden, S, samePerm } from './util'
+import { channelOf, find, isHidden, reads, S, samePerm } from './util'
 
 /**
  * Show Hidden Channels: ShowHiddenChannelsLite (Vencord, CyberKird) 를 옮긴 것.
@@ -297,7 +297,7 @@ export default plugin({
             if (typeof rs?.[key] !== 'function') continue
             cleanup(
                 instead(rs, key, function (this: any, args: any[], orig: any) {
-                    if (settings().hideUnreads && hiddenId(args[0])) return key.startsWith('has') ? false : 0
+                    if (!reads.real && settings().hideUnreads && hiddenId(args[0])) return key.startsWith('has') ? false : 0
                     return orig.apply(this, args)
                 }),
             )
