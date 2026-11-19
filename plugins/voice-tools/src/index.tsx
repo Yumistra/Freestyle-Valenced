@@ -8,9 +8,10 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { Pressable, ScrollView, View } from 'react-native'
 
 /**
- * Voice Tools: 음성, 스테이지 채널을 꾹 누르면 나오는 창에 "모두 음소거, 음소거 해제, 헤드셋 끄기, 켜기, 연결 끊기" 줄을 넣는다.
+ * Voice Tools: 음성, 스테이지 채널을 꾹 누르면 나오는 창에 "모두 음소거, 음소거 해제, 헤드셋 끄기, 켜기, 옮기기, 연결 끊기" 줄을 넣는다.
  * 그 채널에서 멤버 음소거(MUTE_MEMBERS), 헤드셋 끄기(DEAFEN_MEMBERS), 멤버 이동(MOVE_MEMBERS) 권한이 있을 때만 보인다.
  * 한 명씩 PATCH /guilds/{서버}/members/{사람} 로 바꾼다. 너무 빨리 보내면 기다렸다가 다시 보낸다.
  */
@@ -102,6 +103,8 @@ interface Action {
     body: Record<string, unknown>
     done: string
     danger?: boolean
+    /** 옮길 채널을 먼저 고른다 */
+    pick?: boolean
 }
 
 const ACTIONS: Action[] = [
@@ -109,11 +112,13 @@ const ACTIONS: Action[] = [
     { key: 'unmute', label: 'Unmute everyone', icon: 'MicrophoneIcon', perm: 'MUTE_MEMBERS', needs: p => p.mute, body: { mute: false }, done: 'Unmuted' },
     { key: 'deafen', label: 'Deafen everyone', icon: 'HeadphonesSlashIcon', perm: 'DEAFEN_MEMBERS', needs: p => !p.deaf, body: { deaf: true }, done: 'Deafened' },
     { key: 'undeafen', label: 'Undeafen everyone', icon: 'HeadphonesIcon', perm: 'DEAFEN_MEMBERS', needs: p => p.deaf, body: { deaf: false }, done: 'Undeafened' },
+    { key: 'move', label: 'Move everyone', icon: 'ArrowsRightLeftIcon', perm: 'MOVE_MEMBERS', needs: () => true, body: {}, done: 'Moved', pick: true },
     { key: 'disconnect', label: 'Disconnect everyone', icon: 'PhoneHangUpIcon', perm: 'MOVE_MEMBERS', needs: () => true, body: { channel_id: null }, done: 'Disconnected', danger: true },
 ]
 
 /** 한 명씩 바꾼다. 너무 빠르면(429) 기다렸다 다시 */
 async function apply(channel: any, action: Action) {
+    if (action.pick && !('channel_id' in action.body)) return
     const targets = people(channel.id).filter(action.needs)
     if (!targets.length) {
         toast('Nobody to change')
@@ -148,6 +153,77 @@ async function apply(channel: any, action: Action) {
         await sleep(120)
     }
     toast(failed ? `${action.done} ${ok}, ${failed} failed, ${reason}` : `${action.done} ${ok}`)
+}
+
+/** 옮길 수 있는 음성, 스테이지 채널 (지금 채널 빼고, 내가 들어갈 수 있는 것) */
+function targets(channel: any): any[] {
+    try {
+        const all: any[] = Object.values<any>(S().ChannelStore?.getMutableGuildChannelsForGuild?.(channel.guild_id) ?? {})
+        const connect = find('Permissions', 'ChannelTypes')?.Permissions?.CONNECT ?? 1n << 20n
+        const view = find('Permissions', 'ChannelTypes')?.Permissions?.VIEW_CHANNEL ?? 1n << 10n
+        const ps = S().PermissionStore
+        const cats: Record<string, any> = {}
+        for (const c of all) if (c?.type === 4) cats[c.id] = c
+        return all
+            .filter(c => VOCAL.has(c?.type) && c.id !== channel.id && ps?.can?.(view, c) && ps?.can?.(connect, c))
+            .sort((a, b) => (cats[a.parent_id]?.position ?? -1) - (cats[b.parent_id]?.position ?? -1) || (a.position ?? 0) - (b.position ?? 0))
+    } catch {
+        return []
+    }
+}
+
+/** 옮길 채널 고르기 창 */
+function pickChannel(channel: any, action: Action, count: number) {
+    const { AlertModal, AlertActionButton, Text } = Design as any
+    const key = `voice-tools-move-${seq++}`
+    const list = targets(channel)
+    if (!list.length) {
+        toast('No other voice channel to move to')
+        return
+    }
+    const Voice: any = lookupGeneratedIconComponent('VoiceNormalIcon' as any)
+    const Stage: any = lookupGeneratedIconComponent('StageIcon' as any)
+    const go = (to: any) => {
+        try {
+            ;(AlertActionCreators as any).dismissAlert(key)
+        } catch {}
+        void apply(channel, { ...action, body: { channel_id: to.id }, done: `Moved to ${to.name}` })
+    }
+    try {
+        ;(AlertActionCreators as any).openAlert(
+            key,
+            <AlertModal
+                title={action.label}
+                content={<Text variant="text-md/normal">{`Move ${count} ${count === 1 ? 'person' : 'people'} to`}</Text>}
+                extraContent={
+                    <ScrollView style={{ maxHeight: 320, alignSelf: 'stretch' }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                        {list.map(c => {
+                            const Icon = c.type === 13 ? Stage : Voice
+                            const n = Object.keys(S().VoiceStateStore?.getVoiceStatesForChannel?.(c.id) ?? {}).length
+                            return (
+                                <Pressable key={c.id} onPress={() => go(c)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 }}>
+                                    {Icon ? <Icon size="sm" color="icon-muted" /> : null}
+                                    <View style={{ flex: 1 }}>
+                                        <Text variant="text-md/semibold" color="text-default">
+                                            {c.name}
+                                        </Text>
+                                    </View>
+                                    {n ? (
+                                        <Text variant="text-sm/medium" color="text-muted">
+                                            {String(n)}
+                                        </Text>
+                                    ) : null}
+                                </Pressable>
+                            )
+                        })}
+                    </ScrollView>
+                }
+                actions={[<AlertActionButton key="no" text="Cancel" variant="secondary" />]}
+            />,
+        )
+    } catch {
+        toast("Couldn't open the channel list")
+    }
 }
 
 function confirm(channel: any, action: Action, count: number) {
@@ -208,7 +284,7 @@ function group(channel: any, close: () => void) {
                             close()
                             hideSheet(channel.id)
                             // 창이 닫힌 뒤에
-                            setTimeout(() => (a.danger ? confirm(channel, a, n) : void apply(channel, a)), 300)
+                            setTimeout(() => (a.pick ? pickChannel(channel, a, n) : a.danger ? confirm(channel, a, n) : void apply(channel, a)), 300)
                         }}
                     />
                 )
