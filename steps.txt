@@ -1,0 +1,49 @@
+screen 320 x 640
+== install
+Performing Streamed Install
+Success
+Performing Streamed Install
+Success
+Performing Streamed Install
+Success
+== start Shizuku
+/data/app/~~IqGJ3z8j9JAhoWI929dzbg==/com.hamondev.shevery-QK0fTwfG9j745QvXQuZXJg==:
+base.apk
+lib
+oat
+
+/data/app/~~IqGJ3z8j9JAhoWI929dzbg==/com.hamondev.shevery-QK0fTwfG9j745QvXQuZXJg==/lib:
+x86_64
+
+/data/app/~~IqGJ3z8j9JAhoWI929dzbg==/com.hamondev.shevery-QK0fTwfG9j745QvXQuZXJg==/lib/x86_64:
+libadb.so
+libandroidx.graphics.path.so
+librish.so
+libshizuku.so
+ls: oat: Permission denied
+info: starter begin
+info: killing old process...
+info: apk path is /data/app/~~IqGJ3z8j9JAhoWI929dzbg==/com.hamondev.shevery-QK0fTwfG9j745QvXQuZXJg==/base.apk
+info: starting server...
+info: shizuku_server pid is 3964
+info: shizuku_starter exit with 0
+u0_a192       3268   337   13923112 163436 0                   0 S com.hamondev.shevery
+shell         3963     1   10822908    604 do_wait             0 S libshizuku.so
+shell         3964  3963   13132968 147440 do_epoll_wait       0 S shizuku_server
+shell         3963     1   10822908    608 do_wait             0 S libshizuku.so
+shell         3964  3963   13132968 147440 do_epoll_wait       0 S shizuku_server
+== home screen has no icon
+== open from the shell (not Discord)
+== open with a faked referrer
+== open from fake Discord
+== allow Shizuku
+== tap '(?i)^allow shizuku$' at 76 158
+== tap '(?i)^(allow all the time|allow|always allow|grant)$' at 160 371
+== grant all
+== tap '(?i)^grant all$' at 90 156
+== all groups are shown
+== turn camera off with its switch
+== back to Discord
+== tap '(?i)^back$' at 230 156
+    topResumedActivity=ActivityRecord{7bfc201 u0 com.discord/.main.MainActivity t12}
+  ResumedActivity: ActivityRecord{7bfc201 u0 com.discord/.main.MainActivity t12}

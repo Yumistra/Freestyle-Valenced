@@ -1,0 +1,22 @@
+PASS shizuku server running
+PASS no launcher entry
+PASS shell sees only the message
+PASS faked referrer is ignored
+PASS shows Discord's list
+PASS Shizuku ready
+PASS camera granted
+PASS notifications granted
+PASS read logs (development) granted
+PASS overlay appop allowed
+PASS battery whitelist
+PASS background allowed
+PASS DND access
+PASS DND shown as on
+PASS not kept items are explained
+PASS unknown permission is listed
+PASS signature permission is listed
+PASS unavailable items are listed
+PASS camera revoked
+PASS back returns to Discord
+PASS no crash
+fails: 0
