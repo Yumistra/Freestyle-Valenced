@@ -284,7 +284,7 @@ function group(channel: any, close: () => void) {
     const list = people(channel.id)
     const rows = ACTIONS.filter(a => can(a.perm, channel))
         .map(a => ({ a, n: list.filter(a.needs).length }))
-        .filter(x => x.n > 0)
+    // 권한이 있으면 사람이 없어도 보여 준다 (누르면 "Nobody to change")
     if (!rows.length) return null
     return (
         <ActionSheetRow.Group key="voice-tools" hasIcons>
@@ -294,7 +294,7 @@ function group(channel: any, close: () => void) {
                     <ActionSheetRow
                         key={a.key}
                         label={a.label}
-                        subLabel={`${n} ${n === 1 ? 'person' : 'people'}`}
+                        subLabel={n ? `${n} ${n === 1 ? 'person' : 'people'}` : 'Nobody to change'}
                         variant={a.danger ? 'danger' : undefined}
                         icon={Icon ? <ActionSheetRow.Icon IconComponent={Icon} variant={a.danger ? 'danger' : undefined} /> : undefined}
                         onPress={() => {

@@ -228,7 +228,12 @@ check('patches the sheet module and openLazy', sheetModule.default !== original 
 }
 {
     voice.v1 = { me: {} }
-    check('no rows when only you are there', !groupOf(render(channels.v1)))
+    const subs = rowsOf(render(channels.v1)).map(r => r.props.subLabel)
+    check('rows still show when only you are there', subs.length === 6 && subs.every(x => x === 'Nobody to change'), subs.join(','))
+    reset()
+    rowByLabel(render(channels.v1), 'Mute everyone').props.onPress()
+    await settle()
+    check('pressing with nobody there says so', toasts.at(-1) === 'Nobody to change' && calls.length === 0, toasts.join(' | '))
     resetVoice()
 }
 
