@@ -3,7 +3,7 @@ name: Shizuku Permissions app
 # 플러그인이 여는 도우미 앱 (apps/shizuku-permissions) 을 빌드해서 helper-apk 브랜치에 올린다
 on:
   push:
-    branches-ignore: [helper-apk, helper-test, test-jars]
+    branches-ignore: ['helper-*', test-jars]
     paths:
       - apps/shizuku-permissions/**
       - .github/workflows/shizuku-permissions.yml
@@ -44,6 +44,18 @@ jobs:
   # 에뮬레이터에서 Shizuku 와 가짜 디스코드로 처음부터 끝까지 써 본다. 결과는 helper-test 브랜치에
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - manager: shizuku
+            repo: RikkaApps/Shizuku
+            package: moe.shizuku.privileged.api
+            branch: helper-test
+          - manager: shevery
+            repo: HmnDev-Tech/shevery
+            package: com.hamondev.shevery
+            branch: helper-test-shevery
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -57,9 +69,10 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Build app and fake Discord
         run: gradle -p apps/shizuku-permissions :app:assembleRelease :testapp:assembleDebug
-      - name: Download Shizuku
+      - name: Download ${{ matrix.manager }}
         run: |
-          URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/RikkaApps/Shizuku/releases/latest | python3 -c "import sys,json; print([a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if a['name'].endswith('.apk')][0])")
+          # 최신 릴리스(없으면 가장 최근 것)의 첫 apk
+          URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/${{ matrix.repo }}/releases?per_page=10" | python3 -c "import sys,json; print([a['browser_download_url'] for r in json.load(sys.stdin) for a in r['assets'] if a['name'].endswith('.apk')][0])")
           echo "$URL"
           curl -sL "$URL" -o shizuku.apk
           ls -la shizuku.apk
@@ -75,17 +88,17 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: bash apps/shizuku-permissions/ci/emulator-test.sh "$(ls apps/shizuku-permissions/app/build/outputs/apk/release/*.apk | head -1)" apps/shizuku-permissions/testapp/build/outputs/apk/debug/testapp-debug.apk shizuku.apk "$PWD/test-out"
+          script: bash apps/shizuku-permissions/ci/emulator-test.sh "$(ls apps/shizuku-permissions/app/build/outputs/apk/release/*.apk | head -1)" apps/shizuku-permissions/testapp/build/outputs/apk/debug/testapp-debug.apk shizuku.apk "$PWD/test-out" ${{ matrix.package }}
       - name: Push results to helper-test branch
         if: always()
         run: |
           SHA=$(git rev-parse --short HEAD)
           cd test-out 2>/dev/null || exit 0
-          git init -q && git checkout -q -b helper-test
+          git init -q && git checkout -q -b ${{ matrix.branch }}
           git config user.name "github-actions" && git config user.email "github-actions@users.noreply.github.com"
           echo "$GITHUB_REF_NAME $SHA" > SOURCE
-          git add -A && git commit -qm "Shizuku Permissions test from $GITHUB_REF_NAME $SHA"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" helper-test
+          git add -A && git commit -qm "Shizuku Permissions test (${{ matrix.manager }}) from $GITHUB_REF_NAME $SHA"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ${{ matrix.branch }}
       - name: Fail if a check failed
         run: |
           grep -q '^fails: 0$' test-out/result.txt

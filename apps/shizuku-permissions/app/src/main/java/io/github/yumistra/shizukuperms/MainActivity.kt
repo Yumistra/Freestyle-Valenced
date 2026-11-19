@@ -38,6 +38,11 @@ import java.util.concurrent.Executors
  */
 class MainActivity : Activity() {
 
+    companion object {
+        /** Shizuku 관리 앱 패키지: 원본 Shizuku, Shevery */
+        private val MANAGERS = listOf("moe.shizuku.privileged.api", "com.hamondev.shevery")
+    }
+
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -207,7 +212,8 @@ class MainActivity : Activity() {
             Ready.NO_PERMISSION -> Shizuku.requestPermission(1)
             Ready.NOT_RUNNING -> {
                 // Shizuku 앱을 열어서 켜게 한다
-                val open = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                // Shizuku 나 그 포크(Shevery)
+                val open = MANAGERS.firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
                 if (open != null) startActivity(open) else toast("Install and start Shizuku first")
             }
             else -> refresh()

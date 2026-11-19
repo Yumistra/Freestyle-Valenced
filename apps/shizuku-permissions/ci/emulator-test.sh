@@ -6,6 +6,7 @@ APP=$1        # 도우미 앱 apk
 FAKE=$2       # 가짜 디스코드 apk
 SHIZUKU=$3    # Shizuku apk
 OUT=$4
+MGR=${5:-moe.shizuku.privileged.api}   # Shizuku 관리 앱 패키지 (Shevery: com.hamondev.shevery)
 mkdir -p "$OUT"
 FAILS=0
 log() { echo "== $*" | tee -a "$OUT/steps.txt"; }
@@ -76,15 +77,16 @@ adb install -r "$APP" | tee -a "$OUT/steps.txt"
 adb install -r "$FAKE" | tee -a "$OUT/steps.txt"
 
 log "start Shizuku"
-adb shell monkey -p moe.shizuku.privileged.api -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
+adb shell monkey -p $MGR -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
 sleep 6
-DIR=$(adb shell pm path moe.shizuku.privileged.api | head -1 | tr -d '\r' | sed 's/^package://; s/base.apk$//')
+DIR=$(adb shell pm path $MGR | head -1 | tr -d '\r' | sed 's/^package://; s/base.apk$//')
 adb shell ls -R "$DIR" >> "$OUT/steps.txt" 2>&1
-STARTER=$(adb shell "ls $DIR/lib/*/libshizuku.so 2>/dev/null" | tr -d '\r' | head -1)
-if [ -n "$STARTER" ]; then adb shell "$STARTER" >> "$OUT/steps.txt" 2>&1; else adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh >> "$OUT/steps.txt" 2>&1; fi
+STARTER=$(adb shell "ls $DIR/lib/*/lib*.so 2>/dev/null" | tr -d '\r' | grep -E '/lib(shizuku|shevery|starter)\.so$' | head -1)
+if [ -n "$STARTER" ]; then adb shell "$STARTER" >> "$OUT/steps.txt" 2>&1; else adb shell sh /sdcard/Android/data/$MGR/start.sh >> "$OUT/steps.txt" 2>&1; fi
 sleep 6
-check "shizuku server running" "adb shell ps -A | grep -i shizuku_server"
-adb shell am force-stop moe.shizuku.privileged.api
+adb shell ps -A | grep -iE 'shizuku|shevery' >> "$OUT/steps.txt"
+check "shizuku server running" "adb shell ps -A | grep -iE 'shizuku_server|shevery_server|shizuku|shevery' | grep -v $MGR\$"
+adb shell am force-stop $MGR
 
 log "home screen has no icon"
 check "no launcher entry" "! adb shell cmd package query-activities -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep -q shizukuperms"
