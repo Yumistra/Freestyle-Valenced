@@ -23,6 +23,7 @@ Plugins for Valenced.
 | Better Font Scale | `yumistra.better-font-scale` |
 | Server Count | `yumistra.server-count` |
 | Show Hidden Channels | `yumistra.show-hidden-channels` |
+| Shizuku Permissions | `yumistra.shizuku-permissions` |
 
 ## Install
 
