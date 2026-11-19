@@ -81,7 +81,7 @@ adb shell monkey -p $MGR -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
 sleep 6
 DIR=$(adb shell pm path $MGR | head -1 | tr -d '\r' | sed 's/^package://; s/base.apk$//')
 adb shell ls -R "$DIR" >> "$OUT/steps.txt" 2>&1
-STARTER=$(adb shell "ls $DIR/lib/*/lib*.so 2>/dev/null" | tr -d '\r' | grep -iE 'shizuku|shevery|starter' | head -1)
+STARTER=$(adb shell "ls $DIR/lib/*/lib*.so 2>/dev/null" | tr -d '\r' | grep -E '/lib(shizuku|shevery|starter)\.so$' | head -1)
 if [ -n "$STARTER" ]; then adb shell "$STARTER" >> "$OUT/steps.txt" 2>&1; else adb shell sh /sdcard/Android/data/$MGR/start.sh >> "$OUT/steps.txt" 2>&1; fi
 sleep 6
 adb shell ps -A | grep -iE 'shizuku|shevery' >> "$OUT/steps.txt"
