@@ -6,6 +6,7 @@ import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/fi
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
+import { NativeModules } from 'react-native'
 
 /**
  * 디스코드에서 읽고 쓰는 것들. 화면은 이 파일의 함수만 쓴다.
@@ -417,16 +418,32 @@ export function toast(text: string) {
 
 // ── 그림 고르기 (디스코드의 사진 고르기 창) ─────────────────────────────
 /** 고른 그림 주소. 취소하거나 못 열면 undefined */
-export async function pickImage(): Promise<string | undefined> {
+/**
+ * 사진 고르는 창. 디스코드의 사진 고르기 모듈은 디스코드 입력창을 한 번 열어야 불러와지므로,
+ * 없으면 그 아래의 네이티브 모듈(ImagePickerManager)을 바로 쓴다. 결과: { assets, didCancel, errorCode }
+ */
+export async function launchLibrary(options: any): Promise<any> {
+    let picker: any
     try {
         const mod: any = lookupModuleWithImportedPath('modules/image/native/ImagePicker.tsx')
-        const picker = mod?.default ?? mod
-        if (typeof picker?.launchImageLibraryAsync !== 'function') return
-        const res: any = await picker.launchImageLibraryAsync({ mediaType: 'photo', selectionLimit: 1 })
+        picker = mod?.default ?? mod
+    } catch {}
+    if (typeof picker?.launchImageLibraryAsync === 'function') return picker.launchImageLibraryAsync(options)
+    const native = (NativeModules as any)?.ImagePickerManager
+    if (typeof native?.launchImageLibrary !== 'function') throw new Error('no image picker')
+    const full = { videoQuality: 'high', quality: 1, maxWidth: 0, maxHeight: 0, includeBase64: false, cameraType: 'back', saveToPhotos: false, durationLimit: 0, includeExtra: false, presentationStyle: 'pageSheet', selectionLimit: 1, ...options }
+    return new Promise(resolve => native.launchImageLibrary(full, resolve))
+}
+
+export async function pickImage(): Promise<string | undefined> {
+    try {
+        const res: any = await launchLibrary({ mediaType: 'photo', selectionLimit: 1 })
         if (!res || res.didCancel || res.cancelled || res.canceled) return
         const uri = res.assets?.[0]?.uri ?? res.uri ?? res.path ?? (Array.isArray(res) ? res[0]?.uri : undefined)
         return typeof uri === 'string' && uri ? uri : undefined
-    } catch {}
+    } catch {
+        toast('사진 고르기를 열지 못했어요')
+    }
 }
 
 // ── 메시지 고치기 ───────────────────────────────────────────────────────
@@ -435,9 +452,13 @@ export function editMessage(channelId: string, messageId: string, text: string):
     if (!content) return false
     try {
         const m = find('editMessage', 'deleteMessage')
-        if (typeof m?.editMessage !== 'function') return false
-        m.editMessage(channelId, messageId, { content })
-        return true
+        if (typeof m?.editMessage === 'function') {
+            m.editMessage(channelId, messageId, { content })
+            return true
+        }
+        // 디스코드 쪽 모듈이 아직 안 불려 왔으면 API 로
+        rest('patch', `/channels/${channelId}/messages/${messageId}`, { content }, '수정하지 못했어요')
+        return !!http()
     } catch {
         return false
     }
@@ -446,9 +467,12 @@ export function editMessage(channelId: string, messageId: string, text: string):
 export function deleteMessage(channelId: string, messageId: string): boolean {
     try {
         const m = find('editMessage', 'deleteMessage') ?? find('deleteMessage', 'sendMessage')
-        if (typeof m?.deleteMessage !== 'function') return false
-        m.deleteMessage(channelId, messageId)
-        return true
+        if (typeof m?.deleteMessage === 'function') {
+            m.deleteMessage(channelId, messageId)
+            return true
+        }
+        rest('del', `/channels/${channelId}/messages/${messageId}`, undefined, '지우지 못했어요')
+        return !!http()
     } catch {
         return false
     }
@@ -459,7 +483,12 @@ export function toggleReaction(channelId: string, messageId: string, emoji: { id
     try {
         const m = find('addReaction', 'removeReaction')
         const f = mine ? m?.removeReaction : m?.addReaction
-        if (typeof f !== 'function') return false
+        if (typeof f !== 'function') {
+            // 반응 모듈은 디스코드에서 반응을 한 번 써야 불러와진다. 그 전에는 API 로
+            const key = encodeURIComponent(emoji.id ? `${emoji.name}:${emoji.id}` : emoji.name)
+            rest(mine ? 'del' : 'put', `/channels/${channelId}/messages/${messageId}/reactions/${key}/@me`, undefined, '반응을 바꾸지 못했어요')
+            return !!http()
+        }
         f.call(m, channelId, messageId, { id: emoji.id ?? null, name: emoji.name, animated: !!emoji.animated }, 'Message', { burst: false })
         return true
     } catch {
@@ -468,6 +497,14 @@ export function toggleReaction(channelId: string, messageId: string, emoji: { id
 }
 
 // ── REST (디스코드가 쓰는 HTTP 모듈) ────────────────────────────────────
+/** API 요청 (실패하면 알림) */
+function rest(method: 'put' | 'patch' | 'del', url: string, body: any, fail: string) {
+    const h = http()
+    const f = h?.[method] ?? (method === 'del' ? h?.delete : undefined)
+    if (typeof f !== 'function') return toast(fail)
+    Promise.resolve(f.call(h, { url, ...(body ? { body } : {}) })).catch(() => toast(fail))
+}
+
 export function http(): any {
     const a = find('HTTP')?.HTTP
     return a?.get ? a : find('getAPIBaseURL', 'get')

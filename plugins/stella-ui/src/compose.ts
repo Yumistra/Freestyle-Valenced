@@ -1,6 +1,5 @@
 import { Dispatcher } from '@valenced/discord/common/flux'
-import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
-import { channel, displayName, find, guild, guildIds, http, S, toast, user } from './data'
+import { channel, displayName, find, guild, guildIds, http, launchLibrary, S, toast, user } from './data'
 
 /**
  * 입력창이 쓰는 것들: 파일 붙이기, 입력 중 알리기, 이모지·스티커·GIF 목록, 자동완성.
@@ -17,17 +16,8 @@ export interface Picked {
 
 /** 사진, 영상 고르기 (여러 개). 실패하면 이유를 알려 준다 */
 export async function pickFiles(): Promise<Picked[]> {
-    let picker: any
     try {
-        const mod: any = lookupModuleWithImportedPath('modules/image/native/ImagePicker.tsx')
-        picker = mod?.default ?? mod
-    } catch {}
-    if (typeof picker?.launchImageLibraryAsync !== 'function') {
-        toast('사진 고르기를 찾지 못했어요')
-        return []
-    }
-    try {
-        const res: any = await picker.launchImageLibraryAsync({ mediaType: 'mixed', selectionLimit: 10, skipProcessing: true })
+        const res: any = await launchLibrary({ mediaType: 'mixed', selectionLimit: 10, skipProcessing: true })
         if (!res || res.didCancel || res.cancelled || res.canceled) return []
         if (res.errorCode || res.errorMessage) {
             toast(`파일을 고르지 못했어요: ${res.errorMessage ?? res.errorCode}`)

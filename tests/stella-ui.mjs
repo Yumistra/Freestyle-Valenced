@@ -42,6 +42,7 @@ const flatStyle = st => (Array.isArray(st) ? Object.assign({}, ...st.map(flatSty
 const layout = { y: 0, h: 800 }
 const View = ({ children, pointerEvents, ref, onLayout, style, ...p }) => {
     React.useImperativeHandle(ref, () => ({ measureInWindow: cb => cb(0, layout.y, 100, layout.h) }))
+    React.useEffect(() => void onLayout?.({ nativeEvent: { layout: { width: 400, height: 300 } } }), [])
     const pb = flatStyle(style).paddingBottom
     return h('div', { ...clean(p), ...(ref && pb !== undefined ? { 'data-pb': pb } : {}) }, children)
 }
@@ -101,6 +102,7 @@ const ReactNative = {
     Linking: { openURL: url => (opened.push(url), Promise.resolve()) },
     Dimensions: { get: () => win },
     useWindowDimensions: () => win,
+    NativeModules: { ImagePickerManager: { launchImageLibrary: (o, cb) => (calls.push(['nativePicker', o]), cb({ assets: [{ uri: 'content://native.jpg', fileName: 'native.jpg', type: 'image/jpeg' }] })) } },
 }
 
 // ── 가짜 디스코드 스토어 ────────────────────────────────────────────────
@@ -267,6 +269,8 @@ const modules = [
                 if (o.url === '/channels/p1/messages/p1') return { body: { id: 'p1', channel_id: 'p1', content: 'active first', author: { id: '3' } } }
                 throw new Error('404')
             },
+            put: async o => (calls.push(['PUT', o.url]), {}),
+            del: async o => (calls.push(['DEL', o.url]), {}),
             post: async o => (calls.push(['POST', o.url, o.body]), { body: { id: 'p3', name: o.body.name, owner_id: '1', message_count: 0, applied_tags: o.body.applied_tags } }),
         },
     },
@@ -296,6 +300,7 @@ const toastOriginal = toastHost.default
 let toastLoaded = false
 const waiting = []
 let picked = 'content://picked.png'
+let pickerGone = false
 
 let cache = {}
 const storageListeners = new Set()
@@ -331,7 +336,7 @@ globalThis.valenced = {
                 finders: {
                     getModuleWithImportedPath: (path, cb) => (cb(path.includes('AppToastContainer') && toastLoaded ? toastHost : undefined), () => {}),
                     waitForModuleWithImportedPath: (path, cb) => (waiting.push([path, cb]), () => {}),
-                    lookupModuleWithImportedPath: path => path === 'modules/stickers/native/Sticker.tsx' ? { default: ({ sticker, size }) => (sticker.id === 'bad' ? (() => { throw new Error('x') })() : h('i', { 'data-sticker': sticker.id, 'data-format': sticker.format_type, 'data-size': size })) } : (path === 'modules/image/native/ImagePicker.tsx' ? { default: { launchImageLibraryAsync: async () => (picked ? { assets: [{ uri: picked }] } : { didCancel: true }) } } : undefined),
+                    lookupModuleWithImportedPath: path => path === 'modules/stickers/native/Sticker.tsx' ? { default: ({ sticker, size }) => (sticker.id === 'bad' ? (() => { throw new Error('x') })() : h('i', { 'data-sticker': sticker.id, 'data-format': sticker.format_type, 'data-size': size })) } : (path === 'modules/image/native/ImagePicker.tsx' && !pickerGone ? { default: { launchImageLibraryAsync: async () => (picked ? { assets: [{ uri: picked }] } : { didCancel: true }) } } : undefined),
                 },
             },
         },
@@ -621,6 +626,20 @@ await press('gif https://tenor.com/top')
 check('GIF sends its link', calls.filter(c => c[0] === 'sendMessage').at(-1)[2].content === 'https://tenor.com/top')
 typingNow.logs = {}
 await act(async () => Stores.TypingStore.emit())
+
+// 디스코드 모듈이 아직 안 불려 왔을 때: 사진 고르기는 네이티브로, 반응은 API 로
+pickerGone = true
+await press('Attach')
+await render()
+check('no Discord picker → native ImagePickerManager with multi select', calls.some(c => c[0] === 'nativePicker' && c[1].mediaType === 'mixed' && c[1].selectionLimit === 10) && [...presses.keys()].some(k => k === 'remove native.jpg' && presses.get(k).length))
+await press('remove native.jpg')
+pickerGone = false
+const reactionMod = modules.find(m => m.addReaction)
+const keepAdd = reactionMod.addReaction
+delete reactionMod.addReaction
+await press('reaction cat')
+check('no reaction module → API put', calls.some(c => c[0] === 'PUT' && c[1] === '/channels/logs/messages/l1/reactions/cat%3A42/@me'), JSON.stringify(calls.filter(c => c[0] === 'PUT')))
+reactionMod.addReaction = keepAdd
 
 // 키보드: 화면이 줄지 않으면 가려진 만큼만, 줄어들면 0
 const pb = () => Number(html().match(/data-pb="(\d+)"/)?.[1] ?? -1)

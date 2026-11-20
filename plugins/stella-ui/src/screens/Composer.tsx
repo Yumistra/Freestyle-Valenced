@@ -49,9 +49,9 @@ function ChipRow({ children }: { children: any }) {
 }
 
 // ── 이모지 ──────────────────────────────────────────────────────────────
-function EmojiCell({ e, onPick }: { e: Emoji; onPick: (e: Emoji) => void }) {
+function EmojiCell({ e, onPick, size }: { e: Emoji; onPick: (e: Emoji) => void; size: number }) {
     return (
-        <Pressable onPress={() => onPick(e)} accessibilityRole="button" accessibilityLabel={`emoji ${e.name}`} style={({ pressed }) => [{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: pressed ? C.blueSoft : 'transparent' }]}>
+        <Pressable onPress={() => onPick(e)} accessibilityRole="button" accessibilityLabel={`emoji ${e.name}`} style={({ pressed }) => [{ width: size, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: pressed ? C.blueSoft : 'transparent' }]}>
             {e.id ? <Image source={{ uri: emojiUrl(e.id, !!e.animated, 64) }} style={{ width: 32, height: 32 }} resizeMode="contain" /> : <T size={26}>{e.surrogates}</T>}
         </Pressable>
     )
@@ -60,12 +60,16 @@ function EmojiCell({ e, onPick }: { e: Emoji; onPick: (e: Emoji) => void }) {
 function EmojiPanel({ onPick }: { onPick: (e: Emoji) => void }) {
     const servers = useStores(['EmojiStore', 'GuildStore'], guildEmojis, [], (a, b) => sameList(a.map(g => g.guildId + g.emojis.length), b.map(g => g.guildId + g.emojis.length)))
     const [tab, setTab] = useState<string>(UNICODE_CATEGORIES[0])
+    // 칸 너비에 맞춰 줄 수를 정한다 (오른쪽이 비지 않게)
+    const [w, setW] = useState(0)
+    const cols = Math.max(5, Math.floor((w - 16) / 46))
+    const cell = w ? (w - 16) / cols : 44
     const list: Emoji[] = useMemo(() => {
         const g = servers.find(s => s.guildId === tab)
         return g ? g.emojis : unicodeEmojis(tab)
     }, [tab, servers])
     return (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} onLayout={(e: any) => setW(Math.round(e?.nativeEvent?.layout?.width ?? 0))}>
             <ChipRow>
                 {UNICODE_CATEGORIES.map(c => (
                     <Chip key={c} label={CATEGORY_LABEL[c]} on={tab === c} onPress={() => setTab(c)} />
@@ -75,11 +79,11 @@ function EmojiPanel({ onPick }: { onPick: (e: Emoji) => void }) {
                 ))}
             </ChipRow>
             <FlatList
-                key={tab}
-                data={list}
-                numColumns={7}
+                key={`${tab}/${cols}`}
+                data={w ? list : []}
+                numColumns={cols}
                 keyExtractor={(e, i) => e.id ?? `${e.name}${i}`}
-                renderItem={({ item }) => <EmojiCell e={item} onPick={onPick} />}
+                renderItem={({ item }) => <EmojiCell e={item} onPick={onPick} size={cell} />}
                 initialNumToRender={49}
                 windowSize={5}
                 keyboardShouldPersistTaps="handled"
