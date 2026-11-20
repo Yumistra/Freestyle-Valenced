@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Image, Keyboard, Pressable, ScrollView, TextInput, useWindowDimensions, View } from 'react-native'
-import { applySuggestion, CATEGORY_LABEL, emojiText, type Emoji, type Gif, gifs, guildEmojis, guildStickers, pickFiles, type Picked, sendWith, stopTyping, suggestions, typing, typingNames, typingText, UNICODE_CATEGORIES, unicodeEmojis } from '../compose'
+import { applySuggestion, CATEGORY_LABEL, emojiText, type Emoji, type Gif, gifs, guildEmojis, guildStickers, draftOf, onDraft, pickFiles, type Picked, setDraft, sendWith, stopTyping, suggestions, typing, typingNames, typingText, UNICODE_CATEGORIES, unicodeEmojis } from '../compose'
 import { displayName, editMessage, emojiUrl, guildIconUrl, guild, sameList, toast, useStores } from '../data'
 import { Icon, T } from '../parts'
 import { C, R, shadow } from '../theme'
@@ -259,8 +259,12 @@ function SuggestList({ items, onPick }: { items: ReturnType<typeof suggestions>;
 
 // ── 입력창 ──────────────────────────────────────────────────────────────
 export function Composer({ channelId, placeholder, mode, onMode, guildId }: { channelId: string; placeholder: string; mode: Mode; onMode: (m: Mode) => void; guildId?: string }) {
-    const [text, setText] = useState('')
-    const [files, setFiles] = useState<Picked[]>([])
+    // 글과 파일은 채널별로 밖에 둔다 (사진 고르는 창을 다녀오면 이 화면이 새로 그려질 수 있다)
+    const [, redraw] = useState(0)
+    useEffect(() => onDraft(() => redraw(n => n + 1)) as any, [])
+    const { text, files } = draftOf(channelId)
+    const setText = (v: string | ((t: string) => string)) => setDraft(channelId, { text: typeof v === 'function' ? v(draftOf(channelId).text) : v })
+    const setFiles = (v: Picked[] | ((f: Picked[]) => Picked[])) => setDraft(channelId, { files: typeof v === 'function' ? v(draftOf(channelId).files) : v })
     const [failed, setFailed] = useState(false)
     const [panel, setPanel] = useState<Panel>(null)
     const input = useRef<any>(null)
@@ -269,8 +273,6 @@ export function Composer({ channelId, placeholder, mode, onMode, guildId }: { ch
     const editing = mode?.kind === 'edit'
 
     useEffect(() => {
-        setText('')
-        setFiles([])
         setPanel(null)
         return () => stopTyping(channelId)
     }, [channelId])
@@ -333,7 +335,7 @@ export function Composer({ channelId, placeholder, mode, onMode, guildId }: { ch
     return (
         <View style={{ paddingHorizontal: 14, paddingBottom: 12, paddingTop: 4 }}>
             {typingLine ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8, marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginLeft: 6, marginBottom: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: R.pill, backgroundColor: 'rgba(28,42,99,0.7)', maxWidth: '90%' }}>
                     <Icon names={['PencilIcon', 'EditIcon']} color={C.white} size={12} />
                     <T size={12} color={C.white} weight="700" lines={1} style={{ flexShrink: 1 }}>
                         {typingLine}

@@ -1,7 +1,7 @@
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Keyboard, Linking, Pressable, View } from 'react-native'
-import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, loadMessages, me, messageArray, messagesOf, roleColor, S, toast, toggleReaction, useStores } from '../data'
+import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, loadMessages, me, messageArray, messagesOf, roleColor, S, syncChannel, toast, toggleReaction, useStores } from '../data'
 import { previewText } from '../markdown'
 import { Avatar, Icon, PillButton, T } from '../parts'
 import { go, useUi } from '../state'
@@ -448,6 +448,10 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
     }, [])
 
     useEffect(() => loadMessages(channelId), [channelId])
+    // DM 도 디스코드 쪽에서 열어 둔다 (입력 중 알림 등이 오게)
+    useEffect(() => {
+        if (!guildId) syncChannel('@me', channelId)
+    }, [guildId, channelId])
     // 보고 있는 동안 들어온 메시지는 읽음으로
     const newest = rows[0]?.m?.id
     useEffect(() => {

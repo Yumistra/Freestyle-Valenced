@@ -567,6 +567,7 @@ export function mentionList(): any[] {
 let lastSync = ''
 export function syncChannel(guildId: string | undefined, channelId: string | undefined) {
     if (!guildId || !channelId) return
+    // DM 은 '@me'
     const key = `${guildId}/${channelId}`
     if (key === lastSync) return
     lastSync = key

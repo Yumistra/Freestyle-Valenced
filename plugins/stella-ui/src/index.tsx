@@ -14,6 +14,7 @@ import { HeartScreen } from './screens/Heart'
 import { InboxScreen } from './screens/Inbox'
 import { ProfileCard } from './screens/Profile'
 import { forgetSticker } from './screens/Sticker'
+import { forgetDrafts } from './compose'
 import { ImageViewer } from './viewer'
 import { chooseCharacter, LobbyScreen } from './screens/Lobby'
 import { bindStorage, DEFAULTS, save, useSettings } from './settings'
@@ -274,6 +275,7 @@ export default plugin({
             forgetSync()
             forgetThreads()
             forgetSticker()
+            forgetDrafts()
             status.mounted = false
         })
     },
