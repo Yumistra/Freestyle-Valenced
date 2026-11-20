@@ -121,7 +121,7 @@ const channels = {
     chat: { id: 'chat', type: 0, name: 'chat', guild_id: 'g1', parent_id: 'cat2', position: 0, topic: 'Read  me\nfirst' },
     logs: { id: 'logs', type: 0, name: 'logs', guild_id: 'g1', parent_id: 'cat2', position: 1 },
     talk: { id: 'talk', type: 2, name: 'talk', guild_id: 'g1', parent_id: 'cat2', position: 0 },
-    forum: { id: 'forum', type: 15, name: 'help', guild_id: 'g1', parent_id: 'cat2', position: 2, topic: 'Ask here', availableTags: [{ id: 't1', name: 'Bug' }, { id: 't2', name: 'Idea', emojiName: '💡' }] },
+    forum: { id: 'forum', type: 15, name: 'help', guild_id: 'g1', parent_id: 'cat2', position: 2, topic: '**Ask** here', availableTags: [{ id: 't1', name: 'Bug' }, { id: 't2', name: 'Idea', emojiName: '💡' }] },
     p1: { id: 'p1', type: 11, name: 'Active post', guild_id: 'g1', parent_id: 'forum', ownerId: '3', messageCount: 4, lastMessageId: '1300000000000000000', appliedTags: ['t1'], flags: 2 },
     th1: { id: 'th1', type: 11, name: 'side talk', guild_id: 'g1', parent_id: 'chat' },
     777: { id: '777', type: 0, name: 'general' },
@@ -191,6 +191,8 @@ const messages = {
             msg('c1', '3', 'joined', { type: 7, channel_id: 'chat' }),
             msg('c2', '3', 'first', { channel_id: 'chat' }),
             msg('c3', '3', 'second', { channel_id: 'chat' }),
+            msg('c5', '1', 'Notif thread', { type: 18, channel_id: 'chat', messageReference: { channel_id: 'th9' } }),
+            msg('c6', '3', 'has a thread', { channel_id: 'chat', thread: { id: 'th8', name: 'Side chat', message_count: 8, parent_id: 'chat', guild_id: 'g1', type: 11 } }),
             msg('c4', '4', 'reply here', { channel_id: 'chat', messageReference: { channel_id: 'chat', message_id: 'c2' }, editedTimestamp: 1 }),
         ],
     },
@@ -422,7 +424,7 @@ await press('Open Stella UI')
 check('edge tab brings the lobby back', state().visible === true)
 
 text = await press('알림')
-check('mail → Stella inbox', state().visible === true && state().route === 'inbox' && calls.some(c => c[0] === 'fetchRecentMentions' && c[2] === 25 && c[4] === true))
+check('mail → Stella inbox', state().visible === true && state().route === 'inbox' && calls.some(c => c[0] === 'fetchRecentMentions' && c[1].limit === 25 && c[1].roles === true && c[1].everyone === true))
 check('inbox: friend request card and mentions with place', text.includes('친구 신청이 1개 와 있어요') && text.includes('Valenced, #chat') && text.includes('ping @DeStinY'), text)
 await press('mention mm1')
 check('mention → opens that channel', state().route === 'guild' && state().guildId === 'g1' && state().channelId === 'chat')
@@ -464,6 +466,15 @@ check('profile fetched for the server', calls.some(c => c[0] === 'fetchProfile' 
 check('profile banner', html().includes('https://cdn.discordapp.com/banners/3/bn.png?size=600'))
 await act(async () => [...backHandlers][0]())
 check('back closes the profile first', !state().profile && state().route === 'guild')
+check('thread started notice with a card', text.includes('DeStinY 님이 스레드를 시작했어요') && text.includes('Notif thread'))
+check('message with a thread shows the thread card and count', text.includes('Side chat') && text.includes('메시지 8개'))
+await press('thread th8')
+check('thread card opens the thread even if Discord does not know it yet', state().channelId === 'th8' && host.textContent.includes('Side chat'))
+await act(async () => [...backHandlers][0]())
+await press('chat')
+await press('long:message c2')
+await press('메시지 정보 복사')
+check('message info copy has the shape', copied.some(t => t.includes('"type": 0') && t.includes('"content"')))
 check('join message as a system line', text.includes('NaznaNick 님이 들어왔어요'))
 check('reply shows the original inside the bubble, no arrow', /NaznaNickfirstreplyhere/.test(text.replace(/\s/g, '')) && !html().includes('ArrowAngleRightUpIcon'), text)
 await press('reply to c2')
@@ -567,7 +578,9 @@ check('thread opens as a chat with its parent as subtitle', state().channelId ==
 // 포럼
 text = await press('help')
 check('forum opens in Stella, not Discord', state().visible === true && state().channelId === 'forum' && text.includes('Ask here'))
-check('forum loads archived posts with the search API', calls.some(c => c[0] === 'GET' && c[1] === '/channels/forum/threads/search' && c[2].archived === true && c[2].offset === 0))
+check('forum loads open posts, then archived, with the search API', calls.some(c => c[0] === 'GET' && c[1] === '/channels/forum/threads/search' && c[2].archived === false) && calls.some(c => c[0] === 'GET' && c[1] === '/channels/forum/threads/search' && c[2].archived === true && c[2].offset === 0))
+check('opening a channel also opens it in Discord underneath (threads, posts sync)', calls.some(c => c[0] === 'transitionToGuild' && c[1] === 'g1' && c[2] === 'forum'))
+check('forum topic without markdown', !host.textContent.includes('**'))
 text = host.textContent
 check('pinned active post first, then archived', text.indexOf('Active post') < text.indexOf('Old post') && text.includes('보관됨'))
 check('post cards: preview without markdown, image, tags, counts', text.includes('old first') && html().includes('https://media/p2.png') && text.includes('Bug') && text.includes('Idea') && text.includes('4'))

@@ -1,6 +1,6 @@
-import { Fragment, memo, useCallback } from 'react'
+import { Fragment, memo, useCallback, useEffect } from 'react'
 import { FlatList, Image, Pressable, View } from 'react-native'
-import { channel, FORUMS, guild, guildIconUrl, guildSections, joinVoice, sameList, THREADS, threadsOf, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
+import { channel, FORUMS, syncChannel, guild, guildIconUrl, guildSections, joinVoice, sameList, THREADS, threadsOf, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
 import { knownThread } from '../forum'
 import { Backdrop, Badge, Empty, Icon, NavButtons, PlaceChip, T } from '../parts'
 import { useSettings } from '../settings'
@@ -83,7 +83,7 @@ const ChannelCard = memo(function ChannelCard({ id, width, selected }: { id: str
 
 /** 채널 아래 내가 들어간 스레드 (가로 한 줄 전체) */
 const ThreadCards = memo(function ThreadCards({ guildId, parentId, width, selected }: { guildId: string; parentId: string; width: number; selected?: string }) {
-    const ids = useStores(['ActiveJoinedThreadsStore', 'ChannelStore'], () => threadsOf(guildId, parentId, true), [guildId, parentId], sameList)
+    const ids = useStores(['ActiveJoinedThreadsStore', 'ActiveThreadsStore', 'ChannelStore'], () => threadsOf(guildId, parentId), [guildId, parentId], sameList)
     if (!ids.length) return null
     return (
         <>
@@ -151,10 +151,12 @@ export function GuildScreen({ width }: { width: number }) {
     const guildId = useUi(st => st.guildId)
     const channelId = useUi(st => st.channelId)
     const narrow = isNarrow(width)
-    if (!guildId) return null
     const ch = channel(channelId) ?? knownThread(channelId)
     const open = !!(channelId && ch)
     const parent = ch?.parent_id ? channel(ch.parent_id) : undefined
+    // 디스코드도 이 채널을 열게 해서 스레드, 포럼 글 등을 받아 오게 한다
+    useEffect(() => syncChannel(guildId, open ? (THREADS.has(ch?.type) ? ch.parent_id : channelId) : undefined), [guildId, channelId, open])
+    if (!guildId) return null
     // 포럼 글이면 리스트 버튼은 그 포럼으로
     const toForum = THREADS.has(ch?.type) && FORUMS.has(parent?.type) ? () => setState({ channelId: parent.id }) : undefined
     const panelWidth = narrow ? width : Math.min(440, Math.max(320, width * 0.34))

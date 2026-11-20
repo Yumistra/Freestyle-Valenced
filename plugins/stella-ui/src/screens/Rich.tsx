@@ -353,6 +353,9 @@ export function Components({ list, guildId, depth = 0 }: { list: any[]; guildId?
                 )
             }
             default:
+                // 모르는 형식이어도 글이나 하위 칸이 있으면 보여 준다
+                if (typeof c?.content === 'string') return <RichText key={i} text={c.content} guildId={guildId} tone="dark" size={14} />
+                if (Array.isArray(c?.components)) return <Components key={i} list={c.components} guildId={guildId} depth={depth + 1} />
                 return null
         }
     })

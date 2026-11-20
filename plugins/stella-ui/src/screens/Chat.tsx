@@ -1,7 +1,7 @@
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Image, Keyboard, Linking, Pressable, TextInput, View } from 'react-native'
-import { ack, avatarUrl, channel as channelOf, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
+import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
 import { previewText } from '../markdown'
 import { Avatar, Icon, PillButton, T } from '../parts'
 import { go, useUi } from '../state'
@@ -116,8 +116,48 @@ function ReplyQuote({ m, guildId, mine, onJump, alone }: { m: any; guildId?: str
     )
 }
 
+/** 스레드 카드 (누르면 그 스레드로) */
+function ThreadCard({ thread, guildId, parentId }: { thread: any; guildId?: string; parentId?: string }) {
+    rememberThread(thread, parentId, guildId)
+    const ch = channelOf(thread.id) ?? thread
+    const count = ch.messageCount ?? ch.message_count
+    return (
+        <Pressable onPress={() => go.open({ ...ch, guild_id: ch.guild_id ?? guildId })} accessibilityRole="button" accessibilityLabel={`thread ${thread.id}`} style={{ alignSelf: 'stretch' }}>
+            <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, backgroundColor: C.white, maxWidth: 420 }, shadow(2)]}>
+                <Icon names={['ThreadIcon', 'TextIcon']} color={C.navy} size={20} />
+                <View style={{ flexShrink: 1 }}>
+                    <T size={14} weight="800" lines={1}>
+                        {ch.name ?? '스레드'}
+                    </T>
+                    {count != null ? (
+                        <T size={12} color={C.muted} weight="700">
+                            {`메시지 ${count}개`}
+                        </T>
+                    ) : null}
+                </View>
+                <Icon names={['ChevronLargeRightIcon', 'ArrowLargeRightIcon']} color={C.muted} size={16} />
+            </View>
+        </Pressable>
+    )
+}
+
+const SYSTEM_THREAD_CREATED = 18
+
 export const MessageRow = memo(function MessageRow({ row, guildId, showNames, onMenu, onJump, lit }: { row: Row; guildId?: string; showNames: boolean; onMenu: (m: any) => void; onJump: (id: string) => void; lit?: boolean }) {
     const { m, mine, head } = row
+    if (m.type === SYSTEM_THREAD_CREATED) {
+        // 스레드를 시작했다는 알림: 누가 시작했는지와 스레드 카드
+        const ref = m.messageReference ?? m.message_reference
+        const thread = m.thread ?? (ref?.channel_id ? { id: ref.channel_id, name: m.content } : undefined)
+        return (
+            <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 20, gap: 6 }}>
+                <T size={12} color={C.white} weight="700">
+                    {`${displayName(m.author, guildId)} 님이 스레드를 시작했어요`}
+                </T>
+                {thread ? <ThreadCard thread={thread} guildId={guildId} parentId={m.channel_id} /> : null}
+            </View>
+        )
+    }
     if (isSystem(m)) {
         const text = m.type === SYSTEM_JOIN ? `${displayName(m.author, guildId)} 님이 들어왔어요` : previewText(m, guildId) || '시스템 메시지'
         return (
@@ -203,6 +243,7 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
                             </View>
                         ) : null}
                         {reply && !bubble && !empty ? <ReplyQuote m={m} guildId={guildId} mine={mine} onJump={onJump} alone /> : null}
+                        {m.thread ? <ThreadCard thread={m.thread} guildId={guildId} parentId={m.channel_id} /> : null}
                         {embeds.map((e, i) => (
                             <EmbedCard key={i} e={e} guildId={guildId} />
                         ))}
@@ -224,6 +265,21 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
         </View>
     )
 })
+
+/** 화면에 잘못 나오는 메시지를 알려 줄 때 쓰는 정보 (글 내용 없이 모양만) */
+export function messageInfo(m: any): string {
+    const seen = new WeakSet()
+    const shape = (v: any, depth: number): any => {
+        if (v == null || typeof v !== 'object') return typeof v === 'string' ? (v.length > 40 ? `${v.slice(0, 40)}…` : v) : v
+        if (seen.has(v) || depth > 6) return '…'
+        seen.add(v)
+        if (Array.isArray(v)) return v.slice(0, 10).map(x => shape(x, depth + 1))
+        const out: any = {}
+        for (const k of Object.keys(v).slice(0, 40)) if (k !== 'author' && typeof v[k] !== 'function') out[k] = shape(v[k], depth + 1)
+        return out
+    }
+    return JSON.stringify({ type: m.type, flags: m.flags, content: m.content, embeds: shape(m.embeds, 0), components: shape(m.components, 0), thread: shape(m.thread, 0), reference: shape(m.messageReference, 0) }, null, 1).slice(0, 6000)
+}
 
 // ── 꾹 누르기 메뉴 ──────────────────────────────────────────────────────
 type Mode = { kind: 'reply' | 'edit'; m: any } | null
@@ -263,6 +319,13 @@ function MessageMenu({ m, guildId, onClose, onMode }: { m: any; guildId?: string
                     ))}
                 </View>
                 {item(['ArrowAngleLeftUpIcon', 'ReplyIcon'], '답장', () => (onMode({ kind: 'reply', m }), onClose()))}
+                {item(['BugIcon', 'CodeIcon', 'CopyIcon'], '메시지 정보 복사', () => {
+                    try {
+                        Clipboard.setString(messageInfo(m))
+                        toast('메시지 정보를 복사했어요')
+                    } catch {}
+                    onClose()
+                })}
                 {m.content
                     ? item(['CopyIcon'], '글 복사', () => {
                           try {

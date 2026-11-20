@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { Dimensions } from 'react-native'
-import { channel, FORUMS } from './data'
+import { channel, FORUMS, THREADS } from './data'
 import { knownThread } from './forum'
 
 /** 이보다 좁으면 목록과 채팅을 한 번에 하나씩 보여 준다 */
@@ -87,9 +87,9 @@ export function back(): boolean {
     if (state.menu) return setState({ menu: false }), true
     switch (state.route) {
         case 'guild': {
-            // 포럼 글에서는 그 포럼으로
+            // 스레드, 포럼 글에서는 그 상위 채널(포럼)로
             const ch = channel(state.channelId) ?? knownThread(state.channelId)
-            if (ch?.parent_id && FORUMS.has(channel(ch.parent_id)?.type)) {
+            if (ch?.parent_id && (THREADS.has(ch.type) || FORUMS.has(channel(ch.parent_id)?.type))) {
                 setState({ channelId: ch.parent_id })
                 return true
             }

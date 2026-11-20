@@ -566,7 +566,7 @@ export function memberRoles(guildId: string | undefined, userId: string): { id: 
 export function fetchMentions(before?: string) {
     try {
         const m = find('fetchRecentMentions')
-        Promise.resolve(m?.fetchRecentMentions?.(before ?? null, 25, null, true, true)).catch(() => {})
+        Promise.resolve(m?.fetchRecentMentions?.({ before: before ?? null, limit: 25, guildId: null, roles: true, everyone: true })).catch(() => {})
     } catch {}
 }
 
@@ -578,3 +578,29 @@ export function mentionList(): any[] {
         return []
     }
 }
+
+// ── 디스코드에게 이 채널을 보고 있다고 알리기 ───────────────────────────
+// 디스코드는 채널을 열어야 스레드 목록, 포럼 글, 멤버 같은 것을 받아 온다.
+// 게임 화면 아래에 있는 디스코드 화면을 같은 채널로 옮겨서 그것들을 받게 한다 (보이지는 않는다).
+let lastSync = ''
+export function syncChannel(guildId: string | undefined, channelId: string | undefined) {
+    if (!guildId || !channelId) return
+    const key = `${guildId}/${channelId}`
+    if (key === lastSync) return
+    lastSync = key
+    try {
+        const r = find('transitionToGuild')
+        if (typeof r?.transitionToGuild === 'function') r.transitionToGuild(guildId, channelId)
+    } catch {}
+}
+export const forgetSync = () => {
+    lastSync = ''
+}
+
+// ── 메시지에서 본 스레드 (디스코드가 아직 모를 때 쓰려고) ────────────────
+const threadHints = new Map<string, any>()
+export function rememberThread(t: any, parentId?: string, guildId?: string) {
+    if (t?.id && !threadHints.has(t.id)) threadHints.set(t.id, { id: t.id, name: t.name ?? '', type: t.type ?? 11, parent_id: t.parent_id ?? parentId, guild_id: t.guild_id ?? guildId, messageCount: t.message_count ?? t.messageCount })
+}
+export const threadHint = (id: string | undefined) => (id ? threadHints.get(id) : undefined)
+export const forgetThreads = () => threadHints.clear()

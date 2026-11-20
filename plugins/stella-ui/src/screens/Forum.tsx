@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { FlatList, Image, Pressable, TextInput, View } from 'react-native'
 import { avatarUrl, channel, displayName, emojiUrl, S, toast, useStores, user } from '../data'
 import { createPost, forumPosts, forumStatus, loadFirst, loadMore, type Post, useForumVersion } from '../forum'
-import { formatTime, previewText } from '../markdown'
+import { formatTime, plainText, previewText } from '../markdown'
 import { Avatar, Icon, PillButton, T } from '../parts'
 import { go } from '../state'
 import { C, R, shadow } from '../theme'
@@ -184,7 +184,7 @@ export function ForumView({ forumId, compact, onList }: { forumId: string; compa
                     </T>
                     {forum?.topic ? (
                         <T size={13} color="rgba(255,255,255,0.85)" weight="600" lines={2} style={{ marginTop: 2 }}>
-                            {String(forum.topic).replace(/\s+/g, ' ')}
+                            {plainText(String(forum.topic), forum.guild_id)}
                         </T>
                     ) : null}
                 </View>

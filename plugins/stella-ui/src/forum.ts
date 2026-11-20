@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { channel, http, idTime, S, threadsOf } from './data'
+import { channel, http, idTime, S, threadHint, threadsOf } from './data'
 
 /**
  * 포럼 글 목록. 열린 글은 디스코드가 이미 가진 스레드, 보관된 글은 디스코드의 검색 API 로 더 불러온다.
@@ -26,6 +26,7 @@ interface ForumState {
     hasMore: boolean
     loading: boolean
     error: boolean
+    activeLoaded: boolean
 }
 
 const forums = new Map<string, ForumState>()
@@ -47,7 +48,7 @@ export function resetForums() {
 
 const stateOf = (id: string): ForumState => {
     let s = forums.get(id)
-    if (!s) forums.set(id, (s = { archived: new Map(), offset: 0, hasMore: true, loading: false, error: false }))
+    if (!s) forums.set(id, (s = { archived: new Map(), offset: 0, hasMore: true, loading: false, error: false, activeLoaded: false }))
     return s
 }
 
@@ -83,7 +84,15 @@ export function forumPosts(forumId: string): Post[] {
     return list.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.last - a.last)
 }
 
-/** 보관된 글 더 불러오기 */
+/** 검색 결과를 넣는다. 받은 글 수 */
+function take(st: ForumState, body: any, archived: boolean): number {
+    const threads: any[] = body?.threads ?? []
+    for (const t of threads) st.archived.set(t.id, toPost(t, archived))
+    for (const m of body?.first_messages ?? []) if (m?.channel_id) firsts.set(m.channel_id, m)
+    return threads.length
+}
+
+/** 글 더 불러오기 (처음엔 열린 글, 그다음 보관된 글) */
 export async function loadMore(forumId: string): Promise<void> {
     const st = stateOf(forumId)
     if (st.loading || !st.hasMore) return
@@ -97,13 +106,16 @@ export async function loadMore(forumId: string): Promise<void> {
     st.error = false
     emit()
     try {
+        // 처음 한 번은 열린 글도 검색으로 받는다 (디스코드가 아직 포럼을 안 열었으면 열린 글을 모른다)
+        if (!st.activeLoaded) {
+            st.activeLoaded = true
+            const res = await h.get({ url: `/channels/${forumId}/threads/search`, query: { archived: false, sort_by: 'last_message_time', sort_order: 'desc', limit: 25, offset: 0 } }).catch(() => undefined)
+            take(st, res?.body, false)
+        }
         const res = await h.get({ url: `/channels/${forumId}/threads/search`, query: { archived: true, sort_by: 'last_message_time', sort_order: 'desc', limit: 25, offset: st.offset } })
-        const body = res?.body ?? {}
-        const threads: any[] = body.threads ?? []
-        for (const t of threads) st.archived.set(t.id, toPost(t, true))
-        for (const m of body.first_messages ?? []) if (m?.channel_id) firsts.set(m.channel_id, m)
-        st.offset += threads.length
-        st.hasMore = !!body.has_more && threads.length > 0
+        const n = take(st, res?.body, true)
+        st.offset += n
+        st.hasMore = !!res?.body?.has_more && n > 0
     } catch {
         st.error = true
         st.hasMore = false
@@ -155,6 +167,8 @@ export function useForumVersion(): number {
 /** 디스코드가 아직 모르는 (보관된) 글을 채널처럼 */
 export function knownThread(id: string | undefined): any {
     if (!id) return
+    const hint = threadHint(id)
+    if (hint) return hint
     for (const [forumId, st] of forums) {
         const p = st.archived.get(id)
         if (p) return { id, name: p.name, type: 11, parent_id: forumId, guild_id: channel(forumId)?.guild_id }

@@ -54,10 +54,10 @@ export function Badge({ unread, mentions, style }: { unread: boolean; mentions: 
     if (!unread && !mentions) return null
     const bg = mentions ? C.red : C.orange
     return (
-        <View style={[{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 4, backgroundColor: bg, borderWidth: 2, borderColor: C.white, alignItems: 'center', justifyContent: 'center' }, style]}>
-            <T size={11} color={C.white} weight="800">
+        <View style={[{ minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 5, backgroundColor: bg, borderWidth: 2, borderColor: C.white, alignItems: 'center', justifyContent: 'center' }, style]}>
+            <Text textBreakStrategy="simple" style={{ fontSize: 12, lineHeight: 15, color: C.white, fontWeight: 'bold', textAlign: 'center', includeFontPadding: false, textAlignVertical: 'center' }}>
                 {mentions ? (mentions > 9 ? '9+' : '!') : '···'}
-            </T>
+            </Text>
         </View>
     )
 }

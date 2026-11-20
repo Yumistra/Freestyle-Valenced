@@ -5,7 +5,7 @@ import { ReactNativeSafeAreaContext } from '@valenced/externals/react-native-saf
 import { instead } from '@valenced/patcher'
 import { Component, useEffect, useState } from 'react'
 import { BackHandler, Image, Pressable, useWindowDimensions, View } from 'react-native'
-import { forgetModules, pickImage, toast } from './data'
+import { forgetModules, forgetSync, forgetThreads, pickImage, toast } from './data'
 import { resetForums } from './forum'
 import { Icon, T, Wipe } from './parts'
 import { DepartScreen } from './screens/Depart'
@@ -268,6 +268,8 @@ export default plugin({
             resetState()
             forgetModules()
             resetForums()
+            forgetSync()
+            forgetThreads()
             status.mounted = false
         })
     },
