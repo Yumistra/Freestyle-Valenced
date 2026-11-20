@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Image, Pressable, View } from 'react-native'
 import { avatarUrl, count, displayName, dmIds, guildIds, guildUnread, me, onlineFriends, pickImage, relationships, toast, toggleVoice, unread, useStores, voiceSelf, sameList } from '../data'
-import { leaveTo } from './Frame'
 import { Avatar, Backdrop, Dot, Icon, RoundButton, T } from '../parts'
 import { save, useSettings } from '../settings'
 import { go, setState, useUi } from '../state'
@@ -93,7 +92,6 @@ function Profile() {
 }
 
 // ── 위 오른쪽: 아이콘 줄과 메뉴 ─────────────────────────────────────────
-export { leaveTo } from './Frame'
 
 function TopIcons() {
     const requests = useStores(['RelationshipStore'], () => relationships().incoming.length, [])
@@ -181,7 +179,7 @@ function Menu() {
                     </Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', padding: 16 }}>
-                    <MenuItem names={['SettingsIcon']} label="설정" onPress={() => leaveTo('settings')} />
+                    <MenuItem names={['SettingsIcon']} label="설정" onPress={go.settings} />
                     <MenuItem names={['InboxIcon', 'BellIcon']} label="알림" onPress={go.inbox} />
                     <MenuItem names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="퀘스트" onPress={go.quests} />
                     <MenuItem names={['ShopIcon', 'GiftIcon']} label="상점" onPress={go.shop} />

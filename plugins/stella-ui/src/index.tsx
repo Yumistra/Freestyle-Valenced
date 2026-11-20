@@ -15,6 +15,7 @@ import { InboxScreen } from './screens/Inbox'
 import { ProfileCard } from './screens/Profile'
 import { QuestsScreen } from './screens/Quests'
 import { ShopScreen } from './screens/Shop'
+import { SettingsScreen } from './screens/Settings'
 import { forgetSticker } from './screens/Sticker'
 import { forgetDrafts } from './compose'
 import { ImageViewer } from './viewer'
@@ -91,6 +92,8 @@ function Screen({ width, height }: { width: number; height: number }) {
             return <ShopScreen width={width} />
         case 'quests':
             return <QuestsScreen width={width} />
+        case 'settings':
+            return <SettingsScreen width={width} />
         default:
             return <LobbyScreen width={width} height={height} />
     }

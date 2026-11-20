@@ -207,6 +207,9 @@ let relations = { 5: 3, 2: 1, 3: 1, 4: 1 }
 let presence = { 2: 'offline', 3: 'online', 4: 'idle' }
 const media = { mute: false, deaf: false }
 const typingNow = {}
+const statusSet = []
+const customSet = []
+const togglesSet = { TypingIndicatorSetting: true, InAppNotificationsSetting: undefined }
 let uploads = []
 const Stores = {
     UserStore: store({ getCurrentUser: () => users[1], getUser: id => users[id] }),
@@ -270,6 +273,10 @@ const modules = [
                     }
                 if (o.url === '/channels/logs/messages/pins') return { body: { items: [{ pinned_at: '2026-11-20T00:00:00Z', message: { id: 'pin1', channel_id: 'logs', content: 'pinned **rule**', author: { id: '3', username: 'nazna' }, attachments: [] } }], has_more: false } }
                 if (o.url === '/guilds/g1/messages/search') return { body: { total_results: 1, messages: [[{ id: 'f1', channel_id: 'news', content: `found ${o.query.content}`, author: { id: '2', username: 'seina' }, attachments: [] }]] } }
+                if (o.url === '/users/@me/connections') return { body: [{ type: 'github', id: 'gh1', name: 'octo', visibility: 1 }] }
+                if (o.url === '/auth/sessions') return { body: { user_sessions: [{ id_hash: 's1', approx_last_used_time: '2026-11-20T00:00:00Z', client_info: { os: 'Android', platform: 'Discord', location: 'Seoul' } }] } }
+                if (o.url === '/oauth2/tokens') return { body: [{ id: 't1', scopes: ['identify'], application: { id: 'a1', name: 'Some App' } }] }
+                if (o.url === '/users/1/profile') return { body: { user_profile: { bio: 'hi', pronouns: 'he' } } }
                 if (o.url === '/quests/@me') return { body: { quests: [
                     { id: 'q1', config: { expires_at: '2099-01-01T00:00:00Z', messages: { quest_name: 'Play Game Quest', game_title: 'Game', game_publisher: 'Pub' }, rewards_config: { rewards: [{ messages: { name_with_article: 'an Orb' } }] }, task_config_v2: { tasks: { WATCH_VIDEO: { target: 900 } } }, assets: { hero: 'hero.png' } }, user_status: null },
                     { id: 'q2', config: { expires_at: '2099-01-01T00:00:00Z', messages: { quest_name: 'Second Quest' }, task_config_v2: { tasks: { PLAY_ON_DESKTOP: { target: 900 } } } }, user_status: { enrolled_at: '2026-11-01', progress: { PLAY_ON_DESKTOP: { value: 300 } } } },
@@ -288,6 +295,12 @@ const modules = [
     },
     { fetchRecentMentions: record('fetchRecentMentions') },
     { startTyping: record('startTyping'), stopTyping: record('stopTyping') },
+    {
+        StatusSetting: { getSetting: () => statusSet.at(-1) ?? 'online', updateSetting: v => statusSet.push(v) },
+        CustomStatusSetting: { getSetting: () => customSet.at(-1), updateSetting: v => customSet.push(v) },
+        TypingIndicatorSetting: { getSetting: () => togglesSet.TypingIndicatorSetting, updateSetting: v => (togglesSet.TypingIndicatorSetting = v) },
+        InAppNotificationsSetting: { getSetting: () => undefined, updateSetting() {} },
+    },
     { getCategories: () => ['people'], getByCategory: c => (c === 'people' ? [{ uniqueName: 'grinning', surrogates: '😀' }, { uniqueName: 'cat_face', surrogates: '🐱' }] : []) },
     { UploadPlatform: { REACT_NATIVE: 2 } },
     { UploadOrigin: { IMAGE_PICKER: 1 } },
@@ -445,13 +458,48 @@ await press('Unmute')
 await press('Menu')
 check('menu opens', state().menu === true && host.textContent.includes('메뉴'))
 await press('설정')
-check('menu → settings hides the game screen', state().visible === false && state().menu === false)
+check('menu → Stella settings', state().route === 'settings' && host.textContent.includes('내 계정') && host.textContent.includes('표시 이름'))
+await act(async () => inputs.get('표시 이름').at(-1).get().onChangeText('Destiny'))
+await press('표시 이름 저장')
+await act(async () => tick())
+check('display name saved', calls.some(c => c[0] === 'PATCH' && c[1] === '/users/@me' && c[2].global_name === 'Destiny'))
+await press('상태')
+await press('자리 비움')
+check('status changes through Discord user settings', statusSet.at(-1) === 'idle')
+await act(async () => inputs.get('지금 뭐 하고 있어요?').at(-1).get().onChangeText('coding'))
+await press('저장')
+check('custom status', customSet.at(-1)?.text === 'coding')
+await press('채팅, 알림')
+check('only boolean settings shown as switches', host.textContent.includes('입력 중 표시 보내기') && !host.textContent.includes('앱 안 알림'))
+await press('입력 중 표시 보내기')
+check('toggle writes the setting', togglesSet.TypingIndicatorSetting === false)
+await press('연결된 계정')
+await act(async () => tick())
+check('connections listed', host.textContent.includes('github') && host.textContent.includes('octo'))
+await press('연결 끊기')
+await act(async () => tick())
+check('remove a connection', calls.some(c => c[0] === 'DEL' && c[1] === '/users/@me/connections/github/gh1'))
+await press('기기')
+await act(async () => tick())
+check('devices listed', host.textContent.includes('Android') && host.textContent.includes('Seoul'))
+await press('로그아웃')
+await act(async () => tick())
+check('log out a device', calls.some(c => c[0] === 'POST' && c[1] === '/auth/sessions/logout' && c[2].session_id_hashes[0] === 's1'))
+await press('승인한 앱')
+await act(async () => tick())
+await press('끊기')
+await act(async () => tick())
+check('deauthorize an app', calls.some(c => c[0] === 'DEL' && c[1] === '/oauth2/tokens/t1'))
+await press('내 계정')
+await press('바꾸기')
+check('security changes hide Stella', state().visible === false)
 await new Promise(r => setTimeout(r, 80))
-check('menu → settings opens Discord settings', calls.some(c => c[0] === 'openUserSettings'))
+check('and open Discord settings', calls.some(c => c[0] === 'openUserSettings'))
 text = await render()
 check('edge tab shows when hidden', !!presses.get('Open Stella UI')?.length && !text.includes('출발'))
 await press('Open Stella UI')
 check('edge tab brings the lobby back', state().visible === true)
+await act(async () => [...backHandlers][0]())
 
 text = await press('알림')
 check('mail → Stella inbox', state().visible === true && state().route === 'inbox' && calls.some(c => c[0] === 'fetchRecentMentions' && c[1].limit === 25 && c[1].roles === true && c[1].everyone === true))
