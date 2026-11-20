@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.stella-ui",
+	"name": "Stella UI",
+	"description": "Use Discord through a game style lobby: chats in a phone, servers as cards, and your own character art.",
+	"author": "Yumistra",
+	"icon": "StarIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
