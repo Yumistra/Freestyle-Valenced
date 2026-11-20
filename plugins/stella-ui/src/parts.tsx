@@ -33,7 +33,7 @@ export function Icon({ names, color = C.ink, size = 20 }: { names: string[]; col
 // ── 글 ──────────────────────────────────────────────────────────────────
 export function T({ children, size = 14, color = C.ink, weight = '600', lines, style }: { children: any; size?: number; color?: string; weight?: '400' | '500' | '600' | '700' | '800'; lines?: number; style?: any }) {
     return (
-        <Text numberOfLines={lines} style={[{ fontSize: size, color, fontWeight: weight, includeFontPadding: false }, style]}>
+        <Text numberOfLines={lines} textBreakStrategy="simple" style={[{ fontSize: size, color, fontWeight: weight, includeFontPadding: false }, style]}>
             {children}
         </Text>
     )

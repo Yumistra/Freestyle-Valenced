@@ -16,6 +16,9 @@ const soft = (tone: Tone) => (tone === 'light' ? '#dfe7ff' : C.muted)
 const linkColor = (tone: Tone) => (tone === 'light' ? '#eef2ff' : C.blue)
 const MONO = 'monospace'
 
+/** 바깥 글 상자. 안드로이드가 굵은 글자 폭을 잘못 재서 끝 글자가 잘리는 것을 막는다 */
+export const P = (props: any) => <Text textBreakStrategy="simple" {...props} />
+
 const open = (url?: string) => {
     if (url) Linking.openURL(url).catch(() => {})
 }
@@ -96,31 +99,31 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
     switch (b.t) {
         case 'p':
             return (
-                <Text style={base}>
+                <P style={base}>
                     <Nodes nodes={b.c} tone={tone} big={big} />
-                </Text>
+                </P>
             )
         case 'h': {
             const s = b.level === 1 ? size + 7 : b.level === 2 ? size + 4 : size + 2
             return (
-                <Text style={{ ...base, fontSize: s, lineHeight: Math.round(s * 1.3), fontWeight: '800', marginTop: 2 }}>
+                <P style={{ ...base, fontSize: s, lineHeight: Math.round(s * 1.3), fontWeight: '800', marginTop: 2 }}>
                     <Nodes nodes={b.c} tone={tone} />
-                </Text>
+                </P>
             )
         }
         case 'sub':
             return (
-                <Text style={{ ...base, fontSize: size - 3, color: soft(tone), lineHeight: Math.round((size - 3) * 1.4) }}>
+                <P style={{ ...base, fontSize: size - 3, color: soft(tone), lineHeight: Math.round((size - 3) * 1.4) }}>
                     <Nodes nodes={b.c} tone={tone} />
-                </Text>
+                </P>
             )
         case 'li':
             return (
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                    <Text style={base}>•</Text>
-                    <Text style={{ ...base, flex: 1 }}>
+                    <P style={base}>•</P>
+                    <P style={{ ...base, flex: 1 }}>
                         <Nodes nodes={b.c} tone={tone} />
-                    </Text>
+                    </P>
                 </View>
             )
         case 'quote':
@@ -137,7 +140,7 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
         case 'codeblock':
             return (
                 <View style={{ borderRadius: 8, padding: 8, backgroundColor: tone === 'light' ? 'rgba(0,0,0,0.18)' : C.blueSoft }}>
-                    <Text style={{ fontFamily: MONO, fontSize: size - 2, color: ink(tone) }}>{b.v}</Text>
+                    <P style={{ fontFamily: MONO, fontSize: size - 2, color: ink(tone) }}>{b.v}</P>
                 </View>
             )
     }
@@ -229,9 +232,9 @@ export const EmbedCard = memo(function EmbedCard({ e, guildId }: { e: any; guild
                             </Pressable>
                         ) : null}
                         {title ? (
-                            <Text onPress={e.url ? () => open(e.url) : undefined} style={{ fontSize: 15, fontWeight: '800', color: e.url ? C.blue : C.ink }}>
+                            <P onPress={e.url ? () => open(e.url) : undefined} style={{ fontSize: 15, fontWeight: '800', color: e.url ? C.blue : C.ink }}>
                                 {title}
-                            </Text>
+                            </P>
                         ) : null}
                         {desc ? <RichText text={desc} guildId={guildId} tone="dark" size={14} /> : null}
                     </View>

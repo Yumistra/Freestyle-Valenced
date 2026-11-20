@@ -71,7 +71,9 @@ const TextInput = ({ value, placeholder, onChangeText }) => {
     useRegister(inputs, placeholder ?? '', { onChangeText, value })
     return h('input', { 'data-value': value ?? '', 'data-placeholder': placeholder ?? '' })
 }
-const FlatList = ({ data, renderItem, keyExtractor, ListEmptyComponent }) =>
+const scrolled = []
+const FlatList = ({ data, renderItem, keyExtractor, ListEmptyComponent, ref }) =>
+    (React.useImperativeHandle(ref, () => ({ scrollToIndex: o => scrolled.push(o), scrollToOffset() {} })), 0) ||
     h('div', { 'data-list': data?.length ?? 0 }, data?.length ? data.map((item, index) => h(React.Fragment, { key: keyExtractor ? keyExtractor(item, index) : index }, renderItem({ item, index }))) : ListEmptyComponent ?? null)
 class AnimValue {
     constructor(v) {
@@ -424,7 +426,9 @@ text = await press('chat')
 check('channel opens a chat', state().channelId === 'chat' && text.includes('first') && text.includes('second'))
 check('server chat shows names, nickname', text.includes('NaznaNick'))
 check('join message as a system line', text.includes('NaznaNick 님이 들어왔어요'))
-check('reply line shows the original', text.includes('NaznaNick: first'))
+check('reply shows the original inside the bubble, no arrow', /NaznaNickfirstreplyhere/.test(text.replace(/\s/g, '')) && !html().includes('ArrowAngleRightUpIcon'), text)
+await press('reply to c2')
+check('tapping the reply jumps to the original', scrolled.some(o => o.index === exported.buildRows(messages.chat._array, '1').findIndex(r => r.m.id === 'c2')), JSON.stringify(scrolled))
 check('edited mark', text.includes('(수정됨)'))
 check('marks the channel read while open', dispatched.some(e => e.type === 'BULK_ACK' && e.channels[0].channelId === 'chat'))
 check('does not refetch a ready channel', !calls.some(c => c[0] === 'fetchMessages' && c[1]?.channelId === 'chat' && !c[1].before))

@@ -89,22 +89,34 @@ function Files({ m, mine }: { m: any; mine: boolean }) {
 }
 
 // ── 한 줄 ───────────────────────────────────────────────────────────────
-function Reply({ m, guildId, mine }: { m: any; guildId?: string; mine: boolean }) {
+/** 답장: 말풍선 맨 위 옅은 칸에 원래 메시지 (누르면 그 메시지로) */
+function ReplyQuote({ m, guildId, mine, onJump, alone }: { m: any; guildId?: string; mine: boolean; onJump: (id: string) => void; alone?: boolean }) {
     const ref = m.messageReference ?? m.message_reference
     if (!ref?.message_id) return null
     const target = S().MessageStore?.getMessage?.(ref.channel_id ?? m.channel_id, ref.message_id)
-    const text = target ? `${displayName(target.author, guildId)}: ${previewText(target, guildId)}` : '원래 메시지를 불러오지 못했어요'
+    const onBlue = mine && !alone
+    const name = target ? displayName(target.author, guildId) : ''
+    const text = target ? previewText(target, guildId) || '[메시지]' : '원래 메시지를 불러오지 못했어요'
     return (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2, marginHorizontal: 58, alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-            <Icon names={['ArrowAngleRightUpIcon', 'ReplyIcon']} color="rgba(255,255,255,0.8)" size={14} />
-            <T size={12} color="rgba(255,255,255,0.9)" weight="600" lines={1} style={{ flexShrink: 1 }}>
-                {text}
-            </T>
-        </View>
+        <Pressable onPress={() => onJump(ref.message_id)} accessibilityRole="button" accessibilityLabel={`reply to ${ref.message_id}`} style={{ alignSelf: 'stretch' }}>
+            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10, backgroundColor: onBlue ? 'rgba(255,255,255,0.18)' : alone ? C.white : C.blueSoft, minWidth: 160 }}>
+                {target ? <Avatar uri={avatarUrl(target.author, 48, guildId)} size={22} ring="transparent" /> : null}
+                <View style={{ flexShrink: 1 }}>
+                    {name ? (
+                        <T size={12} color={onBlue ? C.white : (roleColor(guildId, target?.author?.id) ?? C.navy)} weight="800" lines={1}>
+                            {name}
+                        </T>
+                    ) : null}
+                    <T size={12} color={onBlue ? '#e6ecff' : C.muted} weight="600" lines={2}>
+                        {text}
+                    </T>
+                </View>
+            </View>
+        </Pressable>
     )
 }
 
-export const MessageRow = memo(function MessageRow({ row, guildId, showNames, onMenu }: { row: Row; guildId?: string; showNames: boolean; onMenu: (m: any) => void }) {
+export const MessageRow = memo(function MessageRow({ row, guildId, showNames, onMenu, onJump, lit }: { row: Row; guildId?: string; showNames: boolean; onMenu: (m: any) => void; onJump: (id: string) => void; lit?: boolean }) {
     const { m, mine, head } = row
     if (isSystem(m)) {
         const text = m.type === SYSTEM_JOIN ? `${displayName(m.author, guildId)} 님이 들어왔어요` : previewText(m, guildId) || '시스템 메시지'
@@ -122,6 +134,7 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
     const components: any[] = m.components ?? []
     const hasText = !!m.content
     const hasFiles = !!(m.attachments?.length || m.stickerItems?.length || m.sticker_items?.length)
+    const reply = !!(m.messageReference ?? m.message_reference)?.message_id
     // 글도 파일도 없으면 임베드, 컴포넌트를 말풍선 없이 카드로만
     const bubble = hasText || hasFiles
     const empty = !bubble && !embeds.length && !components.length
@@ -135,7 +148,6 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
     }
     return (
         <View style={{ paddingHorizontal: 12, paddingTop: head ? 10 : 3 }}>
-            <Reply m={m} guildId={guildId} mine={mine} />
             <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'flex-start', gap: 10 }}>
                 {mine ? null : avatar}
                 <View style={{ maxWidth: '78%', flexShrink: 1, alignItems: mine ? 'flex-end' : 'flex-start', gap: 4 }}>
@@ -158,14 +170,15 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
                                         borderTopRightRadius: mine && head ? 4 : 18,
                                         backgroundColor: mine ? C.blue : C.white,
                                         opacity: pending ? 0.6 : 1,
-                                        borderWidth: failed ? 1.5 : 0,
-                                        borderColor: C.red,
+                                        borderWidth: failed || lit ? 2 : 0,
+                                        borderColor: failed ? C.red : C.teal,
                                         gap: 6,
                                         maxWidth: '100%',
                                     },
                                     shadow(2),
                                 ]}
                             >
+                                {reply ? <ReplyQuote m={m} guildId={guildId} mine={mine} onJump={onJump} /> : null}
                                 {hasText ? <RichText text={m.content} guildId={guildId} tone={tone} /> : null}
                                 <Files m={m} mine={mine} />
                                 {empty ? (
@@ -180,6 +193,7 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
                                 ) : null}
                             </View>
                         ) : null}
+                        {reply && !bubble && !empty ? <ReplyQuote m={m} guildId={guildId} mine={mine} onJump={onJump} alone /> : null}
                         {embeds.map((e, i) => (
                             <EmbedCard key={i} e={e} guildId={guildId} />
                         ))}
@@ -387,7 +401,21 @@ export function Chat({ channelId, guildId, head, compact = false, onList, onOpen
     const [menu, setMenu] = useState<any>(null)
     const [mode, setMode] = useState<Mode>(null)
     const box = useRef<any>(null)
+    const listRef = useRef<any>(null)
+    const [lit, setLit] = useState<string | null>(null)
     const kb = useKeyboardPad(box)
+    const rowsRef = useRef(rows)
+    rowsRef.current = rows
+    // 답장 칸을 누르면 원래 메시지로 가서 잠깐 테두리로 표시한다
+    const jump = useCallback((id: string) => {
+        const index = rowsRef.current.findIndex(r => r.m.id === id)
+        if (index < 0) return toast('원래 메시지가 너무 위에 있어요')
+        try {
+            listRef.current?.scrollToIndex?.({ index, viewPosition: 0.5, animated: true })
+        } catch {}
+        setLit(id)
+        setTimeout(() => setLit(cur => (cur === id ? null : cur)), 1600)
+    }, [])
 
     useEffect(() => loadMessages(channelId), [channelId])
     // 보고 있는 동안 들어온 메시지는 읽음으로
@@ -401,7 +429,7 @@ export function Chat({ channelId, guildId, head, compact = false, onList, onOpen
         if (a.length && messagesOf(channelId)?.hasMoreBefore !== false) loadMessages(channelId, a[0].id)
     }, [channelId])
 
-    const renderItem = useCallback(({ item }: { item: Row }) => <MessageRow row={item} guildId={guildId} showNames={!!guildId} onMenu={setMenu} />, [guildId])
+    const renderItem = useCallback(({ item }: { item: Row }) => <MessageRow row={item} guildId={guildId} showNames={!!guildId} onMenu={setMenu} onJump={jump} lit={item.m.id === lit} />, [guildId, jump, lit])
     const ch = channelOf(channelId)
     const placeholder = guildId ? `#${ch?.name ?? ''} 에 메시지 보내기` : `${head.title} 에게 메시지 보내기`
 
@@ -429,8 +457,19 @@ export function Chat({ channelId, guildId, head, compact = false, onList, onOpen
                 {onList ? <HeadButton label="리스트" names={['ListBulletsIcon', 'ChannelListIcon', 'HamburgerIcon']} compact={compact} onPress={onList} /> : null}
             </View>
             <FlatList
+                ref={listRef}
                 data={rows}
+                extraData={lit}
                 inverted
+                onScrollToIndexFailed={(info: any) => {
+                    // 아직 안 그린 줄이면 대충 그 근처로 간 다음 다시
+                    listRef.current?.scrollToOffset?.({ offset: info.averageItemLength * info.index, animated: false })
+                    setTimeout(() => {
+                        try {
+                            listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.5, animated: true })
+                        } catch {}
+                    }, 120)
+                }}
                 keyExtractor={r => r.m.id}
                 renderItem={renderItem}
                 onEndReached={older}
