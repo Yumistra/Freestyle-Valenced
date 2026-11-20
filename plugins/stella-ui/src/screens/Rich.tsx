@@ -89,14 +89,7 @@ function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; b
             case 'emoji': {
                 // 글자 높이에 맞춘다 (이모지만 있으면 크게)
                 const px = big ? 48 : Math.round(size * 1.3)
-                const uri = emojiUrl(n.id, n.animated, big ? 96 : 48)
-                if (big) return <Image key={i} source={{ uri }} style={{ width: px, height: px }} />
-                // 글 속 그림은 바닥이 글자 기준선에 붙어서 떠 보인다. 기준선 아래 몫(약 0.25 글자)만큼 내린다
-                return (
-                    <View key={i} style={{ width: px, height: px }}>
-                        <Image source={{ uri }} style={{ width: px, height: px, transform: [{ translateY: Math.round(size * 0.27) }] }} />
-                    </View>
-                )
+                return <Image key={i} source={{ uri: emojiUrl(n.id, n.animated, big ? 96 : 48) }} style={{ width: px, height: px }} />
             }
             case 'link':
                 return (
@@ -108,37 +101,111 @@ function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; b
     })
 }
 
+// ── 이모지가 섞인 줄: 낱말과 이모지를 한 줄씩 가운데 맞춰 흘린다 ──────────
+/**
+ * 안드로이드는 글 속 그림을 글자 기준선 위에 올려서 이모지가 떠 보인다.
+ * 그래서 이모지가 있는 줄은 낱말 하나하나와 이모지를 줄 단위로 세로 가운데에 놓는다.
+ */
+type Seg = { emoji: Extract<Inline, { t: 'emoji' }> } | { v: string; style: any; onPress?: () => void; whole?: boolean }
+
+function flatten(nodes: Inline[], tone: Tone, style: any, onPress: (() => void) | undefined, out: Seg[]) {
+    for (const n of nodes) {
+        switch (n.t) {
+            case 'text':
+                out.push({ v: n.v, style, onPress })
+                break
+            case 'b':
+                flatten(n.c, tone, { ...style, fontWeight: '800' }, onPress, out)
+                break
+            case 'i':
+                flatten(n.c, tone, { ...style, fontStyle: 'italic' }, onPress, out)
+                break
+            case 'u':
+                flatten(n.c, tone, { ...style, textDecorationLine: 'underline' }, onPress, out)
+                break
+            case 's':
+                flatten(n.c, tone, { ...style, textDecorationLine: 'line-through' }, onPress, out)
+                break
+            case 'code':
+                out.push({ v: ` ${n.v} `, whole: true, onPress, style: { ...style, fontFamily: MONO, backgroundColor: tone === 'light' ? 'rgba(255,255,255,0.18)' : C.blueSoft, fontSize: 13 } })
+                break
+            case 'mention':
+            case 'time':
+                out.push({ v: n.v, whole: true, onPress, style: { ...style, color: tone === 'light' ? C.white : C.blue, fontWeight: '800', backgroundColor: tone === 'light' ? 'rgba(255,255,255,0.16)' : 'rgba(74,111,216,0.12)' } })
+                break
+            case 'emoji':
+                out.push({ emoji: n })
+                break
+            case 'link':
+                flatten(n.c, tone, { ...style, color: linkColor(tone), textDecorationLine: 'underline' }, () => open(n.url), out)
+                break
+            case 'spoiler':
+                flatten(n.c, tone, style, onPress, out)
+                break
+        }
+    }
+}
+
+const hasEmoji = (nodes: Inline[]): boolean => nodes.some(n => n.t === 'emoji' || ('c' in n && hasEmoji(n.c)))
+const hasSpoiler = (nodes: Inline[]): boolean => nodes.some(n => n.t === 'spoiler' || ('c' in n && hasSpoiler(n.c)))
+
+/** 한 문단의 글. 이모지가 있으면 줄마다 가운데 맞춤, 없으면 보통 글 */
+function Line({ nodes, tone, size, text, box, big }: { nodes: Inline[]; tone: Tone; size: number; text: any; box?: any; big?: boolean }) {
+    if (big || !hasEmoji(nodes) || hasSpoiler(nodes))
+        return (
+            <P style={[text, box]}>
+                <Nodes nodes={nodes} tone={tone} big={big} size={size} />
+            </P>
+        )
+    const segs: Seg[] = []
+    flatten(nodes, tone, {}, undefined, segs)
+    const px = Math.round(size * 1.3)
+    const items: any[] = []
+    segs.forEach((g, i) => {
+        if ('emoji' in g) {
+            items.push(<Image key={i} source={{ uri: emojiUrl(g.emoji.id, g.emoji.animated, 48) }} style={{ width: px, height: px, marginHorizontal: 1 }} />)
+            return
+        }
+        // 줄바꿈은 그대로, 나머지는 낱말(뒤 빈칸 포함) 단위로
+        const lines = g.v.split('\n')
+        lines.forEach((ln, j) => {
+            if (j > 0) items.push(<View key={`${i}n${j}`} style={{ width: '100%', height: 0 }} />)
+            const words = g.whole ? [ln] : (ln.match(/\S+\s*|\s+/g) ?? [])
+            words.forEach((w, k) =>
+                items.push(
+                    <P key={`${i}.${j}.${k}`} style={[text, g.style]} onPress={g.onPress}>
+                        {w}
+                    </P>,
+                ),
+            )
+        })
+    })
+    return <View style={[{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }, box]}>{items}</View>
+}
+
 // ── 블록 ────────────────────────────────────────────────────────────────
 function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number; big?: boolean }): any {
     const base = { fontSize: size, lineHeight: Math.round(size * 1.4), color: ink(tone), fontWeight: '600' as const }
     switch (b.t) {
         case 'p':
             return (
-                <P style={base}>
-                    <Nodes nodes={b.c} tone={tone} big={big} size={size} />
-                </P>
+                <Line nodes={b.c} tone={tone} size={size} text={base} big={big} />
             )
         case 'h': {
             const s = b.level === 1 ? size + 7 : b.level === 2 ? size + 4 : size + 2
             return (
-                <P style={{ ...base, fontSize: s, lineHeight: Math.round(s * 1.3), fontWeight: '800', marginTop: 2 }}>
-                    <Nodes nodes={b.c} tone={tone} size={s} />
-                </P>
+                <Line nodes={b.c} tone={tone} size={s} text={{ ...base, fontSize: s, lineHeight: Math.round(s * 1.3), fontWeight: '800' }} box={{ marginTop: 2 }} />
             )
         }
         case 'sub':
             return (
-                <P style={{ ...base, fontSize: size - 3, color: soft(tone), lineHeight: Math.round((size - 3) * 1.4) }}>
-                    <Nodes nodes={b.c} tone={tone} size={size - 3} />
-                </P>
+                <Line nodes={b.c} tone={tone} size={size - 3} text={{ ...base, fontSize: size - 3, color: soft(tone), lineHeight: Math.round((size - 3) * 1.4) }} />
             )
         case 'li':
             return (
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                     <P style={base}>•</P>
-                    <P style={{ ...base, flexGrow: 1, flexShrink: 1, flexBasis: 'auto' }}>
-                        <Nodes nodes={b.c} tone={tone} size={size} />
-                    </P>
+                    <Line nodes={b.c} tone={tone} size={size} text={base} box={{ flexGrow: 1, flexShrink: 1, flexBasis: 'auto' }} />
                 </View>
             )
         case 'quote':
