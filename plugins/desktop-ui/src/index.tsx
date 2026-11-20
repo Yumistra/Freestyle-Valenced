@@ -2,7 +2,7 @@ import Page from '@valenced/components/Page'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
-import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { getModuleWithImportedPath, waitForModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { instead } from '@valenced/patcher'
 import { useState } from 'react'
 import { Dimensions, useWindowDimensions, View } from 'react-native'
@@ -102,10 +102,31 @@ function useSettingsTick() {
     storage?.use?.()
 }
 
+/** 어느 패치가 붙었는지 (설정 화면에 보여 준다) */
+export const status: Record<string, boolean> = {}
+
+/** 모듈이 이미 불러와졌으면 바로, 아니면 불러와질 때 */
+function onModule(cleanup: (f: any) => void, key: string, path: string, apply: (mod: any) => boolean | void) {
+    status[key] = false
+    const run = (mod: any) => {
+        if (!mod || status[key]) return
+        try {
+            status[key] = apply(mod) !== false
+        } catch (e) {
+            console.error('[Desktop UI]', key, e)
+        }
+    }
+    cleanup(
+        getModuleWithImportedPath(path, (mod: any) => {
+            if (mod) run(mod)
+            else cleanup(waitForModuleWithImportedPath(path, run) as any)
+        }) as any,
+    )
+}
+
 export function start(cleanup: (f: any) => void) {
     // 배치: 채팅을 채널 목록 옆에, 늘 열어 둠
-    cleanup(
-        getModuleWithImportedPath(PATHS.layout, (mod: any) => {
+    onModule(cleanup, 'layout', PATHS.layout, (mod: any) => {
             if (typeof mod?.default === 'function')
                 cleanup(
                     instead(mod, 'default', function (this: any, args: any[], orig: any) {
@@ -116,12 +137,11 @@ export function start(cleanup: (f: any) => void) {
                     }),
                 )
             if (typeof mod?.getChatLayout === 'function') cleanup(instead(mod, 'getChatLayout', () => layoutOf()))
-        }) as any,
-    )
+            return typeof mod?.default === 'function' || typeof mod?.useDrawerWidth === 'function'
+    })
 
     // 채널 목록 너비
-    cleanup(
-        getModuleWithImportedPath(PATHS.drawer, (mod: any) => {
+    onModule(cleanup, 'drawer', PATHS.drawer, (mod: any) => {
             if (typeof mod?.useDrawerWidth === 'function')
                 cleanup(
                     instead(mod, 'useDrawerWidth', function (this: any, args: any[], orig: any) {
@@ -132,12 +152,11 @@ export function start(cleanup: (f: any) => void) {
                     }),
                 )
             if (typeof mod?.getDrawerWidth === 'function') cleanup(instead(mod, 'getDrawerWidth', () => widths(screenWidth()).channel))
-        }) as any,
-    )
+            return typeof mod?.default === 'function' || typeof mod?.useDrawerWidth === 'function'
+    })
 
     // 채팅 너비: 멤버 칸만큼 줄인다 (사진, 영상 크기 계산에 쓰인다)
-    cleanup(
-        getModuleWithImportedPath(PATHS.chatWidth, (mod: any) => {
+    onModule(cleanup, 'chatWidth', PATHS.chatWidth, (mod: any) => {
             if (typeof mod?.default === 'function')
                 cleanup(
                     instead(mod, 'default', function (this: any, args: any[], orig: any) {
@@ -148,29 +167,25 @@ export function start(cleanup: (f: any) => void) {
                     }),
                 )
             if (typeof mod?.getChatWidth === 'function') cleanup(instead(mod, 'getChatWidth', () => widths(screenWidth()).chat))
-        }) as any,
-    )
+            return typeof mod?.default === 'function' || typeof mod?.useDrawerWidth === 'function'
+    })
 
-    cleanup(
-        getModuleWithImportedPath(PATHS.guildMembers, (mod: any) => {
+    onModule(cleanup, 'guildMembers', PATHS.guildMembers, (mod: any) => {
             GuildMembers = mod?.default
-        }) as any,
-    )
-    cleanup(
-        getModuleWithImportedPath(PATHS.privateMembers, (mod: any) => {
+            return !!GuildMembers
+    })
+    onModule(cleanup, 'privateMembers', PATHS.privateMembers, (mod: any) => {
             PrivateMembers = mod?.default
-        }) as any,
-    )
-    cleanup(
-        getModuleWithImportedPath(PATHS.threadMembers, (mod: any) => {
+            return !!PrivateMembers
+    })
+    onModule(cleanup, 'threadMembers', PATHS.threadMembers, (mod: any) => {
             ThreadMembers = mod?.default
-        }) as any,
-    )
+            return !!ThreadMembers
+    })
 
     // 멤버 목록 칸: 채팅 감싸개 옆에 붙인다
-    cleanup(
-        getModuleWithImportedPath(PATHS.chatWrapper, (mod: any) => {
-            if (typeof mod?.default !== 'function') return
+    onModule(cleanup, 'chatWrapper', PATHS.chatWrapper, (mod: any) => {
+            if (typeof mod?.default !== 'function') return false
             cleanup(
                 instead(mod, 'default', function DesktopChat(this: any, args: any[], orig: any) {
                     // 이 함수가 컴포넌트로 불린다. 훅 순서는 늘 같다
@@ -189,8 +204,7 @@ export function start(cleanup: (f: any) => void) {
                     )
                 }),
             )
-        }) as any,
-    )
+    })
 }
 
 // ── 설정 화면 ────────────────────────────────────────────────────────────
@@ -239,6 +253,11 @@ export function SettingsPage({ api }: { api?: any }) {
                 </TableRadioGroup>
                 <NumberInput label="Channel list width" value={s.channelWidth} onSave={channelWidth => save({ channelWidth })} />
                 <NumberInput label="Member list width" value={s.memberWidth} onSave={memberWidth => save({ memberWidth })} />
+                <Text variant="text-sm/medium" color="text-muted">
+                    {`Hooked: ${Object.entries(status)
+                        .map(([k, ok]) => `${k} ${ok ? 'yes' : 'no'}`)
+                        .join(', ')}`}
+                </Text>
                 <Text variant="text-sm/medium" color="text-muted">
                     {`Now: channels ${w.channel}, chat ${w.chat}, members ${w.members ? w.members : 'hidden, the chat would be too narrow'}`}
                 </Text>

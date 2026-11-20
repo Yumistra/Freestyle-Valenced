@@ -83,6 +83,15 @@ const channels = {
 }
 
 // ── 가짜 valenced ──
+// 레이아웃 모듈만 먼저 불러와져 있고, 나머지는 플러그인이 켜진 뒤에 불러와진다
+const loaded = new Set(['modules/chat/native/useChatLayout.tsx'])
+const waiting = []
+const loadRest = () => {
+    for (const [p, cb] of waiting.splice(0)) {
+        loaded.add(p)
+        cb(mods[p])
+    }
+}
 let cache = {}
 const listeners = new Set()
 const storage = {
@@ -114,8 +123,13 @@ const valenced = {
         utils: {
             modules: {
                 finders: {
+                    // 진짜처럼: 아직 안 불러온 모듈은 undefined 를 주고, 기다리면 나중에 준다
                     getModuleWithImportedPath: (path, cb) => {
-                        cb(mods[path])
+                        cb(loaded.has(path) ? mods[path] : undefined)
+                        return () => {}
+                    },
+                    waitForModuleWithImportedPath: (path, cb) => {
+                        waiting.push([path, cb])
                         return () => {}
                     },
                 },
@@ -161,6 +175,9 @@ const attr = (html, name) => html.match(new RegExp(`data-${name}="([^"]*)"`))?.[
 // ── 시험 ──
 const cleanups = []
 def.start({ cleanup: f => cleanups.push(f), jsonStorage: storage })
+check('waits for modules that are not loaded yet', waiting.length === 6, String(waiting.length))
+loadRest()
+check('everything hooked once loaded', Object.values(exported.status).every(Boolean) && Object.keys(exported.status).length === 7, JSON.stringify(exported.status))
 
 check('patches layout, widths and the chat wrapper', L.default !== originals[Object.keys(mods)[0]].default && DW.useDrawerWidth !== originals['modules/screen/native/drawer/useDrawerWidth.tsx'].useDrawerWidth && W.default !== originals['modules/main_tabs_v2/native/channel/SwipeForMemberListWrapper.tsx'].default)
 
@@ -218,7 +235,7 @@ check('non-React getters follow settings', L.getChatLayout().isChatLockedOpen ==
 
 // 설정 화면
 const page = renderToStaticMarkup(React.createElement(exported.SettingsPage, { api: { jsonStorage: storage } }))
-check('settings page renders', page.includes('Always show channels') && page.includes('Member list') && page.includes('Auto') && page.includes('Channel list width') && page.includes('Now: channels'))
+check('settings page renders', page.includes('Always show channels') && page.includes('Member list') && page.includes('Auto') && page.includes('Channel list width') && page.includes('Now: channels') && page.includes('Hooked: layout yes'))
 storage.set({ ...cache, members: false }, true)
 check('old on/off setting still understood', exported.widths(900).members === 0)
 
