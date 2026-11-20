@@ -4,7 +4,7 @@ import { emojiUrl } from '../data'
 import { imageSources, openViewer, SmartImage } from '../viewer'
 import { type Block, blocks, type Inline, onlyEmoji } from '../markdown'
 import { Icon, T } from '../parts'
-import { C, R } from '../theme'
+import { C, fixFont, R } from '../theme'
 
 /**
  * 꾸민 글, 임베드, 봇의 새 메시지 형식(컴포넌트 v2), 반응을 그린다.
@@ -22,7 +22,7 @@ const MONO = 'monospace'
  * 내용 폭(flexBasis auto)을 기준으로 늘고 줄게 한다.
  */
 /** 바깥 글 상자. 안드로이드가 굵은 글자 폭을 잘못 재서 끝 글자가 잘리는 것을 막는다 */
-export const P = (props: any) => <Text textBreakStrategy="simple" {...props} />
+export const P = ({ style, ...props }: any) => <Text textBreakStrategy="simple" style={fixFont(style)} {...props} />
 
 const open = (url?: string) => {
     if (url) Linking.openURL(url).catch(() => {})
@@ -45,9 +45,9 @@ function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; b
                 return n.v
             case 'b':
                 return (
-                    <Text key={i} style={{ fontWeight: '800' }}>
+                    <P key={i} style={{ fontWeight: '800' }}>
                         <Nodes nodes={n.c} tone={tone} size={size} />
-                    </Text>
+                    </P>
                 )
             case 'i':
                 return (
@@ -82,9 +82,9 @@ function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; b
             case 'mention':
             case 'time':
                 return (
-                    <Text key={i} style={{ color: tone === 'light' ? C.white : C.blue, fontWeight: '800', backgroundColor: tone === 'light' ? 'rgba(255,255,255,0.16)' : 'rgba(74,111,216,0.12)' }}>
+                    <P key={i} style={{ color: tone === 'light' ? C.white : C.blue, fontWeight: '800', backgroundColor: tone === 'light' ? 'rgba(255,255,255,0.16)' : 'rgba(74,111,216,0.12)' }}>
                         {n.v}
-                    </Text>
+                    </P>
                 )
             case 'emoji': {
                 // 글자 높이에 맞춘다 (이모지만 있으면 크게)

@@ -36,3 +36,17 @@ export function cardColor(id: string | undefined): string {
     for (const ch of id ?? '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
     return CARD_COLORS[h % CARD_COLORS.length]
 }
+
+/**
+ * 굵기를 디스코드 글꼴 파일로 바꾼다 (ggsans-Bold 등).
+ * 기본 글꼴에 굵기만 주면 안드로이드(특히 삼성 글꼴)가 폭을 좁게 재서 끝 글자가 잘린다.
+ * 디스코드 글자처럼 굵기마다 글꼴 파일을 고르면 잰 폭과 그린 폭이 같다. 한글은 시스템 글꼴로 이어진다.
+ */
+const FAMILY: Record<string, string> = { '100': 'Normal', '200': 'Normal', '300': 'Normal', '400': 'Normal', normal: 'Normal', '500': 'Medium', '600': 'Semibold', '700': 'Bold', bold: 'Bold', '800': 'ExtraBold', '900': 'ExtraBold' }
+const flat = (st: any): any => (Array.isArray(st) ? Object.assign({}, ...st.map(flat)) : st && typeof st === 'object' ? st : {})
+export function fixFont(style: any): any {
+    const s = flat(style)
+    if (s.fontWeight == null || s.fontFamily) return style
+    const name = FAMILY[String(s.fontWeight)] ?? 'Semibold'
+    return { ...s, fontFamily: `ggsans-${name}${s.fontStyle === 'italic' ? 'Italic' : ''}`, fontWeight: 'normal', fontStyle: 'normal' }
+}

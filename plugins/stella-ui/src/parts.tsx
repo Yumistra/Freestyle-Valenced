@@ -2,7 +2,7 @@ import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Component, memo, useEffect, useRef, useState } from 'react'
 import { Animated, Image, Pressable, Text, View } from 'react-native'
 import { useUi } from './state'
-import { C, R, shadow } from './theme'
+import { C, fixFont, R, shadow } from './theme'
 
 /**
  * 여러 화면이 같이 쓰는 조각들.
@@ -44,7 +44,7 @@ export function Icon({ names, color = C.ink, size = 20 }: { names: string[]; col
 // ── 글 ──────────────────────────────────────────────────────────────────
 export function T({ children, size = 14, color = C.ink, weight = '600', lines, style }: { children: any; size?: number; color?: string; weight?: '400' | '500' | '600' | '700' | '800'; lines?: number; style?: any }) {
     return (
-        <Text numberOfLines={lines} textBreakStrategy="simple" style={[{ fontSize: size, color, fontWeight: weight, includeFontPadding: false }, style]}>
+        <Text numberOfLines={lines} textBreakStrategy="simple" style={fixFont([{ fontSize: size, color, fontWeight: weight, includeFontPadding: false }, style])}>
             {children}
         </Text>
     )
@@ -66,7 +66,7 @@ export function Badge({ unread, mentions, style }: { unread: boolean; mentions: 
     const bg = mentions ? C.red : C.orange
     return (
         <View style={[{ minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 5, backgroundColor: bg, borderWidth: 2, borderColor: C.white, alignItems: 'center', justifyContent: 'center' }, style]}>
-            <Text textBreakStrategy="simple" style={{ fontSize: 12, lineHeight: 15, color: C.white, fontWeight: 'bold', textAlign: 'center', includeFontPadding: false, textAlignVertical: 'center' }}>
+            <Text textBreakStrategy="simple" style={fixFont({ fontSize: 12, lineHeight: 15, color: C.white, fontWeight: 'bold', textAlign: 'center', includeFontPadding: false, textAlignVertical: 'center' })}>
                 {mentions ? (mentions > 9 ? '9+' : '!') : '···'}
             </Text>
         </View>
