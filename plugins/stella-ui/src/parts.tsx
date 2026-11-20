@@ -126,7 +126,7 @@ export function RoundButton({ names, label, onPress, dot, size = 64 }: { names: 
                 <Icon names={names} color={C.navy} size={Math.round(size * 0.46)} />
             </View>
             {dot ? <Dot style={{ position: 'absolute', top: 2, right: 2 }} /> : null}
-            <View style={{ marginTop: -10, paddingHorizontal: 8, height: 20, borderRadius: R.pill, backgroundColor: C.white, justifyContent: 'center', borderWidth: 1, borderColor: C.line }}>
+            <View style={{ marginTop: -8, paddingHorizontal: 9, paddingVertical: 2, minHeight: 22, borderRadius: R.pill, backgroundColor: C.white, justifyContent: 'center', borderWidth: 1, borderColor: C.line }}>
                 <T size={12} color={C.ink} weight="700">
                     {label}
                 </T>

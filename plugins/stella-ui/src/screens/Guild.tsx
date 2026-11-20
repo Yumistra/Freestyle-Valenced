@@ -153,6 +153,7 @@ export function GuildScreen({ width }: { width: number }) {
                                 channelId={channelId!}
                                 guildId={guildId}
                                 head={{ title: ch.name ?? '', subtitle: ch.topic ? String(ch.topic).replace(/\s+/g, ' ') : undefined, icon: channelIcon(ch.type) }}
+                                compact={narrow}
                                 onList={narrow ? () => setState({ channelId: undefined }) : undefined}
                                 onOpenNative={() => openChannelNative(ch) && setState({ visible: false })}
                             />

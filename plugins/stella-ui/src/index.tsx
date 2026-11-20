@@ -271,4 +271,6 @@ export default plugin({
 export { getState } from './state'
 export { greetings } from './screens/Lobby'
 export { buildRows } from './screens/Chat'
-export { guildSections, parseContent, plainText, previewText } from './data'
+export { guildSections } from './data'
+export { blocks, formatTime, inline, plainText, previewText } from './markdown'
+export { embedColor } from './screens/Rich'

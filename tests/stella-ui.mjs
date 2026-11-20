@@ -29,13 +29,22 @@ let win = { width: 1280, height: 800 }
 const presses = new Map()
 const inputs = new Map()
 const backHandlers = new Set()
+const kbListeners = []
+const copied = []
 const opened = []
 const clean = props => {
     const out = {}
     for (const [k, v] of Object.entries(props)) if (k.startsWith('data-')) out[k] = v
     return out
 }
-const View = ({ children, pointerEvents, ...p }) => h('div', clean(p), children)
+const flatStyle = st => (Array.isArray(st) ? Object.assign({}, ...st.map(flatStyle)) : st && typeof st === 'object' ? st : {})
+/** 키보드 시험용: 채팅 칸의 창 안 위치 */
+const layout = { y: 0, h: 800 }
+const View = ({ children, pointerEvents, ref, onLayout, style, ...p }) => {
+    React.useImperativeHandle(ref, () => ({ measureInWindow: cb => cb(0, layout.y, 100, layout.h) }))
+    const pb = flatStyle(style).paddingBottom
+    return h('div', { ...clean(p), ...(ref && pb !== undefined ? { 'data-pb': pb } : {}) }, children)
+}
 /** 그려져 있는 동안만 누를 수 있게 등록한다 (memo 로 다시 안 그려져도 남는다) */
 function useRegister(map, key, value) {
     const ref = React.useRef(value)
@@ -52,7 +61,8 @@ const Text = ({ children, onPress, ...p }) => {
     return h('span', clean(p), children)
 }
 const Image = ({ source }) => h('img', { 'data-src': source?.uri ?? '' })
-const Pressable = ({ children, onPress, accessibilityLabel, disabled, style }) => {
+const Pressable = ({ children, onPress, onLongPress, accessibilityLabel, disabled, style }) => {
+    useRegister(presses, onLongPress ? `long:${accessibilityLabel}` : '', onLongPress)
     if (typeof style === 'function') style({ pressed: false })
     useRegister(presses, onPress ? accessibilityLabel : '', disabled ? () => {} : onPress)
     return h('div', { 'data-press': accessibilityLabel ?? '' }, typeof children === 'function' ? children({ pressed: false }) : children)
@@ -83,7 +93,7 @@ const ReactNative = {
     FlatList,
     Animated: { View, Value: AnimValue, timing: (v, cfg) => ({ start: cb => (v.setValue(cfg.toValue), cb?.({ finished: true })), stop() {} }) },
     BackHandler: { addEventListener: (_t, f) => (backHandlers.add(f), { remove: () => backHandlers.delete(f) }) },
-    Keyboard: { addListener: () => ({ remove() {} }) },
+    Keyboard: { addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
     Linking: { openURL: url => (opened.push(url), Promise.resolve()) },
     Dimensions: { get: () => win },
     useWindowDimensions: () => win,
@@ -106,6 +116,7 @@ const channels = {
     rules: { id: 'rules', type: 0, name: 'rules', guild_id: 'g1', parent_id: 'cat1', position: 0 },
     news: { id: 'news', type: 5, name: 'news', guild_id: 'g1', parent_id: 'cat1', position: 1 },
     chat: { id: 'chat', type: 0, name: 'chat', guild_id: 'g1', parent_id: 'cat2', position: 0, topic: 'Read  me\nfirst' },
+    logs: { id: 'logs', type: 0, name: 'logs', guild_id: 'g1', parent_id: 'cat2', position: 1 },
     talk: { id: 'talk', type: 2, name: 'talk', guild_id: 'g1', parent_id: 'cat2', position: 0 },
     forum: { id: 'forum', type: 15, name: 'help', guild_id: 'g1', parent_id: 'cat2', position: 2 },
     777: { id: '777', type: 0, name: 'general' },
@@ -117,6 +128,53 @@ const guilds = {
 }
 const msg = (id, author, content, extra = {}) => ({ id, author: users[author], content, type: 0, timestamp: new Date(Date.UTC(2026, 10, 20, 10, 0, Number(id.replace(/\D/g, '')) || 0)), attachments: [], embeds: [], channel_id: extra.channel_id, ...extra })
 const messages = {
+    logs: {
+        ready: true,
+        _array: [
+            msg('l1', '4', '', {
+                channel_id: 'logs',
+                embeds: [
+                    {
+                        type: 'rich',
+                        color: 0x00ff88,
+                        author: { name: 'Logger', iconProxyURL: 'https://cdn/author.png' },
+                        rawTitle: 'Member Joined',
+                        url: 'https://example.com/m',
+                        rawDescription: 'Bot <@2> was **added** by <@3>',
+                        fields: [
+                            { rawName: 'Id', rawValue: '`575`', inline: true },
+                            { rawName: 'Roles', rawValue: '<@&9>', inline: true },
+                            { rawName: 'Note', rawValue: '> quoted line', inline: false },
+                        ],
+                        thumbnail: { url: 'https://x/t.png', proxyURL: 'https://media/t.png', width: 80, height: 80 },
+                        image: { url: 'https://x/i.png', proxyURL: 'https://media/i.png', width: 600, height: 300 },
+                        footer: { text: 'Footer here' },
+                        timestamp: '2026-11-20T10:00:00Z',
+                    },
+                    { type: 'image', thumbnail: { url: 'https://x/only.png', proxyURL: 'https://media/only.png', width: 100, height: 100 } },
+                ],
+                reactions: [{ emoji: { id: null, name: '👍' }, count: 3, me: true }, { emoji: { id: '42', name: 'cat', animated: false }, count: 1, me: false }],
+            }),
+            msg('l2', '4', '', {
+                channel_id: 'logs',
+                components: [
+                    {
+                        type: 17,
+                        accent_color: 0xff0000,
+                        components: [
+                            { type: 10, content: '# Update\nNew **version** out' },
+                            { type: 12, items: [{ media: { url: 'https://x/g1.png', width: 200, height: 100 } }] },
+                            { type: 14, divider: true },
+                            { type: 9, components: [{ type: 10, content: 'Section text' }], accessory: { type: 11, media: { url: 'https://x/acc.png' } } },
+                            { type: 1, components: [{ type: 2, style: 5, label: 'Open site', url: 'https://example.com/site' }] },
+                        ],
+                    },
+                ],
+            }),
+            msg('l3', '4', '', { channel_id: 'logs', embeds: [{ type: 'rich' }] }),
+            msg('l4', '1', 'my **own** line', { channel_id: 'logs' }),
+        ],
+    },
     dm1: {
         ready: true,
         _array: [msg('m1', '2', 'Hi <@1>, see <#777> <:wave:111> https://example.com/a.', { channel_id: 'dm1' }), msg('m2', '1', 'hello back', { channel_id: 'dm1' }), msg('m3', '1', '', { channel_id: 'dm1', attachments: [{ id: 'a1', filename: 'pic.png', content_type: 'image/png', width: 400, height: 200, url: 'https://cdn/pic.png', proxy_url: 'https://media/pic.png' }] })],
@@ -150,7 +208,7 @@ const Stores = {
     GuildChannelStore: store({
         getChannels: gid =>
             gid === 'g1'
-                ? { SELECTABLE: ['rules', 'news', 'chat', 'forum', 'top'].map(id => ({ channel: channels[id] })), VOCAL: [{ channel: channels.talk }] }
+                ? { SELECTABLE: ['rules', 'news', 'chat', 'logs', 'forum', 'top'].map(id => ({ channel: channels[id] })), VOCAL: [{ channel: channels.talk }] }
                 : { SELECTABLE: [], VOCAL: [] },
     }),
     GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800' } : null) }),
@@ -172,6 +230,8 @@ const modules = [
     { openCollectiblesShopMobile: record('openCollectiblesShopMobile') },
     { openQuestHome: record('openQuestHome') },
     { openUserSettings: record('openUserSettings') },
+    { editMessage: record('editMessage'), deleteMessage: record('deleteMessage') },
+    { addReaction: record('addReaction'), removeReaction: record('removeReaction') },
     { toggleSelfMute: () => ((media.mute = !media.mute), Stores.MediaEngineStore.emit()), toggleSelfDeaf: () => ((media.deaf = !media.deaf), Stores.MediaEngineStore.emit()) },
 ]
 const toasts = []
@@ -231,7 +291,7 @@ globalThis.valenced = {
             },
         },
     },
-    externals: { ReactNativeSafeAreaContext: { ReactNativeSafeAreaContext: { useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }) } } },
+    externals: { ReactNativeClipboard: { Clipboard: { setString: t => copied.push(t) } }, ReactNativeSafeAreaContext: { ReactNativeSafeAreaContext: { useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }) } } },
     modules: {
         finders: {
             lookupModule: filter => {
@@ -385,6 +445,74 @@ const sent = calls.find(c => c[0] === 'sendMessage')
 check('send trims and uses Discord sendMessage(channelId, message, undefined, options)', sent && sent[1] === 'chat' && sent[2].content === 'hi there' && sent[2].tts === false && sent[3] === undefined)
 check('composer clears after sending', box[1][0].get().value === '')
 
+// 임베드, 컴포넌트, 반응
+text = await press('logs')
+check('embed: author, title, description with mentions and bold', text.includes('Logger') && text.includes('Member Joined') && text.includes('Bot @Seina was added by @NaznaNick') && !text.includes('**'), text)
+check('embed: fields in a row, code and role, quote', text.includes('Id') && text.includes('575') && text.includes('@역할') && text.includes('quoted line'))
+check('embed: thumbnail, image, footer', html().includes('https://media/t.png') && html().includes('https://media/i.png') && text.includes('Footer here'))
+check('image-only link embed shows the picture', html().includes('https://media/only.png'))
+check('components v2: heading, bold, gallery, section, button', text.includes('Update') && text.includes('New version out') && html().includes('https://x/g1.png') && text.includes('Section text') && html().includes('https://x/acc.png') && text.includes('Open site'))
+check('nothing to show → a short note, not an empty bubble', text.includes('[표시할 수 없는 메시지]'))
+check('my markdown in a blue bubble', text.includes('my own line') && !text.includes('**own**'))
+check('reactions with counts', text.includes('👍') && text.includes('3') && html().includes('emojis/42.webp'))
+await press('reaction 👍')
+check('my reaction → remove', calls.some(c => c[0] === 'removeReaction' && c[1] === 'logs' && c[2] === 'l1' && c[3].name === '👍'))
+await press('reaction cat')
+check('other reaction → add with the custom emoji', calls.some(c => c[0] === 'addReaction' && c[3].id === '42' && c[3].name === 'cat'))
+await press('Open site')
+check('link button opens', opened.includes('https://example.com/site'))
+
+// 꾹 누르기 메뉴
+await press('long:message l1')
+check('long press opens the message menu', host.textContent.includes('답장') && host.textContent.includes('Logger') === true)
+await press('react 🔥')
+check('quick reaction adds', calls.some(c => c[0] === 'addReaction' && c[3].name === '🔥' && c[3].id === null))
+await press('long:message l1')
+await press('답장')
+check('reply bar shows who', host.textContent.includes('Tillia 에게 답장'))
+const logBox = () => [...inputs.entries()].find(([k, v]) => k.includes('logs') && v.length)[1][0].get()
+await act(async () => logBox().onChangeText('a reply'))
+await press('Send')
+const replied = calls.filter(c => c[0] === 'sendMessage').at(-1)
+check('reply sends a message reference', replied[1] === 'logs' && replied[4]?.messageReference?.message_id === 'l1' && replied[4].messageReference.guild_id === 'g1')
+check('reply bar closes after sending', !host.textContent.includes('에게 답장'))
+await press('long:message l4')
+check('my message: edit, delete, copy', ['수정', '삭제', '글 복사'].every(t => host.textContent.includes(t)))
+await press('글 복사')
+check('copy puts the text on the clipboard', copied.includes('my **own** line'))
+await press('long:message l4')
+await press('수정')
+check('edit fills the composer', logBox().value === 'my **own** line' && host.textContent.includes('메시지 수정 중'))
+await act(async () => logBox().onChangeText('fixed'))
+await press('Send')
+check('edit uses editMessage(channel, id, { content })', calls.some(c => c[0] === 'editMessage' && c[1] === 'logs' && c[2] === 'l4' && c[3].content === 'fixed'))
+await press('long:message l4')
+await press('삭제')
+check('delete asks once more', host.textContent.includes('정말 지울까요') && !calls.some(c => c[0] === 'deleteMessage'))
+await press('정말 지울까요? 한 번 더 누르세요')
+check('delete on the second press', calls.some(c => c[0] === 'deleteMessage' && c[1] === 'logs' && c[2] === 'l4'))
+await press('long:message l1')
+check('others cannot edit or delete', !host.textContent.includes('수정') && !host.textContent.includes('삭제'))
+await press('Close message menu')
+
+// 키보드: 화면이 줄지 않으면 가려진 만큼만, 줄어들면 0
+const pb = () => Number(html().match(/data-pb="(\d+)"/)?.[1] ?? -1)
+const kbShow = async y => {
+    await act(async () => kbListeners.filter(([t]) => t === 'keyboardDidShow').forEach(([, f]) => f({ endCoordinates: { screenY: y, height: 800 - y } })))
+    await act(async () => new Promise(r => setTimeout(r, 90)))
+}
+layout.y = 0
+layout.h = 800
+await kbShow(500)
+check('keyboard over an unresized screen → pad by what is covered', pb() === 300, pb())
+layout.h = 500
+await kbShow(500)
+check('screen already shrunk → no extra gap', pb() === 0, pb())
+await act(async () => kbListeners.filter(([t]) => t === 'keyboardDidHide').forEach(([, f]) => f()))
+check('keyboard hidden → no pad', pb() === 0)
+layout.h = 800
+await press('chat')
+
 // 음성, 포럼
 await press('talk')
 check('voice channel → join', calls.some(c => c[0] === 'selectVoiceChannel' && c[1] === 'talk') && toasts.some(t => t.includes('talk')))
@@ -408,7 +536,7 @@ text = await press('Seina')
 check('contact → chat', state().dmId === 'dm1' && text.includes('hello back'))
 check('mention, channel, link parsed', text.includes('@DeStinY') && text.includes('#general') && !text.includes('<#') && html().includes('emojis/111.webp'))
 check('my image attachment drawn', html().includes('https://media/pic.png'))
-await press('text:https://example.com/a')
+await press('text:')
 check('links open', opened.includes('https://example.com/a'))
 text = await press('Nazna')
 check('dm without messages loads them', calls.some(c => c[0] === 'fetchMessages' && c[1]?.channelId === 'dm2' && c[1].limit === 50))
@@ -487,11 +615,23 @@ check('narrow lobby renders', text.includes('출발') && text.includes('하트�
 win = { width: 1280, height: 800 }
 
 // 순수 함수
-const pieces = exported.parseContent('a <@2> <@!3> <@&9> <#777> <a:dance:55> http://x.y/z) end', 'g1')
-check('parse: mentions, roles, channels, animated emoji, links', JSON.stringify(pieces.map(p => p.t)) === JSON.stringify(['text', 'mention', 'text', 'mention', 'text', 'mention', 'text', 'mention', 'text', 'emoji', 'text', 'link', 'text']), JSON.stringify(pieces))
-check('parse: nickname for mentions in a server', pieces[3]?.v === '@NaznaNick')
-check('parse: link stops before )', pieces[11]?.v === 'http://x.y/z')
-check('plain text', exported.plainText('hi   <:a:1>\nthere') === 'hi :a: there')
+const md = (t, g) => exported.blocks(t, g)
+const kinds = nodes => nodes.map(n => n.t).join(',')
+check('inline: bold, italic, underline, strike, spoiler, code', kinds(exported.inline('**b** *i* __u__ ~~s~~ ||x|| `c`')) === 'b,text,i,text,u,text,s,text,spoiler,text,code', kinds(exported.inline('**b** *i* __u__ ~~s~~ ||x|| `c`')))
+check('inline: nested bold in link label', JSON.stringify(exported.inline('[**hi**](https://a.b/c)')[0]).includes('"t":"b"'))
+const ins = exported.inline('a <@2> <@!3> <@&9> <#777> <a:dance:55> http://x.y/z) end', 'g1')
+check('inline: mentions, role, channel, emoji, link', kinds(ins) === 'text,mention,text,mention,text,mention,text,mention,text,emoji,text,link,text', kinds(ins))
+check('inline: nickname, link stops before )', ins[3].v === '@NaznaNick' && ins[11].url === 'http://x.y/z')
+check('inline: unknown user', exported.inline('<@999>')[0].v === '@알 수 없는 사용자')
+check('inline: snake_case words stay plain', kinds(exported.inline('my_var_name ok')) === 'text')
+check('inline: lone asterisks stay plain', kinds(exported.inline('2 * 3 * 4')) === 'text')
+check('blocks: heading, subtext, list, quote, code block', kinds(md('# T\n-# small\n- a\n> q1\n> q2\ntext\n```js\nx = 1\n```')) === 'h,sub,li,quote,p,codeblock', kinds(md('# T\n-# small\n- a\n> q1\n> q2\ntext\n```js\nx = 1\n```')))
+check('blocks: >>> quotes the rest', md('a\n>>> b\nc')[1].t === 'quote' && md('a\n>>> b\nc')[1].c.length === 1)
+check('blocks: code block keeps markdown as is', md('```**x**```')[0].v === '**x**')
+check('plain text drops markers', exported.plainText('**hi**   <:a:1>\n> there `x`') === 'hi :a: there x')
+check('timestamps', exported.formatTime(0, 'R', 3600 * 1000) === '1시간 전' && exported.inline('<t:0:d>')[0].t === 'time')
+check('preview: embed title when no text', exported.previewText({ content: '', embeds: [{ rawTitle: '**Hi**' }] }) === 'Hi')
+check('embed color from number and string', exported.embedColor({ color: 255 }) === '#0000ff' && exported.embedColor({ color: '#ABCDEF' }) === '#ABCDEF' && exported.embedColor({}) === undefined)
 const rowsBuilt = exported.buildRows(messages.chat._array, '4')
 check('rows newest first, grouping', rowsBuilt[0].m.id === 'c9' && rowsBuilt.find(r => r.m.id === 'c3').head === false && rowsBuilt.find(r => r.m.id === 'c2').head === true)
 check('rows mark my messages', rowsBuilt.find(r => r.m.id === 'c9').mine === true)

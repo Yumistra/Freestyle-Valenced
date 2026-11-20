@@ -212,21 +212,37 @@ export function LobbyScreen({ width, height }: { width: number; height: number }
     return (
         <View style={{ flex: 1 }}>
             <Backdrop uri={s.background} />
-            <Pressable onPress={() => setLineIndex(i => i + 1)} accessibilityLabel="Character" style={{ position: 'absolute', bottom: 0, left: (width - charW) / 2, width: charW, height: height * (narrow ? 0.72 : 0.94) }}>
+            <Pressable onPress={() => setLineIndex(i => i + 1)} accessibilityLabel="Character" style={{ position: 'absolute', bottom: 0, left: (width - charW) / 2, width: charW, height: height * (narrow ? 0.6 : 0.94) }}>
                 <Character uri={s.character} />
             </Pressable>
-            <View style={{ position: 'absolute', left: narrow ? 20 : width * 0.25, top: height * (narrow ? 0.2 : 0.36) }} pointerEvents="none">
-                <Speech lines={lines} index={lineIndex} />
-            </View>
-            <View style={{ position: 'absolute', top: 18, left: 18 }}>
-                <Profile />
-            </View>
-            <View style={{ position: 'absolute', top: narrow ? 110 : 18, right: 18 }}>
-                <TopIcons />
-            </View>
-            <View style={{ position: 'absolute', left: 20, ...(narrow ? { top: 170 } : { bottom: 24 }) }}>
-                <VoiceBar />
-            </View>
+            {narrow ? (
+                // 좁은 화면: 위에서부터 차례로 쌓아서 겹치지 않게
+                <View style={{ position: 'absolute', top: 18, left: 18, right: 18, gap: 14 }}>
+                    <Profile />
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                        <VoiceBar />
+                        <TopIcons />
+                    </View>
+                    <View pointerEvents="none" style={{ alignSelf: 'flex-start' }}>
+                        <Speech lines={lines} index={lineIndex} />
+                    </View>
+                </View>
+            ) : (
+                <>
+                    <View style={{ position: 'absolute', left: width * 0.25, top: height * 0.36 }} pointerEvents="none">
+                        <Speech lines={lines} index={lineIndex} />
+                    </View>
+                    <View style={{ position: 'absolute', top: 18, left: 18 }}>
+                        <Profile />
+                    </View>
+                    <View style={{ position: 'absolute', top: 18, right: 18 }}>
+                        <TopIcons />
+                    </View>
+                    <View style={{ position: 'absolute', left: 20, bottom: 24 }}>
+                        <VoiceBar />
+                    </View>
+                </>
+            )}
             <View style={{ position: 'absolute', right: 24, bottom: 24, alignItems: 'flex-end', gap: 16 }}>
                 <View style={{ flexDirection: 'row', gap: 16 }}>
                     <RoundButton names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="임무" onPress={() => leaveTo('quests')} />

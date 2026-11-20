@@ -1,6 +1,7 @@
 import { memo, useCallback } from 'react'
 import { FlatList, Pressable, View } from 'react-native'
-import { acceptRequest, avatarUrl, channel, declineRequest, displayName, dmAvatar, dmIds, dmName, dmWith, lastMessage, previewText, relationships, S, sameList, unread, useStores, user } from '../data'
+import { acceptRequest, avatarUrl, channel, declineRequest, displayName, dmAvatar, dmIds, dmName, dmWith, lastMessage, relationships, S, sameList, unread, useStores, user } from '../data'
+import { previewText } from '../markdown'
 import { Avatar, Backdrop, Badge, Empty, Icon, Phone, PhoneTabs, T } from '../parts'
 import { useSettings } from '../settings'
 import { go, type HeartTab, isNarrow, setState, useUi } from '../state'
@@ -197,6 +198,7 @@ export function HeartScreen({ width }: { width: number }) {
                                 key={dmId}
                                 channelId={dmId!}
                                 head={{ avatar: dmAvatar(ch), title: dmName(ch), subtitle: ch.type === 3 ? `${(ch.recipients?.length ?? 0) + 1}명` : undefined }}
+                                compact={narrow}
                                 onList={narrow ? () => setState({ dmId: undefined }) : undefined}
                             />
                         ) : (

@@ -297,13 +297,19 @@ export function loadMessages(channelId: string, before?: string) {
     }
 }
 
-export function sendMessage(channelId: string, text: string): boolean {
+/** 메시지 보내기. reply 를 주면 그 메시지에 답장 */
+export function sendMessage(channelId: string, text: string, reply?: any): boolean {
     const content = text.trim()
     if (!content) return false
     const actions = find('sendMessage', 'receiveMessage') ?? find('sendMessage', 'deleteMessage')
     if (typeof actions?.sendMessage !== 'function') return false
+    const options: any = {}
+    if (reply?.id) {
+        const guildId = channel(channelId)?.guild_id
+        options.messageReference = { channel_id: channelId, message_id: reply.id, ...(guildId ? { guild_id: guildId } : {}) }
+    }
     try {
-        actions.sendMessage(channelId, { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, {})
+        actions.sendMessage(channelId, { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, options)
         return true
     } catch {
         return false
@@ -318,54 +324,6 @@ export function ack(channelId: string) {
         const last = rs?.lastMessageId?.(channelId) ?? channel(channelId)?.lastMessageId ?? channel(channelId)?.last_message_id
         if (last) (Dispatcher as any).dispatch({ type: 'BULK_ACK', context: 'APP', channels: [{ channelId, messageId: last, readStateType: 0 }] })
     } catch {}
-}
-
-/** 메시지 한 개를 한 줄 미리보기로 */
-export function previewText(m: any, guildId?: string): string {
-    if (!m) return ''
-    const text = plainText(m.content ?? '', guildId)
-    if (text) return text
-    if (m.attachments?.length) return '[파일]'
-    if (m.stickerItems?.length || m.sticker_items?.length) return '[스티커]'
-    if (m.embeds?.length) return m.embeds[0]?.rawTitle ?? m.embeds[0]?.title ?? '[임베드]'
-    return ''
-}
-
-// ── 메시지 글 ───────────────────────────────────────────────────────────
-export type Piece = { t: 'text'; v: string } | { t: 'mention'; v: string } | { t: 'emoji'; id: string; name: string; animated: boolean } | { t: 'link'; v: string }
-
-const TOKEN = /<(@!?|@&|#)(\d+)>|<(a?):(\w+):(\d+)>|(https?:\/\/[^\s<]+[^\s<.,:;"')\]])/g
-
-/** 메시지 글을 조각으로 나눈다 (멘션, 커스텀 이모지, 링크) */
-export function parseContent(content: string, guildId?: string): Piece[] {
-    const out: Piece[] = []
-    let last = 0
-    TOKEN.lastIndex = 0
-    let m: RegExpExecArray | null
-    while ((m = TOKEN.exec(content))) {
-        const i = m.index
-        if (i > last) out.push({ t: 'text', v: content.slice(last, i) })
-        if (m[1]) {
-            const id = m[2]
-            const kind = m[1]
-            if (kind === '#') out.push({ t: 'mention', v: `#${channel(id)?.name ?? '채널'}` })
-            else if (kind === '@&') out.push({ t: 'mention', v: `@${(guildId && S().GuildRoleStore?.getRole?.(guildId, id)?.name) || S().GuildStore?.getRole?.(guildId, id)?.name || '역할'}` })
-            else out.push({ t: 'mention', v: `@${displayName(user(id), guildId)}` })
-        } else if (m[5]) out.push({ t: 'emoji', id: m[5], name: m[4], animated: m[3] === 'a' })
-        else if (m[6]) out.push({ t: 'link', v: m[6] })
-        last = i + m[0].length
-    }
-    if (last < content.length) out.push({ t: 'text', v: content.slice(last) })
-    return out
-}
-
-/** 꾸밈 없이 글만 */
-export function plainText(content: string, guildId?: string): string {
-    return parseContent(content, guildId)
-        .map(p => (p.t === 'emoji' ? `:${p.name}:` : p.v))
-        .join('')
-        .replace(/\s+/g, ' ')
-        .trim()
 }
 
 // ── 디스코드 화면으로 가기 ──────────────────────────────────────────────
@@ -497,4 +455,42 @@ export async function pickImage(): Promise<string | undefined> {
         const uri = res.assets?.[0]?.uri ?? res.uri ?? res.path ?? (Array.isArray(res) ? res[0]?.uri : undefined)
         return typeof uri === 'string' && uri ? uri : undefined
     } catch {}
+}
+
+// ── 메시지 고치기 ───────────────────────────────────────────────────────
+export function editMessage(channelId: string, messageId: string, text: string): boolean {
+    const content = text.trim()
+    if (!content) return false
+    try {
+        const m = find('editMessage', 'deleteMessage')
+        if (typeof m?.editMessage !== 'function') return false
+        m.editMessage(channelId, messageId, { content })
+        return true
+    } catch {
+        return false
+    }
+}
+
+export function deleteMessage(channelId: string, messageId: string): boolean {
+    try {
+        const m = find('editMessage', 'deleteMessage') ?? find('deleteMessage', 'sendMessage')
+        if (typeof m?.deleteMessage !== 'function') return false
+        m.deleteMessage(channelId, messageId)
+        return true
+    } catch {
+        return false
+    }
+}
+
+/** 반응 누르기 (이미 눌렀으면 뺀다) */
+export function toggleReaction(channelId: string, messageId: string, emoji: { id?: string | null; name: string; animated?: boolean }, mine: boolean): boolean {
+    try {
+        const m = find('addReaction', 'removeReaction')
+        const f = mine ? m?.removeReaction : m?.addReaction
+        if (typeof f !== 'function') return false
+        f.call(m, channelId, messageId, { id: emoji.id ?? null, name: emoji.name, animated: !!emoji.animated }, 'Message', { burst: false })
+        return true
+    } catch {
+        return false
+    }
 }

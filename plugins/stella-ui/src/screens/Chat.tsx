@@ -1,17 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { FlatList, Image, Keyboard, Linking, Pressable, Text, TextInput, View } from 'react-native'
-import { ack, avatarUrl, channel as channelOf, displayName, emojiUrl, loadMessages, me, messageArray, messagesOf, parseContent, previewText, roleColor, S, sendMessage, useStores } from '../data'
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FlatList, Image, Keyboard, Linking, Pressable, TextInput, View } from 'react-native'
+import { ack, avatarUrl, channel as channelOf, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
+import { previewText } from '../markdown'
 import { Avatar, Icon, PillButton, T } from '../parts'
 import { useUi } from '../state'
 import { C, R, shadow } from '../theme'
+import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
 
 /**
  * 말풍선 채팅 (하트챗과 서버 채널이 같이 쓴다).
  * 상대는 왼쪽 흰 말풍선, 나는 오른쪽 파란 말풍선. 서버면 첫 말풍선 위에 이름(역할 색).
+ * 꾹 누르면 반응, 답장, 복사, (내 것) 수정, 삭제.
  */
 
 const GROUP_GAP = 5 * 60 * 1000
 const SYSTEM_JOIN = 7
+const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '✅']
 
 export interface Row {
     m: any
@@ -26,6 +31,8 @@ const time = (m: any) => {
     return Number.isFinite(v) ? v : 0
 }
 
+const isSystem = (m: any) => m && m.type !== 0 && m.type !== 19
+
 /** 시간 순 메시지를 아래가 최신인 거꾸로 목록 줄로 */
 export function buildRows(list: any[], myId: string | undefined): Row[] {
     const rows: Row[] = []
@@ -38,48 +45,13 @@ export function buildRows(list: any[], myId: string | undefined): Row[] {
     return rows.reverse()
 }
 
-const isSystem = (m: any) => m && m.type !== 0 && m.type !== 19
-
-// ── 글 ──────────────────────────────────────────────────────────────────
-const MessageText = memo(function MessageText({ content, guildId, mine }: { content: string; guildId?: string; mine: boolean }) {
-    const pieces = useMemo(() => parseContent(content, guildId), [content, guildId])
-    const onlyEmoji = pieces.length > 0 && pieces.length <= 6 && pieces.every(p => p.t === 'emoji' || (p.t === 'text' && !p.v.trim()))
-    const color = mine ? C.white : C.ink
-    const big = onlyEmoji ? 40 : 20
-    return (
-        <Text style={{ fontSize: 15, lineHeight: 21, color, fontWeight: '600' }}>
-            {pieces.map((p, i) => {
-                switch (p.t) {
-                    case 'mention':
-                        return (
-                            <Text key={i} style={{ color: mine ? '#dfe7ff' : C.blue, fontWeight: '800' }}>
-                                {p.v}
-                            </Text>
-                        )
-                    case 'link':
-                        return (
-                            <Text key={i} style={{ textDecorationLine: 'underline', color: mine ? '#e8eeff' : C.blue }} onPress={() => Linking.openURL(p.v).catch(() => {})}>
-                                {p.v}
-                            </Text>
-                        )
-                    case 'emoji':
-                        return <Image key={i} source={{ uri: emojiUrl(p.id, p.animated, onlyEmoji ? 96 : 48) }} style={{ width: big, height: big }} />
-                    default:
-                        return p.v
-                }
-            })}
-        </Text>
-    )
-})
-
-// ── 파일, 임베드, 스티커 ────────────────────────────────────────────────
-function Attachments({ m, mine }: { m: any; mine: boolean }) {
+// ── 파일, 스티커 ────────────────────────────────────────────────────────
+function Files({ m, mine }: { m: any; mine: boolean }) {
     const files: any[] = m.attachments ?? []
     const stickers: any[] = m.stickerItems ?? m.sticker_items ?? []
-    const embeds: any[] = (m.embeds ?? []).filter((e: any) => e?.rawTitle || e?.title || e?.rawDescription || e?.description)
-    if (!files.length && !stickers.length && !embeds.length) return null
+    if (!files.length && !stickers.length) return null
     return (
-        <View style={{ gap: 6, marginTop: m.content ? 6 : 0 }}>
+        <View style={{ gap: 6 }}>
             {files.map((f: any) => {
                 const isImage = /^image\//.test(f.content_type ?? '') || (f.width && f.height)
                 const url = f.proxy_url ?? f.url
@@ -96,7 +68,7 @@ function Attachments({ m, mine }: { m: any; mine: boolean }) {
                     <Pressable key={f.id ?? url} onPress={() => url && Linking.openURL(f.url ?? url).catch(() => {})}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, backgroundColor: mine ? 'rgba(255,255,255,0.18)' : C.blueSoft }}>
                             <Icon names={['AttachmentIcon', 'PaperclipIcon', 'FileIcon']} color={mine ? C.white : C.navy} size={16} />
-                            <T size={13} color={mine ? C.white : C.ink} lines={1} style={{ maxWidth: 220 }}>
+                            <T size={13} color={mine ? C.white : C.ink} style={{ flexShrink: 1 }}>
                                 {f.filename ?? '파일'}
                             </T>
                         </View>
@@ -112,20 +84,6 @@ function Attachments({ m, mine }: { m: any; mine: boolean }) {
                     <Image key={s.id} source={{ uri: `https://media.discordapp.net/stickers/${s.id}.${s.format_type === 4 ? 'gif' : 'png'}?size=160` }} style={{ width: 120, height: 120 }} />
                 ),
             )}
-            {embeds.slice(0, 2).map((e: any, i: number) => (
-                <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: mine ? C.white : C.teal, paddingLeft: 8, maxWidth: 300 }}>
-                    {e.rawTitle || e.title ? (
-                        <T size={13} color={mine ? C.white : C.ink} weight="800" lines={2}>
-                            {e.rawTitle ?? e.title}
-                        </T>
-                    ) : null}
-                    {e.rawDescription || e.description ? (
-                        <T size={13} color={mine ? '#e8eeff' : C.muted} weight="500" lines={4}>
-                            {e.rawDescription ?? e.description}
-                        </T>
-                    ) : null}
-                </View>
-            ))}
         </View>
     )
 }
@@ -137,69 +95,103 @@ function Reply({ m, guildId, mine }: { m: any; guildId?: string; mine: boolean }
     const target = S().MessageStore?.getMessage?.(ref.channel_id ?? m.channel_id, ref.message_id)
     const text = target ? `${displayName(target.author, guildId)}: ${previewText(target, guildId)}` : '원래 메시지를 불러오지 못했어요'
     return (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2, alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: 360 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2, marginHorizontal: 58, alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
             <Icon names={['ArrowAngleRightUpIcon', 'ReplyIcon']} color="rgba(255,255,255,0.8)" size={14} />
-            <T size={12} color="rgba(255,255,255,0.85)" weight="600" lines={1}>
+            <T size={12} color="rgba(255,255,255,0.9)" weight="600" lines={1} style={{ flexShrink: 1 }}>
                 {text}
             </T>
         </View>
     )
 }
 
-export const MessageRow = memo(function MessageRow({ row, guildId, showNames }: { row: Row; guildId?: string; showNames: boolean }) {
+export const MessageRow = memo(function MessageRow({ row, guildId, showNames, onMenu }: { row: Row; guildId?: string; showNames: boolean; onMenu: (m: any) => void }) {
     const { m, mine, head } = row
     if (isSystem(m)) {
         const text = m.type === SYSTEM_JOIN ? `${displayName(m.author, guildId)} 님이 들어왔어요` : previewText(m, guildId) || '시스템 메시지'
         return (
-            <View style={{ alignItems: 'center', paddingVertical: 6 }}>
+            <View style={{ alignItems: 'center', paddingVertical: 6, paddingHorizontal: 20 }}>
                 <View style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.22)' }}>
-                    <T size={12} color={C.white} weight="600" lines={2}>
+                    <T size={12} color={C.white} weight="600">
                         {text}
                     </T>
                 </View>
             </View>
         )
     }
+    const embeds: any[] = (m.embeds ?? []).filter(hasEmbedContent)
+    const components: any[] = m.components ?? []
+    const hasText = !!m.content
+    const hasFiles = !!(m.attachments?.length || m.stickerItems?.length || m.sticker_items?.length)
+    // 글도 파일도 없으면 임베드, 컴포넌트를 말풍선 없이 카드로만
+    const bubble = hasText || hasFiles
+    const empty = !bubble && !embeds.length && !components.length
     const avatar = <View style={{ width: 48 }}>{head ? <Avatar uri={avatarUrl(m.author, 96, guildId)} size={48} /> : null}</View>
     const pending = m.state === 'SENDING'
     const failed = m.state === 'SEND_FAILED'
+    const edited = m.editedTimestamp || m.edited_timestamp
+    const tone = mine ? 'light' : 'dark'
+    const toggle = (r: any) => {
+        if (!toggleReaction(m.channel_id, m.id, r.emoji ?? {}, !!r.me)) toast('반응을 바꾸지 못했어요')
+    }
     return (
         <View style={{ paddingHorizontal: 12, paddingTop: head ? 10 : 3 }}>
             <Reply m={m} guildId={guildId} mine={mine} />
             <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'flex-start', gap: 10 }}>
                 {mine ? null : avatar}
-                <View style={{ maxWidth: '72%', alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                <View style={{ maxWidth: '78%', flexShrink: 1, alignItems: mine ? 'flex-end' : 'flex-start', gap: 4 }}>
                     {head && showNames && !mine ? (
-                        <T size={13} color={roleColor(guildId, m.author?.id) ?? C.white} weight="800" lines={1} style={{ marginBottom: 3, marginLeft: 4 }}>
-                            {displayName(m.author, guildId)}
-                        </T>
-                    ) : null}
-                    <View
-                        style={[
-                            {
-                                paddingHorizontal: 16,
-                                paddingVertical: 10,
-                                borderRadius: 18,
-                                borderTopLeftRadius: !mine && head ? 4 : 18,
-                                borderTopRightRadius: mine && head ? 4 : 18,
-                                backgroundColor: mine ? C.blue : C.white,
-                                opacity: pending ? 0.6 : 1,
-                                borderWidth: failed ? 1.5 : 0,
-                                borderColor: C.red,
-                            },
-                            shadow(2),
-                        ]}
-                    >
-                        {m.content ? <MessageText content={m.content} guildId={guildId} mine={mine} /> : null}
-                        <Attachments m={m} mine={mine} />
-                        {m.editedTimestamp || m.edited_timestamp ? (
-                            <T size={10} color={mine ? '#dfe7ff' : C.muted} weight="500" style={{ marginTop: 2, alignSelf: 'flex-end' }}>
-                                (수정됨)
+                        <View style={{ paddingHorizontal: 10, paddingVertical: 2, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.92)', marginLeft: 2 }}>
+                            <T size={13} color={roleColor(guildId, m.author?.id) ?? C.navy} weight="800" lines={1}>
+                                {displayName(m.author, guildId)}
                             </T>
+                        </View>
+                    ) : null}
+                    <Pressable onLongPress={() => onMenu(m)} delayLongPress={350} accessibilityLabel={`message ${m.id}`} style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, maxWidth: '100%' }}>
+                        {bubble || empty ? (
+                            <View
+                                style={[
+                                    {
+                                        paddingHorizontal: 16,
+                                        paddingVertical: 10,
+                                        borderRadius: 18,
+                                        borderTopLeftRadius: !mine && head ? 4 : 18,
+                                        borderTopRightRadius: mine && head ? 4 : 18,
+                                        backgroundColor: mine ? C.blue : C.white,
+                                        opacity: pending ? 0.6 : 1,
+                                        borderWidth: failed ? 1.5 : 0,
+                                        borderColor: C.red,
+                                        gap: 6,
+                                        maxWidth: '100%',
+                                    },
+                                    shadow(2),
+                                ]}
+                            >
+                                {hasText ? <RichText text={m.content} guildId={guildId} tone={tone} /> : null}
+                                <Files m={m} mine={mine} />
+                                {empty ? (
+                                    <T size={13} color={mine ? '#dfe7ff' : C.muted} weight="600">
+                                        [표시할 수 없는 메시지]
+                                    </T>
+                                ) : null}
+                                {edited ? (
+                                    <T size={10} color={mine ? '#dfe7ff' : C.muted} weight="500" style={{ alignSelf: 'flex-end' }}>
+                                        (수정됨)
+                                    </T>
+                                ) : null}
+                            </View>
                         ) : null}
-                    </View>
+                        {embeds.map((e, i) => (
+                            <EmbedCard key={i} e={e} guildId={guildId} />
+                        ))}
+                        {components.length ? (
+                            <View style={{ gap: 6, maxWidth: 440 }}>
+                                <Components list={components} guildId={guildId} />
+                            </View>
+                        ) : null}
+                    </Pressable>
+                    <Reactions list={m.reactions} onToggle={toggle} />
                     {failed ? (
-                        <T size={11} color={C.red} weight="700" style={{ marginTop: 2 }}>
+                        <T size={11} color={C.red} weight="700">
                             보내지 못했어요
                         </T>
                     ) : null}
@@ -210,34 +202,139 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames }: 
     )
 })
 
-// ── 키보드 높이 ─────────────────────────────────────────────────────────
-function useKeyboard() {
-    const [h, setH] = useState(0)
+// ── 꾹 누르기 메뉴 ──────────────────────────────────────────────────────
+type Mode = { kind: 'reply' | 'edit'; m: any } | null
+
+function MessageMenu({ m, guildId, onClose, onMode }: { m: any; guildId?: string; onClose: () => void; onMode: (mode: Mode) => void }) {
+    const [confirmDelete, setConfirmDelete] = useState(false)
+    const mine = m.author?.id === me()?.id
+    const react = (name: string) => {
+        const had = (m.reactions ?? []).some((r: any) => !r.emoji?.id && r.emoji?.name === name && r.me)
+        if (!toggleReaction(m.channel_id, m.id, { name }, had)) toast('반응을 바꾸지 못했어요')
+        onClose()
+    }
+    const item = (names: string[], label: string, onPress: () => void, danger?: boolean) => (
+        <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, height: 50, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.white, borderWidth: 1, borderColor: C.line }}>
+                <Icon names={names} color={danger ? C.red : C.navy} size={20} />
+                <T size={15} color={danger ? C.red : C.ink} weight="800">
+                    {label}
+                </T>
+            </View>
+        </Pressable>
+    )
+    return (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.shade, justifyContent: 'flex-end' }}>
+            <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={onClose} accessibilityLabel="Close message menu" />
+            <View style={[{ margin: 12, padding: 14, gap: 8, borderRadius: R.panel, backgroundColor: C.panel }, shadow(10)]}>
+                <T size={13} color={C.muted} lines={2}>
+                    {`${displayName(m.author, guildId)}: ${previewText(m, guildId)}`}
+                </T>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                    {QUICK.map(e => (
+                        <Pressable key={e} onPress={() => react(e)} accessibilityRole="button" accessibilityLabel={`react ${e}`} hitSlop={4}>
+                            <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line }}>
+                                <T size={20}>{e}</T>
+                            </View>
+                        </Pressable>
+                    ))}
+                </View>
+                {item(['ArrowAngleLeftUpIcon', 'ReplyIcon'], '답장', () => (onMode({ kind: 'reply', m }), onClose()))}
+                {m.content
+                    ? item(['CopyIcon'], '글 복사', () => {
+                          try {
+                              Clipboard.setString(m.content)
+                              toast('복사했어요')
+                          } catch {}
+                          onClose()
+                      })
+                    : null}
+                {mine && m.content ? item(['PencilIcon', 'EditIcon'], '수정', () => (onMode({ kind: 'edit', m }), onClose())) : null}
+                {mine
+                    ? item(['TrashIcon'], confirmDelete ? '정말 지울까요? 한 번 더 누르세요' : '삭제', () => {
+                          if (!confirmDelete) return setConfirmDelete(true)
+                          if (!deleteMessage(m.channel_id, m.id)) toast('지우지 못했어요')
+                          onClose()
+                      }, true)
+                    : null}
+            </View>
+        </View>
+    )
+}
+
+// ── 키보드 ──────────────────────────────────────────────────────────────
+/**
+ * 키보드에 가려지는 만큼만 띄운다.
+ * 화면이 이미 키보드만큼 줄어드는 기기(대부분의 휴대폰)는 0, 줄지 않는 기기는 가려진 만큼.
+ */
+function useKeyboardPad(ref: { current: any }) {
+    const [pad, setPad] = useState(0)
+    const top = useRef<number | null>(null)
+    const measure = useCallback(() => {
+        const kb = top.current
+        if (kb == null || !ref.current?.measureInWindow) return setPad(0)
+        ref.current.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+            // 이 칸의 바닥이 키보드 위쪽보다 아래면 그만큼 가려진다 (안쪽 여백은 바깥 크기를 바꾸지 않는다)
+            setPad(Math.max(0, Math.round(y + h - kb)))
+        })
+    }, [])
     useEffect(() => {
-        const a = Keyboard.addListener('keyboardDidShow', (e: any) => setH(e?.endCoordinates?.height ?? 0))
-        const b = Keyboard.addListener('keyboardDidHide', () => setH(0))
+        const a = Keyboard.addListener('keyboardDidShow', (e: any) => {
+            top.current = e?.endCoordinates?.screenY ?? null
+            // 화면이 줄어드는 기기는 줄어든 다음에 잰다
+            setTimeout(measure, 60)
+        })
+        const b = Keyboard.addListener('keyboardDidHide', () => {
+            top.current = null
+            setPad(0)
+        })
         return () => {
             a.remove()
             b.remove()
         }
     }, [])
-    return h
+    return { pad, onLayout: () => top.current != null && measure() }
 }
 
 // ── 입력창 ──────────────────────────────────────────────────────────────
-function Composer({ channelId, placeholder }: { channelId: string; placeholder: string }) {
+function Composer({ channelId, placeholder, mode, onMode, guildId }: { channelId: string; placeholder: string; mode: Mode; onMode: (m: Mode) => void; guildId?: string }) {
     const [text, setText] = useState('')
     const [failed, setFailed] = useState(false)
     useEffect(() => setText(''), [channelId])
+    useEffect(() => {
+        if (mode?.kind === 'edit') setText(mode.m.content ?? '')
+    }, [mode])
     const send = () => {
         if (!text.trim()) return
-        const ok = sendMessage(channelId, text)
+        const ok = mode?.kind === 'edit' ? editMessage(channelId, mode.m.id, text) : sendMessage(channelId, text, mode?.kind === 'reply' ? mode.m : undefined)
         setFailed(!ok)
-        if (ok) setText('')
+        if (ok) {
+            setText('')
+            onMode(null)
+        }
     }
     const canSend = !!text.trim()
     return (
         <View style={{ paddingHorizontal: 14, paddingBottom: 12, paddingTop: 6 }}>
+            {mode ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, marginHorizontal: 6, paddingHorizontal: 12, height: 32, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.9)' }}>
+                    <Icon names={mode.kind === 'edit' ? ['PencilIcon', 'EditIcon'] : ['ArrowAngleLeftUpIcon', 'ReplyIcon']} color={C.navy} size={16} />
+                    <T size={13} weight="700" lines={1} style={{ flex: 1 }}>
+                        {mode.kind === 'edit' ? '메시지 수정 중' : `${displayName(mode.m.author, guildId)} 에게 답장`}
+                    </T>
+                    <Pressable
+                        onPress={() => {
+                            onMode(null)
+                            if (mode.kind === 'edit') setText('')
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel"
+                        hitSlop={8}
+                    >
+                        <Icon names={['XSmallIcon', 'XLargeIcon', 'CloseIcon']} color={C.navy} size={16} />
+                    </Pressable>
+                </View>
+            ) : null}
             {failed ? (
                 <T size={12} color={C.red} weight="700" style={{ marginBottom: 4, marginLeft: 6 }}>
                     보내지 못했어요, 다시 눌러 주세요
@@ -254,11 +351,23 @@ function Composer({ channelId, placeholder }: { channelId: string; placeholder: 
                 />
                 <Pressable onPress={send} disabled={!canSend} accessibilityRole="button" accessibilityLabel="Send" style={({ pressed }) => [{ opacity: canSend ? (pressed ? 0.8 : 1) : 0.45 }]}>
                     <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon names={['SendMessageIcon', 'PaperPlaneIcon', 'ArrowSmallRightIcon']} color={C.white} size={20} />
+                        <Icon names={mode?.kind === 'edit' ? ['CheckmarkLargeIcon', 'CheckmarkSmallIcon'] : ['SendMessageIcon', 'PaperPlaneIcon', 'ArrowSmallRightIcon']} color={C.white} size={20} />
                     </View>
                 </Pressable>
             </View>
         </View>
+    )
+}
+
+// ── 머리줄 버튼 (좁으면 아이콘만) ───────────────────────────────────────
+function HeadButton({ label, names, compact, onPress }: { label: string; names: string[]; compact: boolean; onPress: () => void }) {
+    if (!compact) return <PillButton label={label} kind="white" small onPress={onPress} />
+    return (
+        <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} hitSlop={6}>
+            <View style={[{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center' }, shadow(2)]}>
+                <Icon names={names} color={C.navy} size={20} />
+            </View>
+        </Pressable>
     )
 }
 
@@ -270,12 +379,15 @@ export interface ChatHead {
     icon?: string[]
 }
 
-export function Chat({ channelId, guildId, head, onList, onOpenNative }: { channelId: string; guildId?: string; head: ChatHead; onList?: () => void; onOpenNative?: () => void }) {
+export function Chat({ channelId, guildId, head, compact = false, onList, onOpenNative }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void; onOpenNative?: () => void }) {
     const visible = useUi(s => s.visible)
     const list = useStores(['MessageStore'], () => messagesOf(channelId), [channelId])
     const myId = me()?.id
     const rows = useMemo(() => buildRows(messageArray(list), myId), [list, myId])
-    const kb = useKeyboard()
+    const [menu, setMenu] = useState<any>(null)
+    const [mode, setMode] = useState<Mode>(null)
+    const box = useRef<any>(null)
+    const kb = useKeyboardPad(box)
 
     useEffect(() => loadMessages(channelId), [channelId])
     // 보고 있는 동안 들어온 메시지는 읽음으로
@@ -289,32 +401,32 @@ export function Chat({ channelId, guildId, head, onList, onOpenNative }: { chann
         if (a.length && messagesOf(channelId)?.hasMoreBefore !== false) loadMessages(channelId, a[0].id)
     }, [channelId])
 
-    const renderItem = useCallback(({ item }: { item: Row }) => <MessageRow row={item} guildId={guildId} showNames={!!guildId} />, [guildId])
+    const renderItem = useCallback(({ item }: { item: Row }) => <MessageRow row={item} guildId={guildId} showNames={!!guildId} onMenu={setMenu} />, [guildId])
     const ch = channelOf(channelId)
     const placeholder = guildId ? `#${ch?.name ?? ''} 에 메시지 보내기` : `${head.title} 에게 메시지 보내기`
 
     return (
-        <View style={{ flex: 1, paddingBottom: kb }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.25)' }}>
+        <View ref={box} onLayout={kb.onLayout} style={{ flex: 1, paddingBottom: kb.pad }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: compact ? 8 : 14, paddingHorizontal: compact ? 12 : 18, paddingTop: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.25)' }}>
                 {head.avatar ? (
-                    <Avatar uri={head.avatar} size={56} />
+                    <Avatar uri={head.avatar} size={compact ? 44 : 56} />
                 ) : (
-                    <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon names={head.icon ?? ['TextIcon']} color={C.navy} size={26} />
+                    <View style={{ width: compact ? 40 : 48, height: compact ? 40 : 48, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon names={head.icon ?? ['TextIcon']} color={C.navy} size={compact ? 22 : 26} />
                     </View>
                 )}
                 <View style={{ flex: 1, minWidth: 0 }}>
-                    <T size={22} color={C.white} weight="800" lines={1}>
+                    <T size={compact ? 18 : 22} color={C.white} weight="800" lines={1}>
                         {head.title}
                     </T>
                     {head.subtitle ? (
-                        <T size={13} color="rgba(255,255,255,0.8)" weight="600" lines={1} style={{ marginTop: 2 }}>
+                        <T size={13} color="rgba(255,255,255,0.85)" weight="600" lines={compact ? 1 : 2} style={{ marginTop: 2 }}>
                             {head.subtitle}
                         </T>
                     ) : null}
                 </View>
-                {onOpenNative ? <PillButton label="디스코드에서 열기" kind="white" small onPress={onOpenNative} /> : null}
-                {onList ? <PillButton label="리스트" kind="white" small onPress={onList} /> : null}
+                {onOpenNative ? <HeadButton label="디스코드에서 열기" names={['WindowLaunchIcon', 'ScreenArrowIcon', 'DiscordIcon']} compact={compact} onPress={onOpenNative} /> : null}
+                {onList ? <HeadButton label="리스트" names={['ListBulletsIcon', 'ChannelListIcon', 'HamburgerIcon']} compact={compact} onPress={onList} /> : null}
             </View>
             <FlatList
                 data={rows}
@@ -323,15 +435,16 @@ export function Chat({ channelId, guildId, head, onList, onOpenNative }: { chann
                 renderItem={renderItem}
                 onEndReached={older}
                 onEndReachedThreshold={0.4}
-                initialNumToRender={14}
-                maxToRenderPerBatch={10}
+                initialNumToRender={12}
+                maxToRenderPerBatch={8}
                 windowSize={9}
                 removeClippedSubviews
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingVertical: 10 }}
                 style={{ flex: 1 }}
             />
-            <Composer channelId={channelId} placeholder={placeholder} />
+            <Composer channelId={channelId} placeholder={placeholder} mode={mode} onMode={setMode} guildId={guildId} />
+            {menu ? <MessageMenu m={menu} guildId={guildId} onClose={() => setMenu(null)} onMode={setMode} /> : null}
         </View>
     )
 }
