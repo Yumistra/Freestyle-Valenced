@@ -10,7 +10,7 @@ export const isNarrow = (width = Dimensions.get('window')?.width ?? 1000) => wid
 /**
  * 화면 상태 (어느 화면을 보고 있는지). 플러그인 안에서만 쓰는 작은 저장소.
  */
-export type Route = 'lobby' | 'heart' | 'depart' | 'guild'
+export type Route = 'lobby' | 'heart' | 'depart' | 'guild' | 'inbox'
 export type HeartTab = 'contacts' | 'requests' | 'friends'
 
 export interface UiState {
@@ -25,6 +25,8 @@ export interface UiState {
     channelId?: string
     /** 메뉴 창 */
     menu: boolean
+    /** 프로필 창 (누구, 어느 서버에서) */
+    profile?: { userId: string; guildId?: string }
     /** 화면이 바뀔 때마다 늘어난다 (전환 효과) */
     turn: number
 }
@@ -71,12 +73,17 @@ export const go = {
     lobby: () => setState({ route: 'lobby', menu: false }),
     heart: (dmId?: string) => setState({ route: 'heart', dmId, menu: false }),
     depart: () => setState({ route: 'depart', menu: false }),
+    inbox: () => setState({ route: 'inbox', menu: false }),
+    profile: (userId: string, guildId?: string) => setState({ profile: { userId, guildId } }),
+    /** 어떤 채널이든 그 자리로 (DM 은 하트챗, 서버는 그 서버) */
+    open: (ch: any) => (ch?.guild_id ? setState({ route: 'guild', guildId: ch.guild_id, channelId: ch.id, menu: false }) : ch?.id ? setState({ route: 'heart', dmId: ch.id, heartTab: 'contacts', menu: false }) : undefined),
     guild: (guildId: string) => setState({ route: 'guild', guildId, channelId: guildId === state.guildId ? state.channelId : undefined, menu: false }),
     channel: (channelId: string) => setState({ channelId }),
 }
 
 /** 뒤로 가기. 더 갈 곳이 없으면 false */
 export function back(): boolean {
+    if (state.profile) return setState({ profile: undefined }), true
     if (state.menu) return setState({ menu: false }), true
     switch (state.route) {
         case 'guild': {
@@ -95,6 +102,7 @@ export function back(): boolean {
             else go.lobby()
             return true
         case 'depart':
+        case 'inbox':
             go.lobby()
             return true
         default:

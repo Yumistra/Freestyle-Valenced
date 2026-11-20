@@ -4,7 +4,7 @@ import { FlatList, Image, Keyboard, Linking, Pressable, TextInput, View } from '
 import { ack, avatarUrl, channel as channelOf, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
 import { previewText } from '../markdown'
 import { Avatar, Icon, PillButton, T } from '../parts'
-import { useUi } from '../state'
+import { go, useUi } from '../state'
 import { C, R, shadow } from '../theme'
 import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
 
@@ -138,7 +138,16 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
     // 글도 파일도 없으면 임베드, 컴포넌트를 말풍선 없이 카드로만
     const bubble = hasText || hasFiles
     const empty = !bubble && !embeds.length && !components.length
-    const avatar = <View style={{ width: 48 }}>{head ? <Avatar uri={avatarUrl(m.author, 96, guildId)} size={48} /> : null}</View>
+    const showProfile = () => m.author?.id && go.profile(m.author.id, guildId)
+    const avatar = (
+        <View style={{ width: 48 }}>
+            {head ? (
+                <Pressable onPress={showProfile} accessibilityRole="button" accessibilityLabel={`profile ${m.author?.id}`}>
+                    <Avatar uri={avatarUrl(m.author, 96, guildId)} size={48} />
+                </Pressable>
+            ) : null}
+        </View>
+    )
     const pending = m.state === 'SENDING'
     const failed = m.state === 'SEND_FAILED'
     const edited = m.editedTimestamp || m.edited_timestamp
@@ -152,11 +161,11 @@ export const MessageRow = memo(function MessageRow({ row, guildId, showNames, on
                 {mine ? null : avatar}
                 <View style={{ maxWidth: '78%', flexShrink: 1, alignItems: mine ? 'flex-end' : 'flex-start', gap: 4 }}>
                     {head && showNames && !mine ? (
-                        <View style={{ paddingHorizontal: 10, paddingVertical: 2, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.92)', marginLeft: 2 }}>
+                        <Pressable onPress={showProfile} style={{ paddingHorizontal: 10, paddingVertical: 2, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.92)', marginLeft: 2 }}>
                             <T size={13} color={roleColor(guildId, m.author?.id) ?? C.navy} weight="800" lines={1}>
                                 {displayName(m.author, guildId)}
                             </T>
-                        </View>
+                        </Pressable>
                     ) : null}
                     <Pressable onLongPress={() => onMenu(m)} delayLongPress={350} accessibilityLabel={`message ${m.id}`} style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, maxWidth: '100%' }}>
                         {bubble || empty ? (
@@ -391,6 +400,8 @@ export interface ChatHead {
     title: string
     subtitle?: string
     icon?: string[]
+    /** 머리줄 그림을 누르면 (DM 이면 상대 프로필) */
+    onPress?: () => void
 }
 
 export function Chat({ channelId, guildId, head, compact = false, onList }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void }) {
@@ -437,7 +448,9 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
         <View ref={box} onLayout={kb.onLayout} style={{ flex: 1, paddingBottom: kb.pad }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: compact ? 8 : 14, paddingHorizontal: compact ? 12 : 18, paddingTop: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.25)' }}>
                 {head.avatar ? (
-                    <Avatar uri={head.avatar} size={compact ? 44 : 56} />
+                    <Pressable onPress={head.onPress} disabled={!head.onPress} accessibilityRole="button" accessibilityLabel="chat profile">
+                        <Avatar uri={head.avatar} size={compact ? 44 : 56} />
+                    </Pressable>
                 ) : (
                     <View style={{ width: compact ? 40 : 48, height: compact ? 40 : 48, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' }}>
                         <Icon names={head.icon ?? ['TextIcon']} color={C.navy} size={compact ? 22 : 26} />

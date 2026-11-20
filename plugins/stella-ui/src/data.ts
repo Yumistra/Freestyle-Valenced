@@ -336,7 +336,7 @@ function rootNav(): any {
 }
 
 /** 디스코드 원래 화면 열기. 성공하면 true */
-export function openNative(where: 'notifications' | 'friends' | 'shop' | 'quests' | 'settings'): boolean {
+export function openNative(where: 'shop' | 'quests' | 'settings'): boolean {
     try {
         switch (where) {
             case 'shop': {
@@ -355,10 +355,11 @@ export function openNative(where: 'notifications' | 'friends' | 'shop' | 'quests
                 break
             }
         }
+        // 설정은 화면 이름으로도 열 수 있다
         const nav = rootNav()
-        if (typeof nav?.navigate !== 'function') return false
-        nav.navigate(where === 'settings' ? 'settings' : where)
-        return where === 'notifications' || where === 'friends' || where === 'settings'
+        if (where !== 'settings' || typeof nav?.navigate !== 'function') return false
+        nav.navigate('settings')
+        return true
     } catch {
         return false
     }
@@ -512,3 +513,68 @@ export function threadsOf(guildId: string, parentId: string, joinedOnly = false)
 
 export const THREADS = new Set([10, 11, 12])
 export const FORUMS = new Set([15, 16])
+
+// ── 친구 추가 ───────────────────────────────────────────────────────────
+/** 사용자 이름으로 친구 신청. 실패하면 이유 */
+export async function sendFriendRequest(username: string): Promise<string | undefined> {
+    const name = username.trim().replace(/^@/, '')
+    if (!name) return '이름을 적어 주세요'
+    try {
+        const m = find('sendRequest', 'acceptFriendRequest')
+        if (typeof m?.sendRequest !== 'function') return '친구 신청을 보낼 수 없어요'
+        await m.sendRequest({ discordTag: name, context: { location: 'Stella UI' } })
+    } catch (e: any) {
+        return e?.body?.message ?? e?.message ?? '친구 신청을 보내지 못했어요'
+    }
+}
+
+// ── 프로필 ──────────────────────────────────────────────────────────────
+export function fetchProfile(userId: string, guildId?: string) {
+    try {
+        const m = find('fetchProfile')
+        const r = m?.fetchProfile?.(userId, { guildId, withMutualGuilds: true, withMutualFriends: true })
+        Promise.resolve(r).catch(() => {})
+    } catch {}
+}
+
+export function profileOf(userId: string, guildId?: string) {
+    const ps = S().UserProfileStore
+    const p = ps?.getUserProfile?.(userId)
+    const gp = guildId ? ps?.getGuildMemberProfile?.(userId, guildId) : undefined
+    return {
+        bio: (gp?.bio || p?.bio || '') as string,
+        pronouns: (gp?.pronouns || p?.pronouns || '') as string,
+        banner: (gp?.banner ? `${CDN}/guilds/${guildId}/users/${userId}/banners/${gp.banner}.png?size=600` : p?.banner ? `${CDN}/banners/${userId}/${p.banner}.png?size=600` : undefined) as string | undefined,
+        accent: typeof p?.accentColor === 'number' ? `#${p.accentColor.toString(16).padStart(6, '0')}` : undefined,
+        mutualGuilds: (ps?.getMutualGuilds?.(userId) ?? p?.mutualGuilds ?? []).length as number,
+    }
+}
+
+export function memberRoles(guildId: string | undefined, userId: string): { id: string; name: string; color?: string }[] {
+    if (!guildId) return []
+    const member = S().GuildMemberStore?.getMember?.(guildId, userId)
+    const ids: string[] = member?.roles ?? []
+    const role = (id: string) => S().GuildRoleStore?.getRole?.(guildId, id) ?? S().GuildStore?.getRole?.(guildId, id) ?? S().GuildStore?.getRoles?.(guildId)?.[id]
+    return ids
+        .map(id => role(id))
+        .filter(Boolean)
+        .sort((a: any, b: any) => (b.position ?? 0) - (a.position ?? 0))
+        .map((r: any) => ({ id: r.id, name: r.name, color: r.colorString ?? (r.color ? `#${Number(r.color).toString(16).padStart(6, '0')}` : undefined) }))
+}
+
+// ── 멘션 (알림함) ───────────────────────────────────────────────────────
+export function fetchMentions(before?: string) {
+    try {
+        const m = find('fetchRecentMentions')
+        Promise.resolve(m?.fetchRecentMentions?.(before ?? null, 25, null, true, true)).catch(() => {})
+    } catch {}
+}
+
+export function mentionList(): any[] {
+    try {
+        const list = S().RecentMentionsStore?.getMentions?.()
+        return Array.isArray(list) ? list : []
+    } catch {
+        return []
+    }
+}

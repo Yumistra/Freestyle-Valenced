@@ -72,9 +72,9 @@ const TextInput = ({ value, placeholder, onChangeText }) => {
     return h('input', { 'data-value': value ?? '', 'data-placeholder': placeholder ?? '' })
 }
 const scrolled = []
-const FlatList = ({ data, renderItem, keyExtractor, ListEmptyComponent, ref }) =>
+const FlatList = ({ data, renderItem, keyExtractor, ListEmptyComponent, ListHeaderComponent, ListFooterComponent, ref }) =>
     (React.useImperativeHandle(ref, () => ({ scrollToIndex: o => scrolled.push(o), scrollToOffset() {} })), 0) ||
-    h('div', { 'data-list': data?.length ?? 0 }, data?.length ? data.map((item, index) => h(React.Fragment, { key: keyExtractor ? keyExtractor(item, index) : index }, renderItem({ item, index }))) : ListEmptyComponent ?? null)
+    h('div', { 'data-list': data?.length ?? 0 }, ListHeaderComponent ?? null, ListFooterComponent ?? null, data?.length ? data.map((item, index) => h(React.Fragment, { key: keyExtractor ? keyExtractor(item, index) : index }, renderItem({ item, index }))) : ListEmptyComponent ?? null)
 class AnimValue {
     constructor(v) {
         this.v = v
@@ -93,6 +93,7 @@ const ReactNative = {
     Pressable,
     TextInput,
     FlatList,
+    ScrollView: View,
     Animated: { View, Value: AnimValue, timing: (v, cfg) => ({ start: cb => (v.setValue(cfg.toValue), cb?.({ finished: true })), stop() {} }) },
     BackHandler: { addEventListener: (_t, f) => (backHandlers.add(f), { remove: () => backHandlers.delete(f) }) },
     Keyboard: { addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
@@ -215,11 +216,13 @@ const Stores = {
                 ? { SELECTABLE: ['rules', 'news', 'chat', 'logs', 'forum', 'top'].map(id => ({ channel: channels[id] })), VOCAL: [{ channel: channels.talk }] }
                 : { SELECTABLE: [], VOCAL: [] },
     }),
-    GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800' } : null) }),
-    GuildRoleStore: store({ getRole: () => null }),
+    GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800', roles: ['r1', 'r2'] } : null) }),
+    GuildRoleStore: store({ getRole: (g, id) => ({ r1: { id: 'r1', name: 'Mod', position: 5, colorString: '#00ff00' }, r2: { id: 'r2', name: 'Member', position: 1 } })[id] ?? null }),
     VoiceStateStore: store({ getVoiceStatesForChannel: id => (id === 'talk' ? { a: {}, b: {} } : {}) }),
     ActiveThreadsStore: store({ getThreadsForParent: (g, p) => (p === 'forum' ? { p1: {} } : {}) }),
     ActiveJoinedThreadsStore: store({ getActiveJoinedThreadsForParent: (g, p) => (p === 'chat' ? { th1: {} } : {}) }),
+    RecentMentionsStore: store({ getMentions: () => [msg('mm1', '3', 'ping <@1>', { channel_id: 'chat' })] }),
+    UserProfileStore: store({ getUserProfile: id => (id === '3' ? { bio: 'I like **cats**', pronouns: 'she/her', banner: 'bn', accentColor: 0x123456 } : null), getGuildMemberProfile: () => null, getMutualGuilds: () => [{}, {}] }),
     MediaEngineStore: store({ isSelfMute: () => media.mute, isSelfDeaf: () => media.deaf }),
     ThemeStore: store({ theme: 'dark' }),
 }
@@ -256,6 +259,9 @@ const modules = [
             post: async o => (calls.push(['POST', o.url, o.body]), { body: { id: 'p3', name: o.body.name, owner_id: '1', message_count: 0, applied_tags: o.body.applied_tags } }),
         },
     },
+    { fetchRecentMentions: record('fetchRecentMentions') },
+    { fetchProfile: record('fetchProfile') },
+    { sendRequest: async o => (calls.push(['sendRequest', o]), o.discordTag === 'nobody' ? Promise.reject({ body: { message: 'Unknown user' } }) : undefined), acceptFriendRequest() {} },
     { toggleSelfMute: () => ((media.mute = !media.mute), Stores.MediaEngineStore.emit()), toggleSelfDeaf: () => ((media.deaf = !media.deaf), Stores.MediaEngineStore.emit()) },
 ]
 const toasts = []
@@ -415,10 +421,14 @@ check('edge tab shows when hidden', !!presses.get('Open Stella UI')?.length && !
 await press('Open Stella UI')
 check('edge tab brings the lobby back', state().visible === true)
 
-await press('알림')
-await new Promise(r => setTimeout(r, 80))
-check('mail → Discord notifications', navigated.some(a => a[0] === 'notifications') && state().visible === false)
-await press('Open Stella UI')
+text = await press('알림')
+check('mail → Stella inbox', state().visible === true && state().route === 'inbox' && calls.some(c => c[0] === 'fetchRecentMentions' && c[2] === 25 && c[4] === true))
+check('inbox: friend request card and mentions with place', text.includes('친구 신청이 1개 와 있어요') && text.includes('Valenced, #chat') && text.includes('ping @DeStinY'), text)
+await press('mention mm1')
+check('mention → opens that channel', state().route === 'guild' && state().guildId === 'g1' && state().channelId === 'chat')
+await act(async () => [...backHandlers][0]())
+await act(async () => [...backHandlers][0]())
+check('back to the lobby', state().route === 'lobby')
 await press('임무')
 await new Promise(r => setTimeout(r, 80))
 check('quests → openQuestHome', calls.some(c => c[0] === 'openQuestHome'))
@@ -440,13 +450,20 @@ check('channels grouped by category', text.indexOf('INFO') < text.indexOf('rules
 check('channels without a category come first', text.indexOf('welcome') < text.indexOf('INFO'))
 check('voice channels after text in a category', text.indexOf('help') < text.lastIndexOf('talk'))
 check('voice shows people count', html().includes('talk') && text.includes('2'))
-check('nothing chosen yet', text.includes('채널을 선택하세요.'))
+check('re-entering a server keeps its last channel', state().channelId === 'chat')
 check('place chip shows the server', html().includes('LocationIcon') && text.split('Valenced').length > 2)
 
 // 채팅
 text = await press('chat')
 check('channel opens a chat', state().channelId === 'chat' && text.includes('first') && text.includes('second'))
 check('server chat shows names, nickname', text.includes('NaznaNick'))
+await press('profile 3')
+text = host.textContent
+check('avatar → profile with bio, pronouns, roles by position, mutual servers', state().profile?.userId === '3' && text.includes('NaznaNick') && text.includes('she/her') && text.includes('I like cats') && text.indexOf('Mod') < text.indexOf('Member') && text.includes('같이 있는 서버 2개'), text.slice(-300))
+check('profile fetched for the server', calls.some(c => c[0] === 'fetchProfile' && c[1] === '3' && c[2].guildId === 'g1'))
+check('profile banner', html().includes('https://cdn.discordapp.com/banners/3/bn.png?size=600'))
+await act(async () => [...backHandlers][0]())
+check('back closes the profile first', !state().profile && state().route === 'guild')
 check('join message as a system line', text.includes('NaznaNick 님이 들어왔어요'))
 check('reply shows the original inside the bubble, no arrow', /NaznaNickfirstreplyhere/.test(text.replace(/\s/g, '')) && !html().includes('ArrowAngleRightUpIcon'), text)
 await press('reply to c2')
@@ -611,6 +628,16 @@ check('request list updates', host.textContent.includes('받은 친구 신청이
 await press('친구')
 text = host.textContent
 check('friends sorted online, idle, offline', text.indexOf('Nazna') < text.indexOf('Tillia') && text.indexOf('Tillia') < text.indexOf('Seina'), text)
+await act(async () => inputs.get('사용자 이름으로 친구 추가')[0].get().onChangeText('nobody'))
+await render()
+await press('Add friend')
+await act(async () => tick())
+check('friend add failure shows why', toasts.includes('Unknown user'))
+await act(async () => inputs.get('사용자 이름으로 친구 추가')[0].get().onChangeText('@newpal'))
+await render()
+await press('Add friend')
+await act(async () => tick())
+check('friend add sends the name without @', calls.some(c => c[0] === 'sendRequest' && c[1].discordTag === 'newpal') && toasts.includes('친구 신청을 보냈어요'))
 await press('Tillia')
 check('friend without a DM → creates one and opens it', calls.some(c => c[0] === 'getOrEnsurePrivateChannel' && c[1] === '4') && state().dmId === 'dm-new' && state().heartTab === 'contacts')
 

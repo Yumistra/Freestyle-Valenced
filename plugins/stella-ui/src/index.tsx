@@ -11,6 +11,8 @@ import { Icon, T, Wipe } from './parts'
 import { DepartScreen } from './screens/Depart'
 import { GuildScreen } from './screens/Guild'
 import { HeartScreen } from './screens/Heart'
+import { InboxScreen } from './screens/Inbox'
+import { ProfileCard } from './screens/Profile'
 import { chooseCharacter, LobbyScreen } from './screens/Lobby'
 import { bindStorage, DEFAULTS, save, useSettings } from './settings'
 import { back, getState, resetState, setState, useUi } from './state'
@@ -78,6 +80,8 @@ function Screen({ width, height }: { width: number; height: number }) {
             return <DepartScreen width={width} height={height} />
         case 'guild':
             return <GuildScreen width={width} />
+        case 'inbox':
+            return <InboxScreen width={width} />
         default:
             return <LobbyScreen width={width} height={height} />
     }
@@ -118,6 +122,7 @@ function Stage() {
         <View style={{ position: 'absolute', top: 0, left: 0, width, height, backgroundColor: C.skyMid, overflow: 'hidden' }}>
             <View style={{ position: 'absolute', top: insets.top, left: insets.left, width: w, height: h }}>
                 <Screen width={w} height={h} />
+                <ProfileCard />
             </View>
             <Wipe width={width} />
         </View>

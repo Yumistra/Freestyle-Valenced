@@ -113,7 +113,7 @@ function TopIcons() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={[{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.92)', transform: [{ skewX: '-10deg' }] }, shadow(3)]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', transform: [{ skewX: '10deg' }] }}>
-                    {item(['InboxIcon', 'EnvelopeIcon', 'BellIcon'], '알림', () => leaveTo('notifications'))}
+                    {item(['InboxIcon', 'EnvelopeIcon', 'BellIcon'], '알림', go.inbox)}
                     {item(['FriendsIcon', 'UserPlusIcon'], '친구', () => setState({ route: 'heart', heartTab: requests ? 'requests' : 'friends', dmId: undefined, menu: false }), requests > 0)}
                     {item(['ShopIcon', 'ShopSparkleIcon', 'GiftIcon'], '상점', () => leaveTo('shop'))}
                 </View>
@@ -188,7 +188,7 @@ function Menu() {
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', padding: 16 }}>
                     <MenuItem names={['SettingsIcon']} label="설정" onPress={() => leaveTo('settings')} />
-                    <MenuItem names={['InboxIcon', 'BellIcon']} label="알림" onPress={() => leaveTo('notifications')} />
+                    <MenuItem names={['InboxIcon', 'BellIcon']} label="알림" onPress={go.inbox} />
                     <MenuItem names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="퀘스트" onPress={() => leaveTo('quests')} />
                     <MenuItem names={['ShopIcon', 'GiftIcon']} label="상점" onPress={() => leaveTo('shop')} />
                     <MenuItem names={['ImageIcon', 'ImagePlusIcon']} label="캐릭터 그림" onPress={chooseCharacter} />

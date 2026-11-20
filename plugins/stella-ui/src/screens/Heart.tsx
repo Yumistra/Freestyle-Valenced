@@ -1,11 +1,11 @@
-import { memo, useCallback } from 'react'
-import { FlatList, Pressable, View } from 'react-native'
-import { acceptRequest, avatarUrl, channel, declineRequest, displayName, dmAvatar, dmIds, dmName, dmWith, lastMessage, relationships, S, sameList, unread, useStores, user } from '../data'
+import { memo, useCallback, useState } from 'react'
+import { FlatList, Pressable, TextInput, View } from 'react-native'
+import { acceptRequest, avatarUrl, channel, declineRequest, displayName, dmAvatar, dmIds, dmName, dmWith, lastMessage, relationships, S, sameList, sendFriendRequest, toast, unread, useStores, user } from '../data'
 import { previewText } from '../markdown'
 import { Avatar, Backdrop, Badge, Empty, Icon, Phone, PhoneTabs, T } from '../parts'
 import { useSettings } from '../settings'
 import { go, type HeartTab, isNarrow, setState, useUi } from '../state'
-import { C, shadow } from '../theme'
+import { C, R, shadow } from '../theme'
 import { Chat } from './Chat'
 
 /**
@@ -125,12 +125,52 @@ function Friends() {
         [],
         sameList,
     )
-    if (!ids.length) return <EmptyList text="친구가 없어요" />
+    if (!ids.length)
+        return (
+            <View style={{ flex: 1 }}>
+                <AddFriend />
+                <EmptyList text="친구가 없어요" />
+            </View>
+        )
     const open = async (userId: string) => {
         const dm = await dmWith(userId)
         if (dm) setState({ heartTab: 'contacts', dmId: dm })
     }
-    return <FlatList data={ids} keyExtractor={id => id} renderItem={({ item }) => <PersonRow id={item} onPress={() => open(item)} />} initialNumToRender={14} windowSize={7} removeClippedSubviews />
+    return (
+        <FlatList
+            data={ids}
+            keyExtractor={id => id}
+            ListHeaderComponent={<AddFriend />}
+            renderItem={({ item }) => <PersonRow id={item} onPress={() => open(item)} />}
+            initialNumToRender={14}
+            windowSize={7}
+            removeClippedSubviews
+        />
+    )
+}
+
+/** 사용자 이름으로 친구 신청 */
+function AddFriend() {
+    const [name, setName] = useState('')
+    const [busy, setBusy] = useState(false)
+    const send = async () => {
+        if (!name.trim() || busy) return
+        setBusy(true)
+        const err = await sendFriendRequest(name)
+        setBusy(false)
+        toast(err ?? '친구 신청을 보냈어요')
+        if (!err) setName('')
+    }
+    return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginBottom: 6, paddingLeft: 14, paddingRight: 4, height: 46, borderRadius: R.pill, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.line }}>
+            <TextInput value={name} onChangeText={setName} placeholder="사용자 이름으로 친구 추가" placeholderTextColor={C.muted} autoCapitalize="none" onSubmitEditing={send} style={{ flex: 1, fontSize: 14, color: C.ink, fontWeight: '600' }} />
+            <Pressable onPress={send} accessibilityRole="button" accessibilityLabel="Add friend" disabled={busy}>
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.6 : 1 }}>
+                    <Icon names={['UserPlusIcon', 'FriendsIcon']} color={C.white} size={18} />
+                </View>
+            </Pressable>
+        </View>
+    )
 }
 
 function EmptyList({ text }: { text: string }) {
@@ -197,7 +237,7 @@ export function HeartScreen({ width }: { width: number }) {
                             <Chat
                                 key={dmId}
                                 channelId={dmId!}
-                                head={{ avatar: dmAvatar(ch), title: dmName(ch), subtitle: ch.type === 3 ? `${(ch.recipients?.length ?? 0) + 1}명` : undefined }}
+                                head={{ avatar: dmAvatar(ch), title: dmName(ch), subtitle: ch.type === 3 ? `${(ch.recipients?.length ?? 0) + 1}명` : undefined, onPress: ch.type === 1 && ch.recipients?.[0] ? () => go.profile(ch.recipients[0]) : undefined }}
                                 compact={narrow}
                                 onList={narrow ? () => setState({ dmId: undefined }) : undefined}
                             />
