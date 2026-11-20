@@ -299,25 +299,6 @@ export function loadMessages(channelId: string, before?: string) {
     }
 }
 
-/** 메시지 보내기. reply 를 주면 그 메시지에 답장 */
-export function sendMessage(channelId: string, text: string, reply?: any): boolean {
-    const content = text.trim()
-    if (!content) return false
-    const actions = find('sendMessage', 'receiveMessage') ?? find('sendMessage', 'deleteMessage')
-    if (typeof actions?.sendMessage !== 'function') return false
-    const options: any = {}
-    if (reply?.id) {
-        const guildId = channel(channelId)?.guild_id
-        options.messageReference = { channel_id: channelId, message_id: reply.id, ...(guildId ? { guild_id: guildId } : {}) }
-    }
-    try {
-        actions.sendMessage(channelId, { content, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] }, undefined, options)
-        return true
-    } catch {
-        return false
-    }
-}
-
 /** 읽음으로 표시 */
 export function ack(channelId: string) {
     try {

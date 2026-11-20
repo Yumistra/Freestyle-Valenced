@@ -97,7 +97,7 @@ const ReactNative = {
     PanResponder: { create: cfg => ((globalThis.lastPan = cfg), { panHandlers: {} }) },
     Animated: { View, Value: AnimValue, timing: (v, cfg) => ({ start: cb => (v.setValue(cfg.toValue), cb?.({ finished: true })), stop() {} }) },
     BackHandler: { addEventListener: (_t, f) => (backHandlers.add(f), { remove: () => backHandlers.delete(f) }) },
-    Keyboard: { addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
+    Keyboard: { dismiss() {}, addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
     Linking: { openURL: url => (opened.push(url), Promise.resolve()) },
     Dimensions: { get: () => win },
     useWindowDimensions: () => win,
@@ -203,11 +203,13 @@ let readState = { dm1: { unread: true, mentions: 0 }, dm2: { unread: true, menti
 let relations = { 5: 3, 2: 1, 3: 1, 4: 1 }
 let presence = { 2: 'offline', 3: 'online', 4: 'idle' }
 const media = { mute: false, deaf: false }
+const typingNow = {}
+let uploads = []
 const Stores = {
     UserStore: store({ getCurrentUser: () => users[1], getUser: id => users[id] }),
     ChannelStore: store({ getChannel: id => channels[id], getDMFromUserId: id => Object.values(channels).find(c => c.type === 1 && c.id !== 'dm-new' && c.recipients[0] === id)?.id }),
     PrivateChannelSortStore: store({ getPrivateChannelIds: () => ['dm1', 'dm2', 'gdm'] }),
-    ReadStateStore: store({ hasUnread: id => !!readState[id]?.unread, getMentionCount: id => readState[id]?.mentions ?? 0, lastMessageId: id => messages[id]?._array.at(-1)?.id }),
+    ReadStateStore: store({ hasUnread: id => !!readState[id]?.unread, getMentionCount: id => readState[id]?.mentions ?? 0, lastMessageId: id => messages[id]?._array.at(-1)?.id, getOldestUnreadMessageId: id => (id === 'chat' ? 'c2' : null) }),
     GuildReadStateStore: store({ hasUnread: id => id === 'g1', getMentionCount: id => (id === 'g1' ? 3 : 0) }),
     MessageStore: store({ getMessages: id => messages[id], getMessage: (c, id) => messages[c]?._array.find(m => m.id === id) }),
     RelationshipStore: store({ getRelationships: () => relations }),
@@ -220,7 +222,7 @@ const Stores = {
                 ? { SELECTABLE: ['rules', 'news', 'chat', 'logs', 'forum', 'top'].map(id => ({ channel: channels[id] })), VOCAL: [{ channel: channels.talk }] }
                 : { SELECTABLE: [], VOCAL: [] },
     }),
-    GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800', roles: ['r1', 'r2'] } : null) }),
+    GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800', roles: ['r1', 'r2'] } : null), getMembers: g => (g === 'g1' ? [{ userId: '2' }, { userId: '3' }] : []) }),
     GuildRoleStore: store({ getRole: (g, id) => ({ r1: { id: 'r1', name: 'Mod', position: 5, colorString: '#00ff00' }, r2: { id: 'r2', name: 'Member', position: 1 } })[id] ?? null }),
     VoiceStateStore: store({ getVoiceStatesForChannel: id => (id === 'talk' ? { a: {}, b: {} } : {}) }),
     ActiveThreadsStore: store({ getThreadsForParent: (g, p) => (p === 'forum' ? { p1: {} } : {}) }),
@@ -229,6 +231,10 @@ const Stores = {
     UserProfileStore: store({ getUserProfile: id => (id === '3' ? { bio: 'I like **cats**', pronouns: 'she/her', banner: 'bn', accentColor: 0x123456 } : null), getGuildMemberProfile: () => null, getMutualGuilds: () => [{}, {}] }),
     MediaEngineStore: store({ isSelfMute: () => media.mute, isSelfDeaf: () => media.deaf }),
     ThemeStore: store({ theme: 'dark' }),
+    TypingStore: store({ getTypingUsers: id => typingNow[id] ?? {} }),
+    EmojiStore: store({ getGuildEmoji: g => (g === 'g1' ? [{ id: '42', name: 'cat', animated: false }, { id: '43', name: 'gone', available: false }] : []) }),
+    StickersStore: store({ getStickersByGuildId: g => (g === 'g1' ? [{ id: 's1', name: 'Wave', format_type: 1 }] : []) }),
+    UploadAttachmentStore: store({ getUploads: (c, d) => uploads.filter(u => u.channelId === c && d === 0) }),
 }
 
 // ── 가짜 디스코드 모듈 ──────────────────────────────────────────────────
@@ -257,6 +263,7 @@ const modules = [
                             has_more: false,
                         },
                     }
+                if (o.url === '/gifs/trending-gifs' || o.url === '/gifs/search') return { body: [{ url: `https://tenor.com/${o.query.q ?? 'top'}`, src: `https://media.tenor.com/${o.query.q ?? 'top'}.webp`, width: 200, height: 100 }] }
                 if (o.url === '/channels/p1/messages/p1') return { body: { id: 'p1', channel_id: 'p1', content: 'active first', author: { id: '3' } } }
                 throw new Error('404')
             },
@@ -264,6 +271,10 @@ const modules = [
         },
     },
     { fetchRecentMentions: record('fetchRecentMentions') },
+    { startTyping: record('startTyping'), stopTyping: record('stopTyping') },
+    { getCategories: () => ['people'], getByCategory: c => (c === 'people' ? [{ uniqueName: 'grinning', surrogates: '😀' }, { uniqueName: 'cat_face', surrogates: '🐱' }] : []) },
+    { UploadPlatform: { REACT_NATIVE: 2 } },
+    { UploadOrigin: { IMAGE_PICKER: 1 } },
     { fetchProfile: record('fetchProfile') },
     { sendRequest: async o => (calls.push(['sendRequest', o]), o.discordTag === 'nobody' ? Promise.reject({ body: { message: 'Unknown user' } }) : undefined), acceptFriendRequest() {} },
     { toggleSelfMute: () => ((media.mute = !media.mute), Stores.MediaEngineStore.emit()), toggleSelfDeaf: () => ((media.deaf = !media.deaf), Stores.MediaEngineStore.emit()) },
@@ -311,7 +322,7 @@ globalThis.valenced = {
     components: { Page: ({ children }) => h('main', null, children) },
     discord: {
         actions: { ToastActionCreators: { open: (key, o) => toasts.push(o.text) } },
-        common: { flux: { Dispatcher: { dispatch: e => dispatched.push(e) } } },
+        common: { flux: { Dispatcher: { dispatch: e => (dispatched.push(e), e.type === 'UPLOAD_ATTACHMENT_ADD_FILES' ? uploads.push(...e.files.map(f => ({ id: `up${uploads.length}`, channelId: e.channelId, item: f }))) : e.type === 'UPLOAD_ATTACHMENT_REMOVE_FILE' ? (uploads = uploads.filter(u => u.id !== e.id)) : 0) } } },
         design: { Design: { Stack: D('Stack'), TableRowGroup: D('Group'), TableSwitchRow: D('Switch'), TableRow: D('Row'), TextInput: D('TextInput') } },
         flux: { Stores },
         modules: { mainTabsV2: { RootNavigationRef: { getRootNavigationRef: () => ({ isReady: () => true, navigate: (...a) => navigated.push(a) }) } } },
@@ -485,6 +496,7 @@ check('edited mark', text.includes('(수정됨)'))
 check('marks the channel read while open', dispatched.some(e => e.type === 'BULK_ACK' && e.channels[0].channelId === 'chat'))
 check('does not refetch a ready channel', !calls.some(c => c[0] === 'fetchMessages' && c[1]?.channelId === 'chat' && !c[1].before))
 check('topic shown as one line', text.includes('Read me first'))
+check('"new messages" line above the first unread', text.includes('새 메시지NaznaNickfirst'), text.slice(0, 400))
 
 // 새 메시지가 오면 다시 그린다
 messages.chat = { ...messages.chat, _array: [...messages.chat._array, msg('c9', '4', 'live message', { channel_id: 'chat' })] }
@@ -561,6 +573,53 @@ check('delete on the second press', calls.some(c => c[0] === 'deleteMessage' && 
 await press('long:message l1')
 check('others cannot edit or delete', !host.textContent.includes('수정') && !host.textContent.includes('삭제'))
 await press('Close message menu')
+
+// 입력창: 입력 중, 자동완성, 파일, 이모지, 스티커, GIF
+typingNow.logs = { 3: 1, 1: 1 }
+await act(async () => Stores.TypingStore.emit())
+check('typing line names others, not me', host.textContent.includes('NaznaNick 님이 입력 중…') && !host.textContent.includes('DeStinY 님이'))
+await act(async () => logBox().onChangeText('hey @naz'))
+check('typing tells Discord', calls.some(c => c[0] === 'startTyping' && c[1] === 'logs'))
+await render()
+check('@ suggests members', host.textContent.includes('NaznaNick') && !!presses.get('suggest NaznaNick')?.length)
+await press('suggest NaznaNick')
+check('picking a member inserts the mention', logBox().value === 'hey <@3> ')
+await act(async () => logBox().onChangeText('see #ne'))
+await press('suggest #news')
+check('# suggests channels', logBox().value === 'see <#news> ')
+await act(async () => logBox().onChangeText('so :ca'))
+await render()
+check(': suggests server and unicode emoji, skips unusable', !!presses.get('suggest :cat:')?.length && !!presses.get('suggest :cat_face:')?.length)
+await press('suggest :cat:')
+check('picking an emoji inserts it', logBox().value === 'so <:cat:42> ')
+await act(async () => logBox().onChangeText(''))
+await press('Attach')
+await render()
+check('attached file shows with a remove button', !!presses.get('remove file_' + '')?.length || [...presses.keys()].some(k => k.startsWith('remove ') && presses.get(k).length), [...presses.keys()].filter(k => k.startsWith('remove')).join())
+await press('Send')
+const withFile = calls.filter(c => c[0] === 'sendMessage').at(-1)
+check('file goes up as a Discord upload and is sent with the message', dispatched.some(e => e.type === 'UPLOAD_ATTACHMENT_ADD_FILES' && e.channelId === 'logs' && e.draftType === 0 && e.files[0].uri === picked && e.files[0].platform === 2) && withFile[4]?.attachmentsToUpload?.length === 1)
+check('attachment strip clears after sending', ![...presses.keys()].some(k => k.startsWith('remove ') && presses.get(k).length))
+await press('Emoji')
+check('emoji panel with tabs', ['이모지', '스티커', 'GIF', '사람', 'Valenced'].every(t => host.textContent.includes(t)))
+await press('emoji grinning')
+check('unicode emoji goes into the text', logBox().value === '😀')
+await press('Valenced')
+await press('emoji cat')
+check('server emoji goes into the text', logBox().value === '😀 <:cat:42>' && !presses.get('emoji gone')?.length, logBox().value)
+await act(async () => logBox().onChangeText(''))
+await press('스티커')
+await press('sticker Wave')
+const stick = calls.filter(c => c[0] === 'sendMessage').at(-1)
+check('sticker sends with stickerIds', stick[4]?.stickerIds?.[0] === 's1' && stick[2].content === '')
+await press('Emoji')
+await press('GIF')
+await act(async () => tick())
+check('GIF panel loads trending', calls.some(c => c[0] === 'GET' && c[1] === '/gifs/trending-gifs') && html().includes('media.tenor.com/top.webp'))
+await press('gif https://tenor.com/top')
+check('GIF sends its link', calls.filter(c => c[0] === 'sendMessage').at(-1)[2].content === 'https://tenor.com/top')
+typingNow.logs = {}
+await act(async () => Stores.TypingStore.emit())
 
 // 키보드: 화면이 줄지 않으면 가려진 만큼만, 줄어들면 0
 const pb = () => Number(html().match(/data-pb="(\d+)"/)?.[1] ?? -1)

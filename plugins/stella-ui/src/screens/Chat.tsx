@@ -1,14 +1,15 @@
-import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlatList, Image, Keyboard, Linking, Pressable, TextInput, View } from 'react-native'
-import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
+import { FlatList, Keyboard, Linking, Pressable, View } from 'react-native'
+import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, loadMessages, me, messageArray, messagesOf, roleColor, S, toast, toggleReaction, useStores } from '../data'
 import { previewText } from '../markdown'
-import { Avatar, Boundary, Icon, PillButton, T } from '../parts'
+import { Avatar, Icon, PillButton, T } from '../parts'
 import { go, useUi } from '../state'
 import { C, R, shadow } from '../theme'
 import { imageSources, openViewer, SmartImage } from '../viewer'
 import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
+import { Composer, type Mode } from './Composer'
+import { StickerView } from './Sticker'
 
 /**
  * 말풍선 채팅 (하트챗과 서버 채널이 같이 쓴다).
@@ -82,42 +83,6 @@ function Files({ m, mine }: { m: any; mine: boolean }) {
                 <StickerView key={s.id} s={s} mine={mine} />
             ))}
         </View>
-    )
-}
-
-// ── 스티커: 디스코드의 스티커 그림(움직이는 것, 로티 포함)을 그대로 쓴다 ──
-const STICKER_PATH = 'modules/stickers/native/Sticker.tsx'
-let StickerComp: any
-function stickerComponent(): any {
-    if (StickerComp === undefined) {
-        try {
-            const mod: any = lookupModuleWithImportedPath(STICKER_PATH)
-            StickerComp = typeof mod?.default === 'function' || mod?.default?.$$typeof ? mod.default : null
-        } catch {
-            StickerComp = null
-        }
-    }
-    return StickerComp
-}
-
-function StickerView({ s, mine }: { s: any; mine: boolean }) {
-    const format = s.format_type ?? s.formatType
-    const fallback =
-        format === 3 ? (
-            <T size={13} color={mine ? C.white : C.muted}>
-                {`[스티커] ${s.name ?? ''}`}
-            </T>
-        ) : (
-            <Image source={{ uri: `https://media.discordapp.net/stickers/${s.id}.${format === 4 ? 'gif' : 'png'}?size=160` }} style={{ width: 140, height: 140 }} />
-        )
-    const D = stickerComponent()
-    if (!D) return fallback
-    return (
-        <Boundary fallback={fallback}>
-            <View style={{ width: 140, height: 140 }}>
-                <D sticker={{ ...s, format_type: format, type: s.type ?? 1 }} size={140} animated />
-            </View>
-        </Boundary>
     )
 }
 
@@ -315,7 +280,6 @@ export function messageInfo(m: any): string {
 }
 
 // ── 꾹 누르기 메뉴 ──────────────────────────────────────────────────────
-type Mode = { kind: 'reply' | 'edit'; m: any } | null
 
 function MessageMenu({ m, guildId, onClose, onMode }: { m: any; guildId?: string; onClose: () => void; onMode: (mode: Mode) => void }) {
     const [confirmDelete, setConfirmDelete] = useState(false)
@@ -415,64 +379,15 @@ function useKeyboardPad(ref: { current: any }) {
     return { pad, onLayout: () => top.current != null && measure() }
 }
 
-// ── 입력창 ──────────────────────────────────────────────────────────────
-function Composer({ channelId, placeholder, mode, onMode, guildId }: { channelId: string; placeholder: string; mode: Mode; onMode: (m: Mode) => void; guildId?: string }) {
-    const [text, setText] = useState('')
-    const [failed, setFailed] = useState(false)
-    useEffect(() => setText(''), [channelId])
-    useEffect(() => {
-        if (mode?.kind === 'edit') setText(mode.m.content ?? '')
-    }, [mode])
-    const send = () => {
-        if (!text.trim()) return
-        const ok = mode?.kind === 'edit' ? editMessage(channelId, mode.m.id, text) : sendMessage(channelId, text, mode?.kind === 'reply' ? mode.m : undefined)
-        setFailed(!ok)
-        if (ok) {
-            setText('')
-            onMode(null)
-        }
-    }
-    const canSend = !!text.trim()
+/** 여기부터 새 메시지 */
+function NewDivider() {
     return (
-        <View style={{ paddingHorizontal: 14, paddingBottom: 12, paddingTop: 6 }}>
-            {mode ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, marginHorizontal: 6, paddingHorizontal: 12, height: 32, borderRadius: R.pill, backgroundColor: 'rgba(255,255,255,0.9)' }}>
-                    <Icon names={mode.kind === 'edit' ? ['PencilIcon', 'EditIcon'] : ['ArrowAngleLeftUpIcon', 'ReplyIcon']} color={C.navy} size={16} />
-                    <T size={13} weight="700" lines={1} style={{ flex: 1 }}>
-                        {mode.kind === 'edit' ? '메시지 수정 중' : `${displayName(mode.m.author, guildId)} 에게 답장`}
-                    </T>
-                    <Pressable
-                        onPress={() => {
-                            onMode(null)
-                            if (mode.kind === 'edit') setText('')
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel"
-                        hitSlop={8}
-                    >
-                        <Icon names={['XSmallIcon', 'XLargeIcon', 'CloseIcon']} color={C.navy} size={16} />
-                    </Pressable>
-                </View>
-            ) : null}
-            {failed ? (
-                <T size={12} color={C.red} weight="700" style={{ marginBottom: 4, marginLeft: 6 }}>
-                    보내지 못했어요, 다시 눌러 주세요
+        <View accessibilityLabel="new messages" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginVertical: 8 }}>
+            <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: C.red }} />
+            <View style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: R.pill, backgroundColor: C.red }}>
+                <T size={11} color={C.white} weight="800">
+                    새 메시지
                 </T>
-            ) : null}
-            <View style={[{ flexDirection: 'row', alignItems: 'flex-end', borderRadius: 24, backgroundColor: C.white, paddingLeft: 18, paddingRight: 6, paddingVertical: 6 }, shadow(4)]}>
-                <TextInput
-                    value={text}
-                    onChangeText={setText}
-                    placeholder={placeholder}
-                    placeholderTextColor={C.muted}
-                    multiline
-                    style={{ flex: 1, maxHeight: 120, minHeight: 36, fontSize: 15, color: C.ink, paddingVertical: 6, fontWeight: '600' }}
-                />
-                <Pressable onPress={send} disabled={!canSend} accessibilityRole="button" accessibilityLabel="Send" style={({ pressed }) => [{ opacity: canSend ? (pressed ? 0.8 : 1) : 0.45 }]}>
-                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon names={mode?.kind === 'edit' ? ['CheckmarkLargeIcon', 'CheckmarkSmallIcon'] : ['SendMessageIcon', 'PaperPlaneIcon', 'ArrowSmallRightIcon']} color={C.white} size={20} />
-                    </View>
-                </Pressable>
             </View>
         </View>
     )
@@ -505,6 +420,14 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
     const list = useStores(['MessageStore'], () => messagesOf(channelId), [channelId])
     const myId = me()?.id
     const rows = useMemo(() => buildRows(messageArray(list), myId), [list, myId])
+    // 읽음 표시하기 전에 처음 안 읽은 메시지를 기억해 둔다 ("새 메시지" 줄)
+    const firstUnread = useMemo(() => {
+        try {
+            return S().ReadStateStore?.hasUnread?.(channelId) ? S().ReadStateStore?.getOldestUnreadMessageId?.(channelId) : undefined
+        } catch {
+            return undefined
+        }
+    }, [channelId])
     const [menu, setMenu] = useState<any>(null)
     const [mode, setMode] = useState<Mode>(null)
     const box = useRef<any>(null)
@@ -536,7 +459,15 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
         if (a.length && messagesOf(channelId)?.hasMoreBefore !== false) loadMessages(channelId, a[0].id)
     }, [channelId])
 
-    const renderItem = useCallback(({ item }: { item: Row }) => <MessageRow row={item} guildId={guildId} showNames={!!guildId} onMenu={setMenu} onJump={jump} lit={item.m.id === lit} />, [guildId, jump, lit])
+    const renderItem = useCallback(
+        ({ item }: { item: Row }) => (
+            <>
+                {item.m.id === firstUnread && !item.mine ? <NewDivider /> : null}
+                <MessageRow row={item} guildId={guildId} showNames={!!guildId} onMenu={setMenu} onJump={jump} lit={item.m.id === lit} />
+            </>
+        ),
+        [guildId, jump, lit, firstUnread],
+    )
     const ch = channelOf(channelId)
     const placeholder = guildId ? `#${ch?.name ?? ''} 에 메시지 보내기` : `${head.title} 에게 메시지 보내기`
 

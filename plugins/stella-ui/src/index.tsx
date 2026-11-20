@@ -13,6 +13,7 @@ import { GuildScreen } from './screens/Guild'
 import { HeartScreen } from './screens/Heart'
 import { InboxScreen } from './screens/Inbox'
 import { ProfileCard } from './screens/Profile'
+import { forgetSticker } from './screens/Sticker'
 import { ImageViewer } from './viewer'
 import { chooseCharacter, LobbyScreen } from './screens/Lobby'
 import { bindStorage, DEFAULTS, save, useSettings } from './settings'
@@ -272,6 +273,7 @@ export default plugin({
             resetForums()
             forgetSync()
             forgetThreads()
+            forgetSticker()
             status.mounted = false
         })
     },
