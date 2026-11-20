@@ -1,0 +1,16 @@
+{
+	"format": 1,
+	"id": "yumistra.desktop-ui",
+	"name": "Desktop UI",
+	"description": "A desktop style layout on any screen: servers and channels always beside the chat, and a member list column.",
+	"author": "Yumistra",
+	"icon": "ScreenIcon",
+	"version": "1.0.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
