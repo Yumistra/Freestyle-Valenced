@@ -99,6 +99,7 @@ const ReactNative = {
     Animated: { View, Value: AnimValue, timing: (v, cfg) => ({ start: cb => (v.setValue(cfg.toValue), cb?.({ finished: true })), stop() {} }) },
     BackHandler: { addEventListener: (_t, f) => (backHandlers.add(f), { remove: () => backHandlers.delete(f) }) },
     Keyboard: { dismiss() {}, addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
+    Share: { share: o => (calls.push(['share', o]), Promise.resolve()) },
     Linking: { openURL: url => (opened.push(url), Promise.resolve()) },
     Dimensions: { get: () => win },
     useWindowDimensions: () => win,
@@ -225,7 +226,7 @@ const Stores = {
                 : { SELECTABLE: [], VOCAL: [] },
     }),
     GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800', roles: ['r1', 'r2'] } : null), getMembers: g => (g === 'g1' ? [{ userId: '2' }, { userId: '3' }] : []) }),
-    GuildRoleStore: store({ getRole: (g, id) => ({ r1: { id: 'r1', name: 'Mod', position: 5, colorString: '#00ff00' }, r2: { id: 'r2', name: 'Member', position: 1 } })[id] ?? null }),
+    GuildRoleStore: store({ getRole: (g, id) => ({ r1: { id: 'r1', name: 'Mod', position: 5, colorString: '#00ff00', hoist: true }, r2: { id: 'r2', name: 'Member', position: 1 } })[id] ?? null }),
     VoiceStateStore: store({ getVoiceStatesForChannel: id => (id === 'talk' ? { a: {}, b: {} } : {}) }),
     ActiveThreadsStore: store({ getThreadsForParent: (g, p) => (p === 'forum' ? { p1: {} } : {}) }),
     ActiveJoinedThreadsStore: store({ getActiveJoinedThreadsForParent: (g, p) => (p === 'chat' ? { th1: {} } : {}) }),
@@ -233,6 +234,8 @@ const Stores = {
     UserProfileStore: store({ getUserProfile: id => (id === '3' ? { bio: 'I like **cats**', pronouns: 'she/her', banner: 'bn', accentColor: 0x123456 } : null), getGuildMemberProfile: () => null, getMutualGuilds: () => [{}, {}] }),
     MediaEngineStore: store({ isSelfMute: () => media.mute, isSelfDeaf: () => media.deaf }),
     ThemeStore: store({ theme: 'dark' }),
+    UserGuildSettingsStore: store({ getMessageNotifications: () => 1, isMuted: () => false, isSuppressEveryoneEnabled: () => false, isSuppressRolesEnabled: () => false, getChannelMessageNotifications: () => 3, isChannelMuted: () => false }),
+    GuildMemberCountStore: store({ getMemberCount: () => 42 }),
     TypingStore: store({ getTypingUsers: id => typingNow[id] ?? {} }),
     EmojiStore: store({ getGuildEmoji: g => (g === 'g1' ? [{ id: '42', name: 'cat', animated: false }, { id: '43', name: 'gone', available: false }] : []) }),
     StickersStore: store({ getStickersByGuildId: g => (g === 'g1' ? [{ id: 's1', name: 'Wave', format_type: 1 }] : []) }),
@@ -265,13 +268,16 @@ const modules = [
                             has_more: false,
                         },
                     }
+                if (o.url === '/channels/logs/messages/pins') return { body: { items: [{ pinned_at: '2026-11-20T00:00:00Z', message: { id: 'pin1', channel_id: 'logs', content: 'pinned **rule**', author: { id: '3', username: 'nazna' }, attachments: [] } }], has_more: false } }
+                if (o.url === '/guilds/g1/messages/search') return { body: { total_results: 1, messages: [[{ id: 'f1', channel_id: 'news', content: `found ${o.query.content}`, author: { id: '2', username: 'seina' }, attachments: [] }]] } }
                 if (o.url === '/gifs/trending-gifs' || o.url === '/gifs/search') return { body: [{ url: `https://tenor.com/${o.query.q ?? 'top'}`, src: `https://media.tenor.com/${o.query.q ?? 'top'}.webp`, width: 200, height: 100 }] }
                 if (o.url === '/channels/p1/messages/p1') return { body: { id: 'p1', channel_id: 'p1', content: 'active first', author: { id: '3' } } }
                 throw new Error('404')
             },
             put: async o => (calls.push(['PUT', o.url]), {}),
+            patch: async o => (calls.push(['PATCH', o.url, o.body]), {}),
             del: async o => (calls.push(['DEL', o.url]), {}),
-            post: async o => (calls.push(['POST', o.url, o.body]), { body: { id: 'p3', name: o.body.name, owner_id: '1', message_count: 0, applied_tags: o.body.applied_tags } }),
+            post: async o => (calls.push(['POST', o.url, o.body]), o.url.endsWith('/invites') ? { body: { code: 'abc123' } } : { body: { id: 'p3', name: o.body.name, owner_id: '1', message_count: 0, applied_tags: o.body.applied_tags } }),
         },
     },
     { fetchRecentMentions: record('fetchRecentMentions') },
@@ -626,6 +632,50 @@ await press('gif https://tenor.com/top')
 check('GIF sends its link', calls.filter(c => c[0] === 'sendMessage').at(-1)[2].content === 'https://tenor.com/top')
 typingNow.logs = {}
 await act(async () => Stores.TypingStore.emit())
+
+// 채널 도구: 고정, 검색, 멤버, 알림, 초대
+await press('더보기')
+check('tools menu', ['고정 메시지', '메시지 검색', '멤버', '알림 설정', '초대 링크'].every(t => host.textContent.includes(t)))
+await press('고정 메시지')
+await act(async () => tick())
+check('pins load from the new pins API', host.textContent.includes('pinned rule') && calls.some(c => c[0] === 'GET' && c[1] === '/channels/logs/messages/pins'), host.textContent.slice(-300))
+await press('unpin pin1')
+await act(async () => tick())
+check('unpin uses DELETE', calls.some(c => c[0] === 'DEL' && c[1] === '/channels/logs/messages/pins/pin1') && !host.textContent.includes('pinned rule'))
+await press('Tools back')
+await press('메시지 검색')
+const searchBox = () => inputs.get('찾을 말').at(-1).get()
+await act(async () => searchBox().onChangeText('hello'))
+await press('서버 전체')
+await press('찾기')
+await act(async () => tick())
+check('search the whole server', calls.some(c => c[0] === 'GET' && c[1] === '/guilds/g1/messages/search' && c[2].content === 'hello' && !c[2].channel_id) && host.textContent.includes('found hello') && host.textContent.includes('1개 찾음'))
+await press('found f1')
+check('search result in another channel opens it', state().channelId === 'news')
+await press('logs')
+await press('더보기')
+await press('멤버')
+check('members with status and count', host.textContent.includes('NaznaNick') && host.textContent.includes('전체 42명') && host.textContent.includes('Mod'))
+await press('member NaznaNick')
+check('member opens the profile', state().profile?.userId === '3')
+await act(async () => [...backHandlers][0]())
+await press('Tools back')
+await press('알림 설정')
+await press('멘션만')
+await press('음소거')
+check('notification settings patch the guild settings', calls.some(c => c[0] === 'PATCH' && c[1] === '/users/@me/guilds/g1/settings' && c[2].channel_overrides?.logs?.message_notifications === 1) && calls.some(c => c[0] === 'PATCH' && c[2].channel_overrides?.logs?.muted === true))
+await press('Tools back')
+await press('초대 링크')
+await press('초대 링크 만들기')
+await act(async () => tick())
+check('invite link', host.textContent.includes('https://discord.gg/abc123') && calls.some(c => c[0] === 'POST' && c[1] === '/channels/logs/invites' && c[2].max_age === 604800))
+await press('복사')
+check('invite copy', copied.includes('https://discord.gg/abc123'))
+await press('Close tools')
+await press('long:message l1')
+await press('고정')
+await act(async () => tick())
+check('pin from the message menu', calls.some(c => c[0] === 'PUT' && c[1] === '/channels/logs/messages/pins/l1'))
 
 // 디스코드 모듈이 아직 안 불려 왔을 때: 사진 고르기는 네이티브로, 반응은 API 로
 pickerGone = true

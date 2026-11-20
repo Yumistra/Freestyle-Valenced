@@ -10,6 +10,8 @@ import { imageSources, openViewer, SmartImage } from '../viewer'
 import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
 import { Composer, type Mode } from './Composer'
 import { StickerView } from './Sticker'
+import { ChatTools, type Tool } from './Tools'
+import { setPinned } from '../tools'
 
 /**
  * 말풍선 채팅 (하트챗과 서버 채널이 같이 쓴다).
@@ -332,6 +334,10 @@ function MessageMenu({ m, guildId, onClose, onMode }: { m: any; guildId?: string
                           onClose()
                       })
                     : null}
+                {item(['PinIcon', 'PinUprightIcon'], m.pinned ? '고정 해제' : '고정', () => {
+                    setPinned(m.channel_id, m.id, !m.pinned).then(ok => ok && toast(m.pinned ? '고정을 풀었어요' : '고정했어요'))
+                    onClose()
+                })}
                 {mine && m.content ? item(['PencilIcon', 'EditIcon'], '수정', () => (onMode({ kind: 'edit', m }), onClose())) : null}
                 {mine
                     ? item(['TrashIcon'], confirmDelete ? '정말 지울까요? 한 번 더 누르세요' : '삭제', () => {
@@ -415,7 +421,8 @@ export interface ChatHead {
     onPress?: () => void
 }
 
-export function Chat({ channelId, guildId, head, compact = false, onList }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void }) {
+export function Chat({ channelId, guildId, head, compact = false, onList, top }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void; top?: any }) {
+    const [tool, setTool] = useState<Tool | null>(null)
     const visible = useUi(s => s.visible)
     const list = useStores(['MessageStore'], () => messagesOf(channelId), [channelId])
     const myId = me()?.id
@@ -497,8 +504,10 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
                         </T>
                     ) : null}
                 </View>
+                <HeadButton label="더보기" names={['MoreHorizontalIcon', 'MoreVerticalIcon', 'SettingsIcon']} compact onPress={() => setTool('menu')} />
                 {onList ? <HeadButton label="리스트" names={['ListBulletsIcon', 'ChannelListIcon', 'HamburgerIcon']} compact={compact} onPress={onList} /> : null}
             </View>
+            {top}
             <FlatList
                 ref={listRef}
                 data={rows}
@@ -526,6 +535,24 @@ export function Chat({ channelId, guildId, head, compact = false, onList }: { ch
                 style={{ flex: 1 }}
             />
             <Composer channelId={channelId} placeholder={placeholder} mode={mode} onMode={setMode} guildId={guildId} />
+            {tool ? (
+                <ChatTools
+                    tool={tool}
+                    channelId={channelId}
+                    guildId={guildId}
+                    onTool={setTool}
+                    onJump={m => {
+                        setTool(null)
+                        if (m.channel_id && m.channel_id !== channelId) {
+                            const target = channelOf(m.channel_id)
+                            if (target) go.open(target)
+                            else toast('그 채널을 열 수 없어요')
+                            return
+                        }
+                        jump(m.id)
+                    }}
+                />
+            ) : null}
             {menu ? <MessageMenu m={menu} guildId={guildId} onClose={() => setMenu(null)} onMode={setMode} /> : null}
         </View>
     )
