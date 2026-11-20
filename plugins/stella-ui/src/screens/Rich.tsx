@@ -88,8 +88,15 @@ function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; b
                 )
             case 'emoji': {
                 // 글자 높이에 맞춘다 (이모지만 있으면 크게)
-                const px = big ? 48 : Math.round(size * 1.35)
-                return <Image key={i} source={{ uri: emojiUrl(n.id, n.animated, big ? 96 : 48) }} style={{ width: px, height: px }} />
+                const px = big ? 48 : Math.round(size * 1.3)
+                const uri = emojiUrl(n.id, n.animated, big ? 96 : 48)
+                if (big) return <Image key={i} source={{ uri }} style={{ width: px, height: px }} />
+                // 글 속 그림은 바닥이 글자 기준선에 붙어서 떠 보인다. 기준선 아래 몫(약 0.25 글자)만큼 내린다
+                return (
+                    <View key={i} style={{ width: px, height: px }}>
+                        <Image source={{ uri }} style={{ width: px, height: px, transform: [{ translateY: Math.round(size * 0.27) }] }} />
+                    </View>
+                )
             }
             case 'link':
                 return (
