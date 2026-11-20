@@ -13,6 +13,7 @@ import { GuildScreen } from './screens/Guild'
 import { HeartScreen } from './screens/Heart'
 import { InboxScreen } from './screens/Inbox'
 import { ProfileCard } from './screens/Profile'
+import { ImageViewer } from './viewer'
 import { chooseCharacter, LobbyScreen } from './screens/Lobby'
 import { bindStorage, DEFAULTS, save, useSettings } from './settings'
 import { back, getState, resetState, setState, useUi } from './state'
@@ -123,6 +124,7 @@ function Stage() {
             <View style={{ position: 'absolute', top: insets.top, left: insets.left, width: w, height: h }}>
                 <Screen width={w} height={h} />
                 <ProfileCard />
+                <ImageViewer width={w} height={h} />
             </View>
             <Wipe width={width} />
         </View>

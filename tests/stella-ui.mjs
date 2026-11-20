@@ -94,6 +94,7 @@ const ReactNative = {
     TextInput,
     FlatList,
     ScrollView: View,
+    PanResponder: { create: cfg => ((globalThis.lastPan = cfg), { panHandlers: {} }) },
     Animated: { View, Value: AnimValue, timing: (v, cfg) => ({ start: cb => (v.setValue(cfg.toValue), cb?.({ finished: true })), stop() {} }) },
     BackHandler: { addEventListener: (_t, f) => (backHandlers.add(f), { remove: () => backHandlers.delete(f) }) },
     Keyboard: { addListener: (t, f) => (kbListeners.push([t, f]), { remove: () => kbListeners.splice(kbListeners.findIndex(x => x[1] === f), 1) }) },
@@ -178,7 +179,7 @@ const messages = {
             }),
             msg('l3', '4', '', { channel_id: 'logs', embeds: [{ type: 'rich' }] }),
             msg('l4', '1', 'my **own** line', { channel_id: 'logs' }),
-            msg('l5', '3', 'look <a:dance:77> here', { channel_id: 'logs', stickerItems: [{ id: 'lot', name: 'Smile', format_type: 3 }, { id: 'bad', name: 'Broken', format_type: 1 }] }),
+            msg('l5', '3', 'look <a:dance:77> here', { channel_id: 'logs', stickerItems: [{ id: 'lot', name: 'Smile', format_type: 3 }, { id: 'bad', name: 'Broken', format_type: 1 }], attachments: [{ id: 'w1', filename: 'chibi_idle.webp', content_type: 'image/webp', width: 200, height: 200, url: 'https://cdn.discordapp.com/attachments/1/2/chibi_idle.webp?ex=1&is=2', proxy_url: 'https://media.discordapp.net/attachments/1/2/chibi_idle.webp?ex=1&is=2' }, { id: 'g1', filename: 'a.gif', content_type: 'image/gif', width: 100, height: 50, url: 'https://cdn.discordapp.com/a.gif', proxy_url: 'https://media.discordapp.net/a.gif' }] }),
         ],
     },
     dm1: {
@@ -520,6 +521,13 @@ check('link button opens', opened.includes('https://example.com/site'))
 check('animated emoji as animated WebP, sized to the text', /data-src="https:\/\/cdn.discordapp.com\/emojis\/77.webp\?size=48&amp;animated=true" data-w="20"/.test(html()) || /emojis\/77.webp\?size=48&animated=true" data-w="20"/.test(html()), html().match(/emojis\/77[^>]*/)?.[0])
 check('stickers drawn with Discord\'s sticker (Lottie too)', html().includes('data-sticker="lot"') && html().includes('data-format="3"') && html().includes('data-size="140"'))
 check('a sticker that fails falls back to a picture', html().includes('stickers/bad.png?size=160'))
+
+check('animated WebP attachment asks the media server for the animation', html().includes('chibi_idle.webp?ex=1&amp;is=2&amp;animated=true') || html().includes('chibi_idle.webp?ex=1&is=2&animated=true'))
+check('GIF attachment comes as animated WebP', html().includes('media.discordapp.net/a.gif?format=webp&amp;animated=true') || html().includes('media.discordapp.net/a.gif?format=webp&animated=true'))
+await press('image w1')
+check('tapping a picture opens the viewer', state().viewer?.sources[0].includes('animated=true') && state().viewer.link === 'https://cdn.discordapp.com/attachments/1/2/chibi_idle.webp?ex=1&is=2' && !!presses.get('Close viewer')?.length)
+await act(async () => [...backHandlers][0]())
+check('back closes the viewer first', !state().viewer && state().channelId === 'logs')
 
 // 꾹 누르기 메뉴
 await press('long:message l1')

@@ -7,6 +7,7 @@ import { previewText } from '../markdown'
 import { Avatar, Boundary, Icon, PillButton, T } from '../parts'
 import { go, useUi } from '../state'
 import { C, R, shadow } from '../theme'
+import { imageSources, openViewer, SmartImage } from '../viewer'
 import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
 
 /**
@@ -59,9 +60,10 @@ function Files({ m, mine }: { m: any; mine: boolean }) {
                 if (isImage && url) {
                     const w = Math.min(260, f.width ?? 260)
                     const h = f.width && f.height ? Math.round((w * f.height) / f.width) : 180
+                    const sources = imageSources(f)
                     return (
-                        <Pressable key={f.id ?? url} onPress={() => Linking.openURL(f.url ?? url).catch(() => {})}>
-                            <Image source={{ uri: url }} style={{ width: w, height: Math.min(h, 340), borderRadius: 10, backgroundColor: C.blueSoft }} resizeMode="cover" />
+                        <Pressable key={f.id ?? url} onPress={() => openViewer(sources, f.width, f.height, f.url)} accessibilityRole="imagebutton" accessibilityLabel={`image ${f.id ?? ''}`}>
+                            <SmartImage sources={sources} style={{ width: w, height: Math.min(h, 340), borderRadius: 10, backgroundColor: C.blueSoft }} />
                         </Pressable>
                     )
                 }

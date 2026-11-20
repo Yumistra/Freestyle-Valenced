@@ -27,6 +27,8 @@ export interface UiState {
     menu: boolean
     /** 프로필 창 (누구, 어느 서버에서) */
     profile?: { userId: string; guildId?: string }
+    /** 크게 보는 그림 */
+    viewer?: { sources: string[]; width?: number; height?: number; link?: string }
     /** 화면이 바뀔 때마다 늘어난다 (전환 효과) */
     turn: number
 }
@@ -83,6 +85,7 @@ export const go = {
 
 /** 뒤로 가기. 더 갈 곳이 없으면 false */
 export function back(): boolean {
+    if (state.viewer) return setState({ viewer: undefined }), true
     if (state.profile) return setState({ profile: undefined }), true
     if (state.menu) return setState({ menu: false }), true
     switch (state.route) {

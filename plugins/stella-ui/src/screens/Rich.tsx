@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { Image, Linking, Pressable, Text, View } from 'react-native'
 import { emojiUrl } from '../data'
+import { imageSources, openViewer, SmartImage } from '../viewer'
 import { type Block, blocks, type Inline, onlyEmoji } from '../markdown'
 import { Icon, T } from '../parts'
 import { C, R } from '../theme'
@@ -177,9 +178,10 @@ function Picture({ media, maxWidth = 300, maxHeight = 320, onPress }: { media: a
     const h0 = Number(media.height) || Math.round(maxWidth * 0.6)
     const scale = Math.min(1, maxWidth / w0, maxHeight / h0)
     const style = { width: Math.round(w0 * scale), height: Math.round(h0 * scale), borderRadius: 10, backgroundColor: C.blueSoft }
+    const sources = imageSources({ url: media.url, proxy_url: uri, content_type: media.contentType ?? media.content_type })
     return (
-        <Pressable onPress={onPress ?? (() => open(media.url ?? uri))}>
-            <Image source={{ uri }} style={style} resizeMode="cover" />
+        <Pressable onPress={onPress ?? (() => openViewer(sources, Number(media.width) || undefined, Number(media.height) || undefined, media.url ?? uri))} accessibilityRole="imagebutton" accessibilityLabel="picture">
+            <SmartImage sources={sources} style={style} />
         </Pressable>
     )
 }
