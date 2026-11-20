@@ -5,7 +5,7 @@
 	"description": "A desktop style layout on any screen: servers and channels always beside the chat, and a member list column.",
 	"author": "Yumistra",
 	"icon": "ScreenIcon",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
