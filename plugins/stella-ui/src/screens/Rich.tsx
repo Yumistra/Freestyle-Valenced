@@ -16,6 +16,10 @@ const soft = (tone: Tone) => (tone === 'light' ? '#dfe7ff' : C.muted)
 const linkColor = (tone: Tone) => (tone === 'light' ? '#eef2ff' : C.blue)
 const MONO = 'monospace'
 
+/**
+ * 말풍선은 안 내용만큼 폭을 잡는다. 그 안에서 flex: 1 을 쓰면 폭이 0 이 되어 글이 사라지므로
+ * 내용 폭(flexBasis auto)을 기준으로 늘고 줄게 한다.
+ */
 /** 바깥 글 상자. 안드로이드가 굵은 글자 폭을 잘못 재서 끝 글자가 잘리는 것을 막는다 */
 export const P = (props: any) => <Text textBreakStrategy="simple" {...props} />
 
@@ -124,7 +128,7 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
             return (
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                     <P style={base}>•</P>
-                    <P style={{ ...base, flex: 1 }}>
+                    <P style={{ ...base, flexGrow: 1, flexShrink: 1, flexBasis: 'auto' }}>
                         <Nodes nodes={b.c} tone={tone} size={size} />
                     </P>
                 </View>
@@ -133,7 +137,7 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
             return (
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                     <View style={{ width: 3, borderRadius: 2, backgroundColor: tone === 'light' ? 'rgba(255,255,255,0.6)' : C.line }} />
-                    <View style={{ flex: 1, gap: 2 }}>
+                    <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', gap: 2 }}>
                         {b.c.map((x, i) => (
                             <BlockView key={i} b={x} tone={tone} size={size} />
                         ))}
@@ -246,7 +250,7 @@ export const EmbedCard = memo(function EmbedCard({ e, guildId }: { e: any; guild
                 {rows.map((row, i) => (
                     <View key={i} style={{ flexDirection: 'row', gap: 10 }}>
                         {row.map((f, j) => (
-                            <View key={j} style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                            <View key={j} style={{ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minWidth: 60, gap: 2 }}>
                                 <RichText text={field(f, 'rawName', 'name')} guildId={guildId} tone="dark" size={13} />
                                 <RichText text={field(f, 'rawValue', 'value')} guildId={guildId} tone="dark" size={13} />
                             </View>
@@ -318,7 +322,7 @@ export function Components({ list, guildId, depth = 0 }: { list: any[]; guildId?
             case 9:
                 return (
                     <View key={i} style={{ flexDirection: 'row', gap: 10 }}>
-                        <View style={{ flex: 1, gap: 4 }}>
+                        <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', gap: 4 }}>
                             <Components list={c.components ?? []} guildId={guildId} depth={depth + 1} />
                         </View>
                         {c.accessory?.type === 11 ? <Picture media={c.accessory.media} maxWidth={72} maxHeight={72} /> : c.accessory?.type === 2 ? <ButtonPill c={c.accessory} /> : null}
