@@ -197,6 +197,7 @@ export function guildIds(): string[] {
 export const VOICELIKE = new Set([2, 13])
 
 export interface Section {
+    guildId: string
     id: string
     name: string
     channels: any[]
@@ -221,7 +222,7 @@ export function guildSections(guildId: string): Section[] {
     for (const [parent, list] of byParent) {
         list.sort((a, b) => pos(a) - pos(b))
         const cat = parent ? channel(parent) : undefined
-        sections.push({ id: parent || 'none', name: cat?.name ?? '', channels: list })
+        sections.push({ guildId, id: parent || 'none', name: cat?.name ?? '', channels: list })
     }
     sections.sort((a, b) => (a.id === 'none' ? -1 : b.id === 'none' ? 1 : (channel(a.id)?.position ?? 0) - (channel(b.id)?.position ?? 0)))
     return sections
@@ -363,18 +364,6 @@ export function openNative(where: 'notifications' | 'friends' | 'shop' | 'quests
     }
 }
 
-/** 디스코드에서 채널 열기 (포럼, 스레드 등 이 화면에서 못 보여 주는 것) */
-export function openChannelNative(ch: any): boolean {
-    try {
-        const r = find('transitionToGuild')
-        if (typeof r?.transitionToGuild === 'function') {
-            r.transitionToGuild(ch.guild_id, ch.id)
-            return true
-        }
-    } catch {}
-    return false
-}
-
 export function joinVoice(channelId: string): boolean {
     try {
         const m = find('selectVoiceChannel')
@@ -494,3 +483,32 @@ export function toggleReaction(channelId: string, messageId: string, emoji: { id
         return false
     }
 }
+
+// ── REST (디스코드가 쓰는 HTTP 모듈) ────────────────────────────────────
+export function http(): any {
+    const a = find('HTTP')?.HTTP
+    return a?.get ? a : find('getAPIBaseURL', 'get')
+}
+
+/** 눈송이 ID 의 시간 (밀리초) */
+export const idTime = (id: string | undefined) => (id ? Math.floor(Number(id) / 4194304) + 1420070400000 : 0)
+
+// ── 스레드 ──────────────────────────────────────────────────────────────
+const idsOf = (v: any): string[] => (Array.isArray(v) ? v.map((x: any) => (typeof x === 'string' ? x : x?.id ?? x?.channel?.id)).filter(Boolean) : v && typeof v === 'object' ? Object.keys(v) : [])
+
+/** 채널 아래 열려 있는 스레드 (내가 들어간 것 먼저). joinedOnly 면 내가 들어간 것만 */
+export function threadsOf(guildId: string, parentId: string, joinedOnly = false): string[] {
+    const s = S()
+    const out = new Set<string>()
+    try {
+        idsOf(s.ActiveJoinedThreadsStore?.getActiveJoinedThreadsForParent?.(guildId, parentId)).forEach(id => out.add(id))
+    } catch {}
+    if (!joinedOnly)
+        try {
+            idsOf(s.ActiveThreadsStore?.getThreadsForParent?.(guildId, parentId)).forEach(id => out.add(id))
+        } catch {}
+    return [...out].filter(id => channel(id))
+}
+
+export const THREADS = new Set([10, 11, 12])
+export const FORUMS = new Set([15, 16])

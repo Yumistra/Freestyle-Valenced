@@ -6,6 +6,7 @@ import { instead } from '@valenced/patcher'
 import { Component, useEffect, useState } from 'react'
 import { BackHandler, Image, Pressable, useWindowDimensions, View } from 'react-native'
 import { forgetModules, pickImage, toast } from './data'
+import { resetForums } from './forum'
 import { Icon, T, Wipe } from './parts'
 import { DepartScreen } from './screens/Depart'
 import { GuildScreen } from './screens/Guild'
@@ -261,6 +262,7 @@ export default plugin({
         cleanup(() => {
             resetState()
             forgetModules()
+            resetForums()
             status.mounted = false
         })
     },

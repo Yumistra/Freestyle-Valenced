@@ -393,7 +393,7 @@ export interface ChatHead {
     icon?: string[]
 }
 
-export function Chat({ channelId, guildId, head, compact = false, onList, onOpenNative }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void; onOpenNative?: () => void }) {
+export function Chat({ channelId, guildId, head, compact = false, onList }: { channelId: string; guildId?: string; head: ChatHead; compact?: boolean; onList?: () => void }) {
     const visible = useUi(s => s.visible)
     const list = useStores(['MessageStore'], () => messagesOf(channelId), [channelId])
     const myId = me()?.id
@@ -453,7 +453,6 @@ export function Chat({ channelId, guildId, head, compact = false, onList, onOpen
                         </T>
                     ) : null}
                 </View>
-                {onOpenNative ? <HeadButton label="디스코드에서 열기" names={['WindowLaunchIcon', 'ScreenArrowIcon', 'DiscordIcon']} compact={compact} onPress={onOpenNative} /> : null}
                 {onList ? <HeadButton label="리스트" names={['ListBulletsIcon', 'ChannelListIcon', 'HamburgerIcon']} compact={compact} onPress={onList} /> : null}
             </View>
             <FlatList

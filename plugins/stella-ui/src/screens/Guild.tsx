@@ -1,11 +1,13 @@
-import { memo, useCallback } from 'react'
+import { Fragment, memo, useCallback } from 'react'
 import { FlatList, Image, Pressable, View } from 'react-native'
-import { channel, guild, guildIconUrl, guildSections, joinVoice, openChannelNative, sameList, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
+import { channel, FORUMS, guild, guildIconUrl, guildSections, joinVoice, sameList, THREADS, threadsOf, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
+import { knownThread } from '../forum'
 import { Backdrop, Badge, Empty, Icon, NavButtons, PlaceChip, T } from '../parts'
 import { useSettings } from '../settings'
 import { back, go, isNarrow, setState, useUi } from '../state'
 import { C, cardColor } from '../theme'
 import { Chat } from './Chat'
+import { ForumView } from './Forum'
 
 /**
  * 서버 채널. 왼쪽 흐린 칸에 채널 작은 카드(카테고리별), 오른쪽에 말풍선 채팅.
@@ -23,13 +25,17 @@ export function channelIcon(type: number | undefined): string[] {
             return ['ForumIcon', 'TextIcon']
         case 16:
             return ['ImageIcon', 'ForumIcon']
+        case 10:
+        case 11:
+        case 12:
+            return ['ThreadIcon', 'TextIcon']
         default:
             return ['TextIcon']
     }
 }
 
-/** 이 화면에서 바로 대화할 수 있는 채널 (포럼, 미디어는 디스코드로 넘긴다) */
-export const chatsHere = (type: number | undefined) => type === 0 || type === 5
+/** 말풍선 채팅으로 여는 채널 (글 채널, 공지, 스레드, 포럼 글) */
+export const chatsHere = (type: number | undefined) => type === 0 || type === 5 || THREADS.has(type as number)
 
 /** 채널 카드를 눌렀을 때 */
 export function pressChannel(ch: any) {
@@ -38,13 +44,11 @@ export function pressChannel(ch: any) {
         toast(joinVoice(ch.id) ? `${ch.name} 에 들어가는 중` : '음성 채널에 들어가지 못했어요')
         return
     }
-    if (chatsHere(ch.type)) {
+    if (chatsHere(ch.type) || FORUMS.has(ch.type)) {
         go.channel(ch.id)
         return
     }
-    // 포럼, 미디어 채널은 디스코드 화면에서 연다
-    if (openChannelNative(ch)) setState({ visible: false })
-    else toast('이 채널은 열 수 없어요')
+    toast('이 채널은 아직 열 수 없어요')
 }
 
 const ChannelCard = memo(function ChannelCard({ id, width, selected }: { id: string; width: number; selected: boolean }) {
@@ -77,6 +81,21 @@ const ChannelCard = memo(function ChannelCard({ id, width, selected }: { id: str
     )
 })
 
+/** 채널 아래 내가 들어간 스레드 (가로 한 줄 전체) */
+const ThreadCards = memo(function ThreadCards({ guildId, parentId, width, selected }: { guildId: string; parentId: string; width: number; selected?: string }) {
+    const ids = useStores(['ActiveJoinedThreadsStore', 'ChannelStore'], () => threadsOf(guildId, parentId, true), [guildId, parentId], sameList)
+    if (!ids.length) return null
+    return (
+        <>
+            {ids.map(id => (
+                <View key={id} style={{ width: width * 2 + 8, paddingLeft: 18 }}>
+                    <ChannelCard id={id} width={width * 2 + 8 - 18} selected={id === selected} />
+                </View>
+            ))}
+        </>
+    )
+})
+
 const SectionBlock = memo(function SectionBlock({ section, cardWidth, selected }: { section: Section; cardWidth: number; selected?: string }) {
     return (
         <View style={{ marginBottom: 10 }}>
@@ -87,7 +106,10 @@ const SectionBlock = memo(function SectionBlock({ section, cardWidth, selected }
             ) : null}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                 {section.channels.map(ch => (
-                    <ChannelCard key={ch.id} id={ch.id} width={cardWidth} selected={ch.id === selected} />
+                    <Fragment key={ch.id}>
+                        <ChannelCard id={ch.id} width={cardWidth} selected={ch.id === selected} />
+                        {VOICELIKE.has(ch.type) || FORUMS.has(ch.type) ? null : <ThreadCards guildId={section.guildId} parentId={ch.id} width={cardWidth} selected={selected} />}
+                    </Fragment>
                 ))}
             </View>
         </View>
@@ -130,8 +152,11 @@ export function GuildScreen({ width }: { width: number }) {
     const channelId = useUi(st => st.channelId)
     const narrow = isNarrow(width)
     if (!guildId) return null
-    const ch = channel(channelId)
+    const ch = channel(channelId) ?? knownThread(channelId)
     const open = !!(channelId && ch)
+    const parent = ch?.parent_id ? channel(ch.parent_id) : undefined
+    // 포럼 글이면 리스트 버튼은 그 포럼으로
+    const toForum = THREADS.has(ch?.type) && FORUMS.has(parent?.type) ? () => setState({ channelId: parent.id }) : undefined
     const panelWidth = narrow ? width : Math.min(440, Math.max(320, width * 0.34))
     const showPanel = !narrow || !open
     const showChat = !narrow || open
@@ -147,15 +172,16 @@ export function GuildScreen({ width }: { width: number }) {
                 {showPanel ? <ChannelPanel key={guildId} guildId={guildId} width={panelWidth} selected={channelId} /> : null}
                 {showChat ? (
                     <View style={{ flex: 1, paddingLeft: narrow ? 0 : 16, paddingRight: narrow ? 0 : 40 }}>
-                        {open ? (
+                        {open && FORUMS.has(ch.type) ? (
+                            <ForumView key={channelId} forumId={channelId!} compact={narrow} onList={narrow ? () => setState({ channelId: undefined }) : undefined} />
+                        ) : open ? (
                             <Chat
                                 key={channelId}
                                 channelId={channelId!}
                                 guildId={guildId}
-                                head={{ title: ch.name ?? '', subtitle: ch.topic ? String(ch.topic).replace(/\s+/g, ' ') : undefined, icon: channelIcon(ch.type) }}
+                                head={{ title: ch.name ?? '', subtitle: ch.topic ? String(ch.topic).replace(/\s+/g, ' ') : parent && THREADS.has(ch.type) ? `#${parent.name}` : undefined, icon: channelIcon(ch.type) }}
                                 compact={narrow}
-                                onList={narrow ? () => setState({ channelId: undefined }) : undefined}
-                                onOpenNative={() => openChannelNative(ch) && setState({ visible: false })}
+                                onList={toForum ?? (narrow ? () => setState({ channelId: undefined }) : undefined)}
                             />
                         ) : (
                             <Empty text="채널을 선택하세요." />

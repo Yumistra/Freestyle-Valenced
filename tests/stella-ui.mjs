@@ -120,7 +120,9 @@ const channels = {
     chat: { id: 'chat', type: 0, name: 'chat', guild_id: 'g1', parent_id: 'cat2', position: 0, topic: 'Read  me\nfirst' },
     logs: { id: 'logs', type: 0, name: 'logs', guild_id: 'g1', parent_id: 'cat2', position: 1 },
     talk: { id: 'talk', type: 2, name: 'talk', guild_id: 'g1', parent_id: 'cat2', position: 0 },
-    forum: { id: 'forum', type: 15, name: 'help', guild_id: 'g1', parent_id: 'cat2', position: 2 },
+    forum: { id: 'forum', type: 15, name: 'help', guild_id: 'g1', parent_id: 'cat2', position: 2, topic: 'Ask here', availableTags: [{ id: 't1', name: 'Bug' }, { id: 't2', name: 'Idea', emojiName: '💡' }] },
+    p1: { id: 'p1', type: 11, name: 'Active post', guild_id: 'g1', parent_id: 'forum', ownerId: '3', messageCount: 4, lastMessageId: '1300000000000000000', appliedTags: ['t1'], flags: 2 },
+    th1: { id: 'th1', type: 11, name: 'side talk', guild_id: 'g1', parent_id: 'chat' },
     777: { id: '777', type: 0, name: 'general' },
     top: { id: 'top', type: 0, name: 'welcome', guild_id: 'g1', position: 5 },
 }
@@ -216,6 +218,8 @@ const Stores = {
     GuildMemberStore: store({ getNick: (g, id) => (g === 'g1' && id === '3' ? 'NaznaNick' : null), getMember: (g, id) => (id === '3' ? { colorString: '#ff8800' } : null) }),
     GuildRoleStore: store({ getRole: () => null }),
     VoiceStateStore: store({ getVoiceStatesForChannel: id => (id === 'talk' ? { a: {}, b: {} } : {}) }),
+    ActiveThreadsStore: store({ getThreadsForParent: (g, p) => (p === 'forum' ? { p1: {} } : {}) }),
+    ActiveJoinedThreadsStore: store({ getActiveJoinedThreadsForParent: (g, p) => (p === 'chat' ? { th1: {} } : {}) }),
     MediaEngineStore: store({ isSelfMute: () => media.mute, isSelfDeaf: () => media.deaf }),
     ThemeStore: store({ theme: 'dark' }),
 }
@@ -234,6 +238,24 @@ const modules = [
     { openUserSettings: record('openUserSettings') },
     { editMessage: record('editMessage'), deleteMessage: record('deleteMessage') },
     { addReaction: record('addReaction'), removeReaction: record('removeReaction') },
+    {
+        HTTP: {
+            get: async o => {
+                calls.push(['GET', o.url, o.query])
+                if (o.url === '/channels/forum/threads/search')
+                    return {
+                        body: {
+                            threads: [{ id: 'p2', name: 'Old post', owner_id: '2', message_count: 2, applied_tags: ['t2'], last_message_id: '1200000000000000000', thread_metadata: { archived: true } }],
+                            first_messages: [{ id: 'p2', channel_id: 'p2', content: 'old **first**', author: { id: '2', username: 'seina' }, attachments: [{ url: 'https://x/p2.png', proxy_url: 'https://media/p2.png', content_type: 'image/png', width: 10, height: 10 }] }],
+                            has_more: false,
+                        },
+                    }
+                if (o.url === '/channels/p1/messages/p1') return { body: { id: 'p1', channel_id: 'p1', content: 'active first', author: { id: '3' } } }
+                throw new Error('404')
+            },
+            post: async o => (calls.push(['POST', o.url, o.body]), { body: { id: 'p3', name: o.body.name, owner_id: '1', message_count: 0, applied_tags: o.body.applied_tags } }),
+        },
+    },
     { toggleSelfMute: () => ((media.mute = !media.mute), Stores.MediaEngineStore.emit()), toggleSelfDeaf: () => ((media.deaf = !media.deaf), Stores.MediaEngineStore.emit()) },
 ]
 const toasts = []
@@ -416,7 +438,7 @@ text = await press('Valenced')
 check('server card → channel screen', state().route === 'guild' && state().guildId === 'g1')
 check('channels grouped by category', text.indexOf('INFO') < text.indexOf('rules') && text.indexOf('GENERAL') < text.indexOf('chat'))
 check('channels without a category come first', text.indexOf('welcome') < text.indexOf('INFO'))
-check('voice channels after text in a category', text.indexOf('help') < text.indexOf('talk'))
+check('voice channels after text in a category', text.indexOf('help') < text.lastIndexOf('talk'))
 check('voice shows people count', html().includes('talk') && text.includes('2'))
 check('nothing chosen yet', text.includes('채널을 선택하세요.'))
 check('place chip shows the server', html().includes('LocationIcon') && text.split('Valenced').length > 2)
@@ -520,9 +542,36 @@ await press('chat')
 // 음성, 포럼
 await press('talk')
 check('voice channel → join', calls.some(c => c[0] === 'selectVoiceChannel' && c[1] === 'talk') && toasts.some(t => t.includes('talk')))
-await press('help')
-check('forum → opens in Discord', calls.some(c => c[0] === 'transitionToGuild' && c[1] === 'g1' && c[2] === 'forum') && state().visible === false)
-await press('Open Stella UI')
+// 스레드: 채널 아래 내가 들어간 스레드
+check('joined thread under its channel', host.textContent.indexOf('side talk') > host.textContent.indexOf('chat'))
+text = await press('side talk')
+check('thread opens as a chat with its parent as subtitle', state().channelId === 'th1' && text.includes('#chat'))
+
+// 포럼
+text = await press('help')
+check('forum opens in Stella, not Discord', state().visible === true && state().channelId === 'forum' && text.includes('Ask here'))
+check('forum loads archived posts with the search API', calls.some(c => c[0] === 'GET' && c[1] === '/channels/forum/threads/search' && c[2].archived === true && c[2].offset === 0))
+text = host.textContent
+check('pinned active post first, then archived', text.indexOf('Active post') < text.indexOf('Old post') && text.includes('보관됨'))
+check('post cards: preview without markdown, image, tags, counts', text.includes('old first') && html().includes('https://media/p2.png') && text.includes('Bug') && text.includes('Idea') && text.includes('4'))
+check('active post first message fetched once', calls.filter(c => c[0] === 'GET' && c[1] === '/channels/p1/messages/p1').length === 1 && text.includes('active first'))
+await press('tag Idea')
+check('tag filter', !host.textContent.includes('Active post') && host.textContent.includes('Old post'))
+await press('tag 전체')
+text = await press('Old post')
+check('archived post opens as a chat', state().channelId === 'p2' && text.includes('Old post') && text.includes('#help') && calls.some(c => c[0] === 'fetchMessages' && c[1]?.channelId === 'p2'))
+await act(async () => [...backHandlers][0]())
+check('back from a post → the forum', state().channelId === 'forum')
+await press('글 쓰기')
+await act(async () => inputs.get('제목')[0].get().onChangeText('New idea'))
+await act(async () => inputs.get('내용')[0].get().onChangeText('details'))
+await render()
+await press('tag Idea', 1)
+await press('올리기')
+await act(async () => tick())
+check('new post: POST threads with name, message and tags', calls.some(c => c[0] === 'POST' && c[1] === '/channels/forum/threads' && c[2].name === 'New idea' && c[2].message.content === 'details' && c[2].applied_tags.includes('t2')))
+check('new post opens', state().channelId === 'p3')
+await act(async () => [...backHandlers][0]())
 
 // 뒤로 가기 (넓은 화면): 서버 → 출발 → 로비
 check('back handler registered while visible', backHandlers.size === 1)
