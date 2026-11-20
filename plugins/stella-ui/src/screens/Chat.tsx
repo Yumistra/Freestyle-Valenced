@@ -1,9 +1,10 @@
+import { lookupModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Image, Keyboard, Linking, Pressable, TextInput, View } from 'react-native'
 import { ack, avatarUrl, channel as channelOf, rememberThread, deleteMessage, displayName, editMessage, loadMessages, me, messageArray, messagesOf, roleColor, S, sendMessage, toast, toggleReaction, useStores } from '../data'
 import { previewText } from '../markdown'
-import { Avatar, Icon, PillButton, T } from '../parts'
+import { Avatar, Boundary, Icon, PillButton, T } from '../parts'
 import { go, useUi } from '../state'
 import { C, R, shadow } from '../theme'
 import { Components, EmbedCard, hasEmbedContent, Reactions, RichText } from './Rich'
@@ -75,16 +76,46 @@ function Files({ m, mine }: { m: any; mine: boolean }) {
                     </Pressable>
                 )
             })}
-            {stickers.map((s: any) =>
-                s.format_type === 3 ? (
-                    <T key={s.id} size={13} color={mine ? C.white : C.muted}>
-                        {`[스티커] ${s.name ?? ''}`}
-                    </T>
-                ) : (
-                    <Image key={s.id} source={{ uri: `https://media.discordapp.net/stickers/${s.id}.${s.format_type === 4 ? 'gif' : 'png'}?size=160` }} style={{ width: 120, height: 120 }} />
-                ),
-            )}
+            {stickers.map((s: any) => (
+                <StickerView key={s.id} s={s} mine={mine} />
+            ))}
         </View>
+    )
+}
+
+// ── 스티커: 디스코드의 스티커 그림(움직이는 것, 로티 포함)을 그대로 쓴다 ──
+const STICKER_PATH = 'modules/stickers/native/Sticker.tsx'
+let StickerComp: any
+function stickerComponent(): any {
+    if (StickerComp === undefined) {
+        try {
+            const mod: any = lookupModuleWithImportedPath(STICKER_PATH)
+            StickerComp = typeof mod?.default === 'function' || mod?.default?.$$typeof ? mod.default : null
+        } catch {
+            StickerComp = null
+        }
+    }
+    return StickerComp
+}
+
+function StickerView({ s, mine }: { s: any; mine: boolean }) {
+    const format = s.format_type ?? s.formatType
+    const fallback =
+        format === 3 ? (
+            <T size={13} color={mine ? C.white : C.muted}>
+                {`[스티커] ${s.name ?? ''}`}
+            </T>
+        ) : (
+            <Image source={{ uri: `https://media.discordapp.net/stickers/${s.id}.${format === 4 ? 'gif' : 'png'}?size=160` }} style={{ width: 140, height: 140 }} />
+        )
+    const D = stickerComponent()
+    if (!D) return fallback
+    return (
+        <Boundary fallback={fallback}>
+            <View style={{ width: 140, height: 140 }}>
+                <D sticker={{ ...s, format_type: format, type: s.type ?? 1 }} size={140} animated />
+            </View>
+        </Boundary>
     )
 }
 

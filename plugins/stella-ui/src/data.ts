@@ -103,7 +103,8 @@ export function guildBannerUrl(g: any, size = 512): string | undefined {
 }
 
 export function emojiUrl(id: string, animated: boolean, size = 48) {
-    return `${CDN}/emojis/${id}.${animated ? 'gif' : 'webp'}?size=${size}`
+    // 움직이는 이모지도 WebP 로 (GIF 는 안드로이드에서 프레임이 겹쳐 남는다)
+    return `${CDN}/emojis/${id}.webp?size=${size}${animated ? '&animated=true' : ''}`
 }
 
 /** 이름 (서버 별명, 표시 이름, 아이디 순) */

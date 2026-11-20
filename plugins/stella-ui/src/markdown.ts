@@ -1,4 +1,4 @@
-import { channel, displayName, emojiUrl, S, user } from './data'
+import { channel, displayName, S, user } from './data'
 
 /**
  * 디스코드 글 꾸밈(마크다운)을 조각으로 나눈다. 그리는 건 Rich.tsx.
@@ -11,7 +11,7 @@ export type Inline =
     | { t: 'b' | 'i' | 'u' | 's' | 'spoiler'; c: Inline[] }
     | { t: 'code'; v: string }
     | { t: 'mention'; v: string }
-    | { t: 'emoji'; id: string; name: string; animated: boolean; url: string }
+    | { t: 'emoji'; id: string; name: string; animated: boolean }
     | { t: 'link'; url: string; c: Inline[] }
     | { t: 'time'; v: string }
 
@@ -58,7 +58,7 @@ interface Rule {
 const RULES: Rule[] = [
     { re: /``([^`]+?)``|`([^`\n]+)`/, make: m => ({ t: 'code', v: m[1] ?? m[2] }) },
     { re: /<(@!?|@&|#)(\d+)>/, make: (m, g) => ({ t: 'mention', v: mention(m[1], m[2], g) }) },
-    { re: /<(a?):(\w+):(\d+)>/, make: m => ({ t: 'emoji', id: m[3], name: m[2], animated: m[1] === 'a', url: emojiUrl(m[3], m[1] === 'a') }) },
+    { re: /<(a?):(\w+):(\d+)>/, make: m => ({ t: 'emoji', id: m[3], name: m[2], animated: m[1] === 'a' }) },
     { re: /<t:(-?\d+)(?::([tTdDfFR]))?>/, make: m => ({ t: 'time', v: formatTime(Number(m[1]), m[2]) }) },
     { re: /\[([^\]\n]+)\]\(<?(https?:\/\/[^\s)>]+)>?\)/, make: (m, g, d) => ({ t: 'link', url: m[2], c: inline(m[1], g, d + 1) }) },
     { re: /<?(https?:\/\/[^\s<>]+[^\s<>.,:;"')\]])>?/, make: m => ({ t: 'link', url: m[1], c: [{ t: 'text', v: m[1] }] }) },

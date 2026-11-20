@@ -60,7 +60,7 @@ const Text = ({ children, onPress, ...p }) => {
     useRegister(presses, onPress ? `text:${typeof children === 'string' ? children : ''}` : '', onPress)
     return h('span', clean(p), children)
 }
-const Image = ({ source }) => h('img', { 'data-src': source?.uri ?? '' })
+const Image = ({ source, style }) => h('img', { 'data-src': source?.uri ?? '', 'data-w': flatStyle(style).width ?? '' })
 const Pressable = ({ children, onPress, onLongPress, accessibilityLabel, disabled, style }) => {
     useRegister(presses, onLongPress ? `long:${accessibilityLabel}` : '', onLongPress)
     if (typeof style === 'function') style({ pressed: false })
@@ -178,6 +178,7 @@ const messages = {
             }),
             msg('l3', '4', '', { channel_id: 'logs', embeds: [{ type: 'rich' }] }),
             msg('l4', '1', 'my **own** line', { channel_id: 'logs' }),
+            msg('l5', '3', 'look <a:dance:77> here', { channel_id: 'logs', stickerItems: [{ id: 'lot', name: 'Smile', format_type: 3 }, { id: 'bad', name: 'Broken', format_type: 1 }] }),
         ],
     },
     dm1: {
@@ -318,7 +319,7 @@ globalThis.valenced = {
                 finders: {
                     getModuleWithImportedPath: (path, cb) => (cb(path.includes('AppToastContainer') && toastLoaded ? toastHost : undefined), () => {}),
                     waitForModuleWithImportedPath: (path, cb) => (waiting.push([path, cb]), () => {}),
-                    lookupModuleWithImportedPath: path => (path === 'modules/image/native/ImagePicker.tsx' ? { default: { launchImageLibraryAsync: async () => (picked ? { assets: [{ uri: picked }] } : { didCancel: true }) } } : undefined),
+                    lookupModuleWithImportedPath: path => path === 'modules/stickers/native/Sticker.tsx' ? { default: ({ sticker, size }) => (sticker.id === 'bad' ? (() => { throw new Error('x') })() : h('i', { 'data-sticker': sticker.id, 'data-format': sticker.format_type, 'data-size': size })) } : (path === 'modules/image/native/ImagePicker.tsx' ? { default: { launchImageLibraryAsync: async () => (picked ? { assets: [{ uri: picked }] } : { didCancel: true }) } } : undefined),
                 },
             },
         },
@@ -515,6 +516,10 @@ await press('reaction cat')
 check('other reaction → add with the custom emoji', calls.some(c => c[0] === 'addReaction' && c[3].id === '42' && c[3].name === 'cat'))
 await press('Open site')
 check('link button opens', opened.includes('https://example.com/site'))
+
+check('animated emoji as animated WebP, sized to the text', /data-src="https:\/\/cdn.discordapp.com\/emojis\/77.webp\?size=48&amp;animated=true" data-w="20"/.test(html()) || /emojis\/77.webp\?size=48&animated=true" data-w="20"/.test(html()), html().match(/emojis\/77[^>]*/)?.[0])
+check('stickers drawn with Discord\'s sticker (Lottie too)', html().includes('data-sticker="lot"') && html().includes('data-format="3"') && html().includes('data-size="140"'))
+check('a sticker that fails falls back to a picture', html().includes('stickers/bad.png?size=160'))
 
 // 꾹 누르기 메뉴
 await press('long:message l1')

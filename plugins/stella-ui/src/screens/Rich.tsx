@@ -33,7 +33,7 @@ function Spoiler({ children, tone }: { children: any; tone: Tone }) {
     )
 }
 
-function Nodes({ nodes, tone, big }: { nodes: Inline[]; tone: Tone; big?: boolean }): any {
+function Nodes({ nodes, tone, big, size = 15 }: { nodes: Inline[]; tone: Tone; big?: boolean; size?: number }): any {
     return nodes.map((n, i) => {
         switch (n.t) {
             case 'text':
@@ -41,31 +41,31 @@ function Nodes({ nodes, tone, big }: { nodes: Inline[]; tone: Tone; big?: boolea
             case 'b':
                 return (
                     <Text key={i} style={{ fontWeight: '800' }}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Text>
                 )
             case 'i':
                 return (
                     <Text key={i} style={{ fontStyle: 'italic' }}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Text>
                 )
             case 'u':
                 return (
                     <Text key={i} style={{ textDecorationLine: 'underline' }}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Text>
                 )
             case 's':
                 return (
                     <Text key={i} style={{ textDecorationLine: 'line-through' }}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Text>
                 )
             case 'spoiler':
                 return (
                     <Spoiler key={i} tone={tone}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Spoiler>
                 )
             case 'code':
@@ -81,12 +81,15 @@ function Nodes({ nodes, tone, big }: { nodes: Inline[]; tone: Tone; big?: boolea
                         {n.v}
                     </Text>
                 )
-            case 'emoji':
-                return <Image key={i} source={{ uri: big ? emojiUrl(n.id, n.animated, 96) : n.url }} style={{ width: big ? 44 : 20, height: big ? 44 : 20 }} />
+            case 'emoji': {
+                // 글자 높이에 맞춘다 (이모지만 있으면 크게)
+                const px = big ? 48 : Math.round(size * 1.35)
+                return <Image key={i} source={{ uri: emojiUrl(n.id, n.animated, big ? 96 : 48) }} style={{ width: px, height: px }} />
+            }
             case 'link':
                 return (
                     <Text key={i} style={{ color: linkColor(tone), textDecorationLine: 'underline' }} onPress={() => open(n.url)}>
-                        <Nodes nodes={n.c} tone={tone} />
+                        <Nodes nodes={n.c} tone={tone} size={size} />
                     </Text>
                 )
         }
@@ -100,21 +103,21 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
         case 'p':
             return (
                 <P style={base}>
-                    <Nodes nodes={b.c} tone={tone} big={big} />
+                    <Nodes nodes={b.c} tone={tone} big={big} size={size} />
                 </P>
             )
         case 'h': {
             const s = b.level === 1 ? size + 7 : b.level === 2 ? size + 4 : size + 2
             return (
                 <P style={{ ...base, fontSize: s, lineHeight: Math.round(s * 1.3), fontWeight: '800', marginTop: 2 }}>
-                    <Nodes nodes={b.c} tone={tone} />
+                    <Nodes nodes={b.c} tone={tone} size={s} />
                 </P>
             )
         }
         case 'sub':
             return (
                 <P style={{ ...base, fontSize: size - 3, color: soft(tone), lineHeight: Math.round((size - 3) * 1.4) }}>
-                    <Nodes nodes={b.c} tone={tone} />
+                    <Nodes nodes={b.c} tone={tone} size={size - 3} />
                 </P>
             )
         case 'li':
@@ -122,7 +125,7 @@ function BlockView({ b, tone, size, big }: { b: Block; tone: Tone; size: number;
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                     <P style={base}>•</P>
                     <P style={{ ...base, flex: 1 }}>
-                        <Nodes nodes={b.c} tone={tone} />
+                        <Nodes nodes={b.c} tone={tone} size={size} />
                     </P>
                 </View>
             )

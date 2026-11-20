@@ -1,5 +1,5 @@
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { memo, useEffect, useRef, useState } from 'react'
+import { Component, memo, useEffect, useRef, useState } from 'react'
 import { Animated, Image, Pressable, Text, View } from 'react-native'
 import { useUi } from './state'
 import { C, R, shadow } from './theme'
@@ -7,6 +7,17 @@ import { C, R, shadow } from './theme'
 /**
  * 여러 화면이 같이 쓰는 조각들.
  */
+
+// ── 오류가 나면 대신 그릴 것 ───────────────────────────────────────────
+export class Boundary extends Component<{ fallback: any; children?: any }, { failed: boolean }> {
+    state = { failed: false }
+    static getDerivedStateFromError() {
+        return { failed: true }
+    }
+    render() {
+        return this.state.failed ? this.props.fallback : this.props.children
+    }
+}
 
 // ── 아이콘 ──────────────────────────────────────────────────────────────
 const icons = new Map<string, any>()
