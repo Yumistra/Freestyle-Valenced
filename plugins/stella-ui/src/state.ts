@@ -10,7 +10,7 @@ export const isNarrow = (width = Dimensions.get('window')?.width ?? 1000) => wid
 /**
  * 화면 상태 (어느 화면을 보고 있는지). 플러그인 안에서만 쓰는 작은 저장소.
  */
-export type Route = 'lobby' | 'heart' | 'depart' | 'guild' | 'inbox'
+export type Route = 'lobby' | 'heart' | 'depart' | 'guild' | 'inbox' | 'shop' | 'quests' | 'settings'
 export type HeartTab = 'contacts' | 'requests' | 'friends'
 
 export interface UiState {
@@ -76,6 +76,9 @@ export const go = {
     heart: (dmId?: string) => setState({ route: 'heart', dmId, menu: false }),
     depart: () => setState({ route: 'depart', menu: false }),
     inbox: () => setState({ route: 'inbox', menu: false }),
+    shop: () => setState({ route: 'shop', menu: false }),
+    quests: () => setState({ route: 'quests', menu: false }),
+    settings: () => setState({ route: 'settings', menu: false }),
     profile: (userId: string, guildId?: string) => setState({ profile: { userId, guildId } }),
     /** 어떤 채널이든 그 자리로 (DM 은 하트챗, 서버는 그 서버) */
     open: (ch: any) => (ch?.guild_id ? setState({ route: 'guild', guildId: ch.guild_id, channelId: ch.id, menu: false }) : ch?.id ? setState({ route: 'heart', dmId: ch.id, heartTab: 'contacts', menu: false }) : undefined),
@@ -106,6 +109,9 @@ export function back(): boolean {
             return true
         case 'depart':
         case 'inbox':
+        case 'shop':
+        case 'quests':
+        case 'settings':
             go.lobby()
             return true
         default:

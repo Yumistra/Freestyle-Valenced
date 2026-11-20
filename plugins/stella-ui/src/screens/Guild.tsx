@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect } from 'react'
 import { FlatList, Image, Pressable, View } from 'react-native'
-import { channel, FORUMS, syncChannel, guild, guildIconUrl, guildSections, joinVoice, sameList, THREADS, threadsOf, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
+import { channel, FORUMS, syncChannel, guild, guildIconUrl, guildSections, sameList, THREADS, threadsOf, toast, unread, useStores, voiceCount, VOICELIKE, type Section } from '../data'
 import { knownThread } from '../forum'
 import { Backdrop, Badge, Empty, Icon, NavButtons, PlaceChip, T } from '../parts'
 import { useSettings } from '../settings'
@@ -8,6 +8,7 @@ import { back, go, isNarrow, setState, useUi } from '../state'
 import { C, cardColor } from '../theme'
 import { Chat } from './Chat'
 import { ForumView } from './Forum'
+import { VoicePanel } from './Voice'
 
 /**
  * 서버 채널. 왼쪽 흐린 칸에 채널 작은 카드(카테고리별), 오른쪽에 말풍선 채팅.
@@ -35,15 +36,11 @@ export function channelIcon(type: number | undefined): string[] {
 }
 
 /** 말풍선 채팅으로 여는 채널 (글 채널, 공지, 스레드, 포럼 글) */
-export const chatsHere = (type: number | undefined) => type === 0 || type === 5 || THREADS.has(type as number)
+export const chatsHere = (type: number | undefined) => type === 0 || type === 5 || THREADS.has(type as number) || VOICELIKE.has(type as number)
 
 /** 채널 카드를 눌렀을 때 */
 export function pressChannel(ch: any) {
     if (!ch) return
-    if (VOICELIKE.has(ch.type)) {
-        toast(joinVoice(ch.id) ? `${ch.name} 에 들어가는 중` : '음성 채널에 들어가지 못했어요')
-        return
-    }
     if (chatsHere(ch.type) || FORUMS.has(ch.type)) {
         go.channel(ch.id)
         return
@@ -184,6 +181,7 @@ export function GuildScreen({ width }: { width: number }) {
                                 head={{ title: ch.name ?? '', subtitle: ch.topic ? String(ch.topic).replace(/\s+/g, ' ') : parent && THREADS.has(ch.type) ? `#${parent.name}` : undefined, icon: channelIcon(ch.type) }}
                                 compact={narrow}
                                 onList={toForum ?? (narrow ? () => setState({ channelId: undefined }) : undefined)}
+                                top={VOICELIKE.has(ch.type) ? <VoicePanel channelId={channelId!} guildId={guildId} /> : undefined}
                             />
                         ) : (
                             <Empty text="채널을 선택하세요." />

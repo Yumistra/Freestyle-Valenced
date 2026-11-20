@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Image, Pressable, View } from 'react-native'
-import { avatarUrl, count, displayName, dmIds, guildIds, guildUnread, me, onlineFriends, openNative, pickImage, relationships, toast, toggleVoice, unread, useStores, voiceSelf, sameList } from '../data'
+import { avatarUrl, count, displayName, dmIds, guildIds, guildUnread, me, onlineFriends, pickImage, relationships, toast, toggleVoice, unread, useStores, voiceSelf, sameList } from '../data'
+import { leaveTo } from './Frame'
 import { Avatar, Backdrop, Dot, Icon, RoundButton, T } from '../parts'
 import { save, useSettings } from '../settings'
 import { go, setState, useUi } from '../state'
@@ -92,14 +93,7 @@ function Profile() {
 }
 
 // ── 위 오른쪽: 아이콘 줄과 메뉴 ─────────────────────────────────────────
-/** 디스코드 원래 화면으로 */
-export function leaveTo(where: Parameters<typeof openNative>[0]) {
-    setState({ visible: false, menu: false })
-    // 화면이 내려간 다음 연다
-    setTimeout(() => {
-        if (!openNative(where)) toast('그 화면을 열지 못했어요')
-    }, 60)
-}
+export { leaveTo } from './Frame'
 
 function TopIcons() {
     const requests = useStores(['RelationshipStore'], () => relationships().incoming.length, [])
@@ -115,7 +109,7 @@ function TopIcons() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', transform: [{ skewX: '10deg' }] }}>
                     {item(['InboxIcon', 'EnvelopeIcon', 'BellIcon'], '알림', go.inbox)}
                     {item(['FriendsIcon', 'UserPlusIcon'], '친구', () => setState({ route: 'heart', heartTab: requests ? 'requests' : 'friends', dmId: undefined, menu: false }), requests > 0)}
-                    {item(['ShopIcon', 'ShopSparkleIcon', 'GiftIcon'], '상점', () => leaveTo('shop'))}
+                    {item(['ShopIcon', 'ShopSparkleIcon', 'GiftIcon'], '상점', go.shop)}
                 </View>
             </View>
             <Pressable onPress={() => setState({ menu: true })} accessibilityRole="button" accessibilityLabel="Menu" hitSlop={6}>
@@ -189,8 +183,8 @@ function Menu() {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', padding: 16 }}>
                     <MenuItem names={['SettingsIcon']} label="설정" onPress={() => leaveTo('settings')} />
                     <MenuItem names={['InboxIcon', 'BellIcon']} label="알림" onPress={go.inbox} />
-                    <MenuItem names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="퀘스트" onPress={() => leaveTo('quests')} />
-                    <MenuItem names={['ShopIcon', 'GiftIcon']} label="상점" onPress={() => leaveTo('shop')} />
+                    <MenuItem names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="퀘스트" onPress={go.quests} />
+                    <MenuItem names={['ShopIcon', 'GiftIcon']} label="상점" onPress={go.shop} />
                     <MenuItem names={['ImageIcon', 'ImagePlusIcon']} label="캐릭터 그림" onPress={chooseCharacter} />
                     <MenuItem names={['ScreenArrowIcon', 'DiscordIcon']} label="디스코드 화면" onPress={() => setState({ visible: false, menu: false })} />
                 </View>
@@ -245,8 +239,8 @@ export function LobbyScreen({ width, height }: { width: number; height: number }
             )}
             <View style={{ position: 'absolute', right: 24, bottom: 24, alignItems: 'flex-end', gap: 16 }}>
                 <View style={{ flexDirection: 'row', gap: 16 }}>
-                    <RoundButton names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="임무" onPress={() => leaveTo('quests')} />
-                    <RoundButton names={['ShopIcon', 'GiftIcon']} label="구매" onPress={() => leaveTo('shop')} />
+                    <RoundButton names={['QuestsIcon', 'TrophyIcon', 'GameControllerIcon']} label="임무" onPress={go.quests} />
+                    <RoundButton names={['ShopIcon', 'GiftIcon']} label="구매" onPress={go.shop} />
                     <RoundButton names={['ChatIcon', 'ChatSmileIcon', 'HeartIcon']} label="하트챗" onPress={() => go.heart()} dot={unreadDms > 0} />
                 </View>
                 <Pressable onPress={go.depart} accessibilityRole="button" accessibilityLabel="출발" style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.96 : 1 }] }]}>

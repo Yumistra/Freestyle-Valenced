@@ -270,6 +270,12 @@ const modules = [
                     }
                 if (o.url === '/channels/logs/messages/pins') return { body: { items: [{ pinned_at: '2026-11-20T00:00:00Z', message: { id: 'pin1', channel_id: 'logs', content: 'pinned **rule**', author: { id: '3', username: 'nazna' }, attachments: [] } }], has_more: false } }
                 if (o.url === '/guilds/g1/messages/search') return { body: { total_results: 1, messages: [[{ id: 'f1', channel_id: 'news', content: `found ${o.query.content}`, author: { id: '2', username: 'seina' }, attachments: [] }]] } }
+                if (o.url === '/quests/@me') return { body: { quests: [
+                    { id: 'q1', config: { expires_at: '2099-01-01T00:00:00Z', messages: { quest_name: 'Play Game Quest', game_title: 'Game', game_publisher: 'Pub' }, rewards_config: { rewards: [{ messages: { name_with_article: 'an Orb' } }] }, task_config_v2: { tasks: { WATCH_VIDEO: { target: 900 } } }, assets: { hero: 'hero.png' } }, user_status: null },
+                    { id: 'q2', config: { expires_at: '2099-01-01T00:00:00Z', messages: { quest_name: 'Second Quest' }, task_config_v2: { tasks: { PLAY_ON_DESKTOP: { target: 900 } } } }, user_status: { enrolled_at: '2026-11-01', progress: { PLAY_ON_DESKTOP: { value: 300 } } } },
+                ] } }
+                if (o.url === '/collectibles-categories/v2') return { body: [{ sku_id: 'c1', name: 'Fantasy', summary: 'Magic', products: [{ sku_id: 'p1', name: 'Dragon Wings', summary: 'Fly', type: 0, prices: { 0: { country_prices: { prices: [{ amount: 499, currency: 'usd', exponent: 2 }] } } }, items: [{ type: 0, id: 'd1', sku_id: 'p1', asset: 'a_dragon' }] }] }] }
+                if (o.url === '/users/@me/collectibles-purchases') return { body: [{ sku_id: 'p9', name: 'Cat Ears', type: 0, items: [{ type: 0, id: 'd2', sku_id: 'p9', asset: 'cat' }] }] }
                 if (o.url === '/gifs/trending-gifs' || o.url === '/gifs/search') return { body: [{ url: `https://tenor.com/${o.query.q ?? 'top'}`, src: `https://media.tenor.com/${o.query.q ?? 'top'}.webp`, width: 200, height: 100 }] }
                 if (o.url === '/channels/p1/messages/p1') return { body: { id: 'p1', channel_id: 'p1', content: 'active first', author: { id: '3' } } }
                 throw new Error('404')
@@ -456,13 +462,33 @@ await act(async () => [...backHandlers][0]())
 await act(async () => [...backHandlers][0]())
 check('back to the lobby', state().route === 'lobby')
 await press('임무')
+await act(async () => tick())
+check('quests drawn in Stella', state().route === 'quests' && host.textContent.includes('Play Game Quest') && host.textContent.includes('보상: an Orb') && host.textContent.includes('받기'), host.textContent.slice(0, 400))
+await press('받기 q1')
+await act(async () => tick())
+check('accept a quest', calls.some(c => c[0] === 'POST' && c[1] === '/quests/q1/enroll'))
+await press('진행하기 q2')
 await new Promise(r => setTimeout(r, 80))
-check('quests → openQuestHome', calls.some(c => c[0] === 'openQuestHome'))
+check('progressing a quest opens Discord quest home', calls.some(c => c[0] === 'openQuestHome') && state().visible === false)
 await press('Open Stella UI')
+await act(async () => [...backHandlers][0]())
 await press('구매')
+await act(async () => tick())
+check('shop drawn in Stella with categories and decorations', state().route === 'shop' && host.textContent.includes('Fantasy') && host.textContent.includes('Dragon Wings') && html().includes('avatar-decoration-presets/a_dragon.png'), host.textContent.slice(0, 300))
+await press('product Dragon Wings')
+check('product detail with price', host.textContent.includes('$4.99') && host.textContent.includes('사기 (디스코드 결제)'))
+await press('사기')
 await new Promise(r => setTimeout(r, 80))
-check('shop → openCollectiblesShopMobile with a source', calls.some(c => c[0] === 'openCollectiblesShopMobile' && c[1]?.analyticsSource))
+check('buying opens the Discord shop (payment)', calls.some(c => c[0] === 'openCollectiblesShopMobile' && c[1]?.analyticsSource))
 await press('Open Stella UI')
+await act(async () => tick())
+await press('가진 것 1')
+await press('product Cat Ears')
+await press('쓰기')
+await act(async () => tick())
+check('wear an owned decoration', calls.some(c => c[0] === 'PATCH' && c[1] === '/users/@me' && c[2].avatar_decoration_id === 'd2'))
+await press('Close product')
+await act(async () => [...backHandlers][0]())
 
 // 출발
 text = await press('출발')
@@ -711,7 +737,9 @@ await press('chat')
 
 // 음성, 포럼
 await press('talk')
-check('voice channel → join', calls.some(c => c[0] === 'selectVoiceChannel' && c[1] === 'talk') && toasts.some(t => t.includes('talk')))
+check('voice channel opens its Stella view with people and chat', state().channelId === 'talk' && host.textContent.includes('참가하기'))
+await press('음성 참가')
+check('join from the voice view', calls.some(c => c[0] === 'selectVoiceChannel' && c[1] === 'talk'))
 // 스레드: 채널 아래 내가 들어간 스레드
 check('joined thread under its channel', host.textContent.indexOf('side talk') > host.textContent.indexOf('chat'))
 text = await press('side talk')

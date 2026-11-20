@@ -13,6 +13,8 @@ import { GuildScreen } from './screens/Guild'
 import { HeartScreen } from './screens/Heart'
 import { InboxScreen } from './screens/Inbox'
 import { ProfileCard } from './screens/Profile'
+import { QuestsScreen } from './screens/Quests'
+import { ShopScreen } from './screens/Shop'
 import { forgetSticker } from './screens/Sticker'
 import { forgetDrafts } from './compose'
 import { ImageViewer } from './viewer'
@@ -85,6 +87,10 @@ function Screen({ width, height }: { width: number; height: number }) {
             return <GuildScreen width={width} />
         case 'inbox':
             return <InboxScreen width={width} />
+        case 'shop':
+            return <ShopScreen width={width} />
+        case 'quests':
+            return <QuestsScreen width={width} />
         default:
             return <LobbyScreen width={width} height={height} />
     }
