@@ -7,6 +7,7 @@ import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { useEffect, useRef, useState } from 'react'
 import { NativeModules } from 'react-native'
+import { tr } from './i18n'
 
 /**
  * 디스코드에서 읽고 쓰는 것들. 화면은 이 파일의 함수만 쓴다.
@@ -412,7 +413,7 @@ export function toggleVoice(kind: 'mute' | 'deaf') {
 let toastSeq = 0
 export function toast(text: string) {
     try {
-        ;(ToastActionCreators as any).open(`stella-ui-${Date.now()}-${toastSeq++}`, { text })
+        ;(ToastActionCreators as any).open(`stella-ui-${Date.now()}-${toastSeq++}`, { text: tr(text) })
     } catch {}
 }
 

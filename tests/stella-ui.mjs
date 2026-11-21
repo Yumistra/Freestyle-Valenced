@@ -207,6 +207,7 @@ let relations = { 5: 3, 2: 1, 3: 1, 4: 1 }
 let presence = { 2: 'offline', 3: 'online', 4: 'idle' }
 const media = { mute: false, deaf: false }
 const typingNow = {}
+const lang = { value: 'ko' }
 const statusSet = []
 const customSet = []
 const togglesSet = { TypingIndicatorSetting: true, InAppNotificationsSetting: undefined }
@@ -237,6 +238,7 @@ const Stores = {
     UserProfileStore: store({ getUserProfile: id => (id === '3' ? { bio: 'I like **cats**', pronouns: 'she/her', banner: 'bn', accentColor: 0x123456 } : null), getGuildMemberProfile: () => null, getMutualGuilds: () => [{}, {}] }),
     MediaEngineStore: store({ isSelfMute: () => media.mute, isSelfDeaf: () => media.deaf }),
     ThemeStore: store({ theme: 'dark' }),
+    LocaleStore: store({ getLocale: () => lang.value }),
     UserGuildSettingsStore: store({ getMessageNotifications: () => 1, isMuted: () => false, isSuppressEveryoneEnabled: () => false, isSuppressRolesEnabled: () => false, getChannelMessageNotifications: () => 3, isChannelMuted: () => false }),
     GuildMemberCountStore: store({ getMemberCount: () => 42 }),
     TypingStore: store({ getTypingUsers: id => typingNow[id] ?? {} }),
@@ -948,6 +950,19 @@ const rowsBuilt = exported.buildRows(messages.chat._array, '4')
 check('rows newest first, grouping', rowsBuilt[0].m.id === 'c9' && rowsBuilt.find(r => r.m.id === 'c3').head === false && rowsBuilt.find(r => r.m.id === 'c2').head === true)
 check('rows mark my messages', rowsBuilt.find(r => r.m.id === 'c9').mine === true)
 check('empty guild has no sections', exported.guildSections('g2').length === 0)
+
+// 영어 (디스코드 언어가 한국어가 아니면)
+lang.value = 'en-US'
+await new Promise(r => setTimeout(r, 2100))
+await act(async () => exported.go?.lobby?.())
+text = await render()
+check('English follows Discord language: lobby', text.includes('Depart') && text.includes('Heart Chat') && text.includes('Quests') && !text.includes('출발'), text.slice(0, 300))
+check('English: numbers and names in patterns', exported.tr('DeStinY 님이 입력 중…') === 'DeStinY is typing…' && exported.tr('3분 전') === '3 minutes ago' && exported.tr('안 읽은 대화가 1개 있어요.') === 'You have 1 unread conversation.')
+check('English: unknown text and user content stay as they are', exported.tr('hello') === 'hello' && exported.tr('처음 보는 한국어') === '처음 보는 한국어')
+check('English dates', exported.formatTime(0, 'd') === `${new Date(0).getMonth() + 1}/${new Date(0).getDate()}/${new Date(0).getFullYear()}`)
+lang.value = 'ko'
+await new Promise(r => setTimeout(r, 2100))
+check('back to Korean', exported.tr('출발') === '출발')
 
 // 끄기
 await act(async () => root.unmount())

@@ -7,6 +7,7 @@ import { Avatar, Icon, PillButton, T } from '../parts'
 import { go } from '../state'
 import { C, R, shadow } from '../theme'
 import { mediaUrl } from './Rich'
+import { tr } from '../i18n'
 
 /**
  * 포럼: 글을 카드로. 누르면 그 글(스레드)을 말풍선 채팅으로 연다. 위에서 새 글을 쓸 수 있다.
@@ -132,8 +133,8 @@ function NewPost({ forumId, tags, onClose }: { forumId: string; tags: Tag[]; onC
                     </Pressable>
                 </View>
                 <View style={{ padding: 16, gap: 10 }}>
-                    <TextInput value={title} onChangeText={setTitle} placeholder="제목" placeholderTextColor={C.muted} maxLength={100} style={field} />
-                    <TextInput value={body} onChangeText={setBody} placeholder="내용" placeholderTextColor={C.muted} multiline style={{ ...field, minHeight: 110, maxHeight: 220, textAlignVertical: 'top' }} />
+                    <TextInput value={title} onChangeText={setTitle} placeholder={tr('제목')} placeholderTextColor={C.muted} maxLength={100} style={field} />
+                    <TextInput value={body} onChangeText={setBody} placeholder={tr('내용')} placeholderTextColor={C.muted} multiline style={{ ...field, minHeight: 110, maxHeight: 220, textAlignVertical: 'top' }} />
                     {tags.length ? (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                             {tags.map(t => (

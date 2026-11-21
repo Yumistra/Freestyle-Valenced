@@ -5,7 +5,7 @@
 	"description": "Use Discord through a game style lobby: chats in a phone, servers as cards, and your own character art.",
 	"author": "Yumistra",
 	"icon": "StarIcon",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

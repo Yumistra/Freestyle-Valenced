@@ -24,6 +24,7 @@ import {
     setSuppress,
 } from '../tools'
 import { RichText } from './Rich'
+import { tr } from '../i18n'
 
 /**
  * 채팅 머리줄 "더보기"에서 여는 도구들. 채팅 위에 흰 판으로 뜬다.
@@ -121,7 +122,7 @@ export function SearchBox({ value, onChange, placeholder, onSubmit }: { value: s
     return (
         <View style={{ margin: 12, marginBottom: 6, height: 42, borderRadius: R.pill, backgroundColor: C.white, borderWidth: 1, borderColor: C.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 8 }}>
             <Icon names={['MagnifyingGlassIcon', 'SearchIcon']} color={C.muted} size={18} />
-            <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={C.muted} returnKeyType="search" onSubmitEditing={onSubmit} style={{ flex: 1, fontSize: 15, color: C.ink, paddingVertical: 0, fontWeight: '600' }} />
+            <TextInput value={value} onChangeText={onChange} placeholder={tr(placeholder)} placeholderTextColor={C.muted} returnKeyType="search" onSubmitEditing={onSubmit} style={{ flex: 1, fontSize: 15, color: C.ink, paddingVertical: 0, fontWeight: '600' }} />
         </View>
     )
 }

@@ -32,6 +32,7 @@ import { C, R, shadow } from '../theme'
 import { Frame, leaveTo } from './Frame'
 import { chooseCharacter } from './Lobby'
 import { Chips, Note, Section, Toggle } from './Tools'
+import { tr } from '../i18n'
 
 /**
  * 설정: 디스코드 설정을 Stella 판으로. 비밀번호, 이메일, 2단계 인증, 결제처럼 보안 확인이 필요한 것만 디스코드 설정을 연다.
@@ -62,7 +63,7 @@ function Field({ label, value, onChange, multiline, placeholder, max }: { label:
             <TextInput
                 value={value}
                 onChangeText={onChange}
-                placeholder={placeholder ?? label}
+                placeholder={tr(placeholder ?? label)}
                 placeholderTextColor={C.muted}
                 multiline={multiline}
                 maxLength={max}

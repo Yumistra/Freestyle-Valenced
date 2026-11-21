@@ -1,4 +1,5 @@
 import { Dispatcher } from '@valenced/discord/common/flux'
+import { locale } from './i18n'
 import { channel, displayName, find, guild, guildIds, http, launchLibrary, S, toast, user } from './data'
 
 /**
@@ -211,7 +212,7 @@ export interface Gif {
 export async function gifs(query: string): Promise<Gif[]> {
     try {
         const q = query.trim()
-        const res = await http()?.get?.({ url: q ? '/gifs/search' : '/gifs/trending-gifs', query: { ...(q ? { q } : {}), media_format: 'webp', provider: 'tenor', locale: 'ko' } })
+        const res = await http()?.get?.({ url: q ? '/gifs/search' : '/gifs/trending-gifs', query: { ...(q ? { q } : {}), media_format: 'webp', provider: 'tenor', locale: locale() } })
         const list: any[] = Array.isArray(res?.body) ? res.body : (res?.body?.gifs ?? [])
         return list.filter(g => g?.src && g?.url).map(g => ({ url: g.url, src: g.src, width: Number(g.width) || 200, height: Number(g.height) || 200 }))
     } catch {

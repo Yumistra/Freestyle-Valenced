@@ -7,6 +7,7 @@ import { useSettings } from '../settings'
 import { go, type HeartTab, isNarrow, setState, useUi } from '../state'
 import { C, R, shadow } from '../theme'
 import { Chat } from './Chat'
+import { tr } from '../i18n'
 
 /**
  * 하트챗 = DM. 왼쪽 휴대폰에 연락처(DM), 신청(친구 요청), 친구. 오른쪽에 말풍선 대화.
@@ -163,7 +164,7 @@ function AddFriend() {
     }
     return (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginBottom: 6, paddingLeft: 14, paddingRight: 4, height: 46, borderRadius: R.pill, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.line }}>
-            <TextInput value={name} onChangeText={setName} placeholder="사용자 이름으로 친구 추가" placeholderTextColor={C.muted} autoCapitalize="none" onSubmitEditing={send} style={{ flex: 1, fontSize: 14, color: C.ink, fontWeight: '600' }} />
+            <TextInput value={name} onChangeText={setName} placeholder={tr('사용자 이름으로 친구 추가')} placeholderTextColor={C.muted} autoCapitalize="none" onSubmitEditing={send} style={{ flex: 1, fontSize: 14, color: C.ink, fontWeight: '600' }} />
             <Pressable onPress={send} accessibilityRole="button" accessibilityLabel="Add friend" disabled={busy}>
                 <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.6 : 1 }}>
                     <Icon names={['UserPlusIcon', 'FriendsIcon']} color={C.white} size={18} />

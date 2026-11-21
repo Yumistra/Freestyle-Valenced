@@ -5,6 +5,7 @@ import { displayName, editMessage, emojiUrl, guildIconUrl, guild, sameList, toas
 import { Icon, T } from '../parts'
 import { C, R, shadow } from '../theme'
 import { StickerView } from './Sticker'
+import { tr } from '../i18n'
 
 /**
  * 입력창: 글, 파일 붙이기, 이모지·스티커·GIF 고르기, @ # : 자동완성, 입력 중 표시.
@@ -143,7 +144,7 @@ function GifPanel({ onPick, width }: { onPick: (g: Gif) => void; width: number }
         <View style={{ flex: 1 }}>
             <View style={{ margin: 10, marginBottom: 6, height: 38, borderRadius: R.pill, backgroundColor: C.white, borderWidth: 1, borderColor: C.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 6 }}>
                 <Icon names={['MagnifyingGlassIcon', 'SearchIcon']} color={C.muted} size={18} />
-                <TextInput value={query} onChangeText={setQuery} placeholder="GIF 찾기" placeholderTextColor={C.muted} style={{ flex: 1, fontSize: 14, color: C.ink, paddingVertical: 0, fontWeight: '600' }} />
+                <TextInput value={query} onChangeText={setQuery} placeholder={tr('GIF 찾기')} placeholderTextColor={C.muted} style={{ flex: 1, fontSize: 14, color: C.ink, paddingVertical: 0, fontWeight: '600' }} />
             </View>
             {list == null ? (
                 <Nothing text="불러오는 중…" />
@@ -383,7 +384,7 @@ export function Composer({ channelId, placeholder, mode, onMode, guildId }: { ch
                         if (t.trim() && !editing) typing(channelId)
                     }}
                     onFocus={() => setPanel(null)}
-                    placeholder={placeholder}
+                    placeholder={tr(placeholder)}
                     placeholderTextColor={C.muted}
                     multiline
                     style={{ flex: 1, maxHeight: 120, minHeight: 36, fontSize: 15, color: C.ink, paddingVertical: 6, paddingHorizontal: 6, fontWeight: '600' }}

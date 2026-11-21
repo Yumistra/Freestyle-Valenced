@@ -3,6 +3,7 @@ import { Component, memo, useEffect, useRef, useState } from 'react'
 import { Animated, Image, Pressable, Text, View } from 'react-native'
 import { useUi } from './state'
 import { C, fixFont, R, shadow } from './theme'
+import { tr } from './i18n'
 
 /**
  * 여러 화면이 같이 쓰는 조각들.
@@ -45,7 +46,7 @@ export function Icon({ names, color = C.ink, size = 20 }: { names: string[]; col
 export function T({ children, size = 14, color = C.ink, weight = '600', lines, style }: { children: any; size?: number; color?: string; weight?: '400' | '500' | '600' | '700' | '800'; lines?: number; style?: any }) {
     return (
         <Text numberOfLines={lines} textBreakStrategy="simple" style={fixFont([{ fontSize: size, color, fontWeight: weight, includeFontPadding: false }, style])}>
-            {children}
+            {typeof children === 'string' ? tr(children) : children}
         </Text>
     )
 }

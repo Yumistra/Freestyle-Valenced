@@ -1,3 +1,4 @@
+import { korean } from './i18n'
 import { channel, displayName, S, user } from './data'
 
 /**
@@ -28,7 +29,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
 export function formatTime(seconds: number, style = 'f', now = Date.now()): string {
     const d = new Date(seconds * 1000)
     if (!Number.isFinite(d.getTime())) return '?'
-    const date = `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`
+    const date = korean() ? `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.` : `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`
     const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
     switch (style) {
         case 't':
