@@ -7,7 +7,7 @@ import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { useEffect, useState } from 'react'
-import { AppState, LayoutAnimation, ScrollView } from 'react-native'
+import { AppState, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { trim } from './away'
 import { bindNotes, nativeStatus, readTray, trimNotes } from './tray'
 import { clearAll, expire, importPushes, intercept } from './logger'
@@ -16,6 +16,9 @@ import { registerPicker } from './picker'
 import { FilterSettings } from './filtersUI'
 import { patchSheet } from './sheet'
 import { setNative, styleRow } from './rows'
+import { interceptEvents } from './events'
+import { SERVERS_ROUTE, ServersScreen } from './servers'
+import { companionStatus, exportLogs, importLogs, pullCompanion } from './transfer'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
 
 /**
@@ -23,6 +26,54 @@ import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings,
  * 핑 배경은 메시지 줄 데이터의 backgroundHighlight { backgroundColor, gutterColor } 로 그려지므로 그 색만 바꿔 넣는다.
  * 로그는 저장되어 디스코드를 다시 켜도 남고 (지운 메시지는 채널을 불러올 때 제자리에 다시 넣는다), 보관 시간이 지나면 사라진다.
  */
+
+/** 고를 수 있는 색 (비우면 테마 색) */
+const COLORS = ['', '#f23f43', '#ff7a45', '#f0b232', '#23a55a', '#00a8fc', '#5865f2', '#b45cf6', '#eb459e', '#949ba4']
+
+function ColorRow({ label, value, onPick }: { label: string; value: string; onPick: (v: string) => void }) {
+    const { Text } = Design as any
+    return (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
+            <Text variant="text-md/semibold" color="text-strong">
+                {label}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                {COLORS.map(c => (
+                    <Pressable
+                        key={c || 'theme'}
+                        accessibilityRole="radio"
+                        accessibilityLabel={`${label} ${c || 'theme'}`}
+                        accessibilityState={{ selected: value === c }}
+                        onPress={() => onPick(c)}
+                        style={{ width: 30, height: 30, borderRadius: 15, borderWidth: value === c ? 3 : 1, borderColor: value === c ? '#ffffff' : 'rgba(128,128,128,0.5)', backgroundColor: c || 'transparent', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                        {!c ? (
+                            <Text variant="text-xs/bold" color="text-muted">
+                                A
+                            </Text>
+                        ) : null}
+                    </Pressable>
+                ))}
+            </View>
+        </View>
+    )
+}
+
+function BackupGroup() {
+    const { TableRowGroup, TableRow } = Design as any
+    const [msg, setMsg] = useState('')
+    const run = (f: () => Promise<string>) =>
+        f()
+            .then(setMsg)
+            .catch((e: any) => setMsg(`Failed: ${e?.message ?? e}`))
+    return (
+        <TableRowGroup title="Backup">
+            <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Export logs" subLabel="Saves a file in Download/MessageLogger" onPress={() => run(async () => `Saved to ${await exportLogs()}`)} />
+            <TableRow icon={<TableRowAssetIcon name="UploadIcon" />} label="Import logs" subLabel="Adds logs from an exported file, nothing is removed" onPress={() => run(async () => `Added ${await importLogs()} log(s)`)} />
+            {msg ? <TableRow label={msg} /> : null}
+        </TableRowGroup>
+    )
+}
 
 function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bind(api.jsonStorage)
@@ -62,6 +113,33 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow icon={<TableRowAssetIcon name="PencilIcon" />} label="Edited messages" value={s.logEdits} onValueChange={(logEdits: boolean) => set({ logEdits })} />
                     <TableSwitchRow label="Ignore my messages" value={s.ignoreSelf} onValueChange={(ignoreSelf: boolean) => set({ ignoreSelf })} />
                     <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
+                    <TableSwitchRow label="Log DMs and group DMs" value={s.logDms} onValueChange={(logDms: boolean) => set({ logDms })} />
+                    <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" subLabel="Shown under the message and in View logs" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
+                    <TableSwitchRow icon={<TableRowAssetIcon name="TextIcon" />} label="Deleted channels and threads" subLabel="Keeps the name and the last messages" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
+                    <TableSwitchRow icon={<TableRowAssetIcon name="UserIcon" />} label="Profile changes" subLabel="Username, display name, avatar and status of friends and people you DM" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
+                </TableRowGroup>
+                <TableRowGroup title="Servers">
+                    <TableSwitchRow label="Only log chosen servers" subLabel="Direct messages are not affected" value={s.onlyServersOn} onValueChange={(onlyServersOn: boolean) => set({ onlyServersOn })} />
+                    {s.onlyServersOn ? <TableRow icon={<TableRowAssetIcon name="ServerIcon" />} label="Choose servers" subLabel={`${(s.onlyServers ?? []).length} chosen`} arrow onPress={() => nav?.navigate?.(SERVERS_ROUTE)} /> : null}
+                </TableRowGroup>
+                <TableRowGroup title="In chat">
+                    <TableSwitchRow label="Show previous versions" value={s.showHistoryInChat} onValueChange={(showHistoryInChat: boolean) => set({ showHistoryInChat })} />
+                    <TableSwitchRow label="Show edit time" value={s.showEditTime} onValueChange={(showEditTime: boolean) => set({ showEditTime })} />
+                    <TableSwitchRow label="Show deletion time" value={s.showDeleteTime} onValueChange={(showDeleteTime: boolean) => set({ showDeleteTime })} />
+                    <TableSwitchRow label="Show seconds" value={s.seconds} onValueChange={(seconds: boolean) => set({ seconds })} />
+                    <TableSwitchRow label="Use a 12-hour clock" value={s.clock12} onValueChange={(clock12: boolean) => set({ clock12 })} />
+                    <TableSwitchRow label="Color deleted usernames" value={s.colorDeletedNames} onValueChange={(colorDeletedNames: boolean) => set({ colorDeletedNames })} />
+                    <ColorRow label="Deleted message color" value={s.deletedColor} onPick={deletedColor => set({ deletedColor })} />
+                    <ColorRow label="Edited message color" value={s.editedColor} onPick={editedColor => set({ editedColor })} />
+                </TableRowGroup>
+                <TableRowGroup title="Notifications">
+                    <TableSwitchRow
+                        icon={<TableRowAssetIcon name="BellIcon" />}
+                        label="Notify when a DM or mention is deleted"
+                        subLabel={`Phone notification while Discord runs.${companionStatus.last ? ` Companion app sent ${companionStatus.received} log(s).` : ''}`}
+                        value={s.notifyDeletes}
+                        onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })}
+                    />
                 </TableRowGroup>
                 <TableRowGroup title="Attachments">
                     <TableSwitchRow
@@ -110,6 +188,7 @@ function SettingsPage({ api }: { api?: any }) {
                 <TableRowGroup title="Saved">
                     <TableRow label={`${deleted} deleted, ${edited} edited`} subLabel={`${away} found after coming back, ${remembered} messages remembered`} />
                 </TableRowGroup>
+                <BackupGroup />
                 <Button text="Clear all logs" variant="destructive" size="md" disabled={!all.length} onPress={() => clearAll()} />
             </Stack>
         </ScrollView>
@@ -170,10 +249,24 @@ export default plugin({
             )
             refreshSettings()
         } catch {}
+        try {
+            cleanup(
+                registerSettingsItem(SERVERS_ROUTE, {
+                    type: 'route',
+                    parent: 'yumistra.message-logger',
+                    unsearchable: true,
+                    usePredicate: () => false,
+                    useTitle: () => 'Servers to log',
+                    screen: { route: SERVERS_ROUTE, getComponent: () => ServersScreen },
+                } as any),
+            )
+            refreshSettings()
+        } catch {}
         patchSheet(cleanup)
         const pull = () => {
             importPushes(me()).catch(() => {})
             readTray().catch(() => {})
+            pullCompanion().catch(() => {})
         }
         Promise.resolve(jsonStorage.cache ?? jsonStorage.get?.())
             .then(() => {
@@ -196,6 +289,7 @@ export default plugin({
             () => clearInterval(timer),
             () => sub?.remove?.(),
             ...(intercept() as any[]),
+            ...(interceptEvents() as any[]),
             // modules/messages/native/renderer/RowGenerator.tsx
             getModules(withName('RowManager') as any, (RowManager: any) => {
                 const proto = RowManager?.prototype
@@ -241,3 +335,13 @@ export default plugin({
     },
     SettingsComponent: SettingsPage,
 } as any)
+
+// 시험용 (Valenced 는 default 만 쓴다)
+export { diff } from './diff'
+export { stats } from './logsMore'
+export { exportText, mergeData, pullCompanion } from './transfer'
+export { allowed } from './filters'
+export { styleRow, setNative } from './rows'
+export { LogsView } from './logs'
+export { SettingsPage }
+export { logs as _logs, events as _events, settings as _settings, setSettings as _setSettings } from './store'

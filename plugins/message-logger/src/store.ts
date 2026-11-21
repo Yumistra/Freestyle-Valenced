@@ -53,9 +53,52 @@ export interface Settings {
     allowOnly: boolean
     /** 친구가 보낸 메시지만 기록 (화이트리스트는 그대로 기록) */
     friendsOnly: boolean
+    /** DM, 그룹 DM 도 기록 */
+    logDms: boolean
+    /** 고른 서버만 기록 (DM 은 상관없음) */
+    onlyServersOn: boolean
+    onlyServers: string[]
+    /** 채팅에 예전 버전 보이기 */
+    showHistoryInChat: boolean
+    /** 지운 메시지에 지운 시각 */
+    showDeleteTime: boolean
+    /** 예전 버전 옆에 수정 시각 */
+    showEditTime: boolean
+    /** 시각에 초까지 */
+    seconds: boolean
+    /** 12시간제 */
+    clock12: boolean
+    /** 지운 메시지 색 (#rrggbb, 비우면 테마 빨강) */
+    deletedColor: string
+    /** 수정 기록 색 (비우면 테마 회색) */
+    editedColor: string
+    /** 지운 메시지 보낸 사람 이름도 그 색으로 */
+    colorDeletedNames: boolean
+    /** 반응을 뺀 것 기록 */
+    logReactions: boolean
+    /** 채널, 스레드 삭제 기록 */
+    logChannels: boolean
+    /** 친구, DM 상대의 프로필 변경 기록 */
+    logProfiles: boolean
+    /** 내 DM, 나를 멘션한 메시지가 지워지면 휴대폰 알림 */
+    notifyDeletes: boolean
+    /** 저장한 검색 */
+    searches: SavedSearch[]
 }
 
-export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false, friendsOnly: false }
+export interface SavedSearch {
+    name: string
+    q: string
+    f: { kinds: string[]; places: string[]; channels: string[]; users: string[]; from?: string; to?: string }
+}
+
+/** 메시지 말고 다른 기록 (반응, 채널, 프로필) */
+export type Event =
+    | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number }
+    | { k: 'c'; id: string; c: string; g?: string; name: string; type: number; parent?: string; msgs: any[]; at: number }
+    | { k: 'p'; id: string; u: string; field: 'username' | 'name' | 'avatar' | 'status'; from: string; to: string; at: number }
+
+export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false, friendsOnly: false, logDms: true, onlyServersOn: false, onlyServers: [], showHistoryInChat: true, showDeleteTime: true, showEditTime: true, seconds: false, clock12: false, deletedColor: '', editedColor: '', colorDeletedNames: false, logReactions: true, logChannels: true, logProfiles: true, notifyDeletes: true, searches: [] }
 
 /** 첨부파일 하나 저장 크기 상한 */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -110,6 +153,23 @@ export function notes(): Record<string, any> {
     return c.notes
 }
 
+/** 반응, 채널, 프로필 기록 (새것이 뒤) */
+export const EVENTS_MAX = 3000
+export function events(): Event[] {
+    const c = storage?.cache
+    if (!c) return []
+    if (!Array.isArray(c.events)) c.events = []
+    return c.events
+}
+
+/** 친구, DM 상대의 마지막으로 본 프로필 (바뀐 걸 알아내려고) */
+export function profiles(): Record<string, { username?: string; name?: string; avatar?: string; status?: string }> {
+    const c = storage?.cache
+    if (!c) return {}
+    if (!c.profiles || typeof c.profiles !== 'object') c.profiles = {}
+    return c.profiles
+}
+
 export const onChange = (fn: () => void) => {
     listeners.add(fn)
     return () => listeners.delete(fn)
@@ -127,7 +187,7 @@ export function save(now = false) {
     clearTimeout(timer)
     const write = () => {
         try {
-            storage.set({ ...(storage.cache ?? {}), logs: logs(), seen: seen(), notes: notes(), settings: settings() }, true)
+            storage.set({ ...(storage.cache ?? {}), logs: logs(), seen: seen(), notes: notes(), events: events(), profiles: profiles(), settings: settings() }, true)
         } catch {}
     }
     if (now) write()

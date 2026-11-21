@@ -31,14 +31,25 @@ function idsOf(m: any): string[] {
     return out
 }
 
+/** 메시지(또는 채널 ID 를 가진 것)의 서버 */
+export function guildOf(m: any): string | undefined {
+    const cid = m?.channel_id ?? m?.channelId
+    const gid = m?.guild_id ?? m?.guildId ?? channelOf(cid ? String(cid) : undefined)?.guild_id
+    return gid ? String(gid) : undefined
+}
+
 /** 이 메시지를 기록해도 되는지 */
 export function allowed(m: any): boolean {
     const s = settings()
     const allow = s.allow ?? []
     const block = s.block ?? []
-    if (!allow.length && !block.length && !s.allowOnly && !s.friendsOnly) return true
     const ids = idsOf(m)
     if (ids.some(id => allow.includes(id))) return true
+    // DM 끄기, 고른 서버만 (DM 은 서버 고르기와 상관없다)
+    const gid = guildOf(m)
+    if (!gid && s.logDms === false) return false
+    if (gid && s.onlyServersOn && !(s.onlyServers ?? []).includes(gid)) return false
+    if (!allow.length && !block.length && !s.allowOnly && !s.friendsOnly) return true
     if (s.allowOnly) return false
     if (s.friendsOnly && !isFriend(m?.author?.id)) return false
     return !ids.some(id => block.includes(id))

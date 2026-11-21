@@ -8,8 +8,11 @@ import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
+import { diff } from './diff'
 import { removeOne } from './logger'
-import { logs, seen, type Entry } from './store'
+import { MoreTab, type Tab, TABS } from './logsMore'
+import { when } from './time'
+import { logs, seen, setSettings, settings, type Entry, type SavedSearch } from './store'
 
 /**
  * 로그 보기: 채팅 메시지와 같은 모양(아바타, 이름, 시간, 내용)으로 보여 주고,
@@ -54,7 +57,7 @@ function alpha(color: string, a: number) {
     return `rgba(${r},${g},${b},${a})`
 }
 
-function palette() {
+export function palette() {
     const brand = tokenColor(['BACKGROUND_BRAND', 'BRAND_500', 'TEXT_BRAND'], '#5865f2')
     const danger = tokenColor(['TEXT_FEEDBACK_CRITICAL', 'TEXT_DANGER', 'STATUS_DANGER'], '#f23f43')
     const muted = tokenColor(['TEXT_MUTED'], '#949ba4')
@@ -72,11 +75,13 @@ function palette() {
         surface: tokenColor(['BACKGROUND_SURFACE_HIGH', 'BACKGROUND_FLOATING', 'BACKGROUND_SECONDARY'], alpha(muted, 0.1)),
         link: tokenColor(['TEXT_LINK'], '#00a8fc'),
         onBrand: tokenColor(['WHITE', 'TEXT_ON_BRAND'], '#ffffff'),
+        add: tokenColor(['TEXT_FEEDBACK_POSITIVE', 'TEXT_POSITIVE', 'STATUS_POSITIVE'], '#23a55a'),
+        addSoft: alpha(tokenColor(['TEXT_FEEDBACK_POSITIVE', 'TEXT_POSITIVE', 'STATUS_POSITIVE'], '#23a55a'), 0.15),
     }
 }
 
 /** 디스코드 이동 함수 (transitionToMessage(channelId, messageId)) */
-let toMessage: ((channelId: string, messageId: string, opts?: any) => void) | undefined
+export let toMessage: ((channelId: string, messageId: string, opts?: any) => void) | undefined
 export function bindNavigation(cleanup: (...f: Array<() => void>) => void) {
     cleanup(
         getModules(withProps('transitionToMessage') as any, (mod: any) => {
@@ -90,7 +95,7 @@ function authorOf(id: string, e: Entry): any {
     return e.m?.author ?? S.MessageStore?.getMessage?.(e.c, id)?.author ?? (seen() as any)[id]?.m?.author
 }
 
-function avatarUrl(a: any) {
+export function avatarUrl(a: any) {
     if (a?.id && a.avatar) return `https://cdn.discordapp.com/avatars/${a.id}/${a.avatar}.png?size=96`
     let n = 0
     try {
@@ -121,9 +126,8 @@ function editedWord() {
 /** <:이름:id> 같은 커스텀 이모지를 :이름: 으로 */
 const emojis = (t: string) => t.replace(/<a?:(\w+):\d+>/g, ':$1:')
 
-const when = (ms: number) => (ms ? new Date(ms).toLocaleString() : '')
 
-function where(e: Entry) {
+export function where(e: { c: string; g?: string }) {
     try {
         const S: any = Stores
         const ch = S.ChannelStore?.getChannel?.(e.c)
@@ -136,7 +140,7 @@ function where(e: Entry) {
 }
 
 /** 설정 화면들을 닫는다 (안쪽 목록부터 맨 처음 화면까지) */
-function closeSettings(nav: any) {
+export function closeSettings(nav: any) {
     let n = nav
     let guard = 0
     while (n && guard++ < 8) {
@@ -172,6 +176,9 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
     const current = e.d ? String(e.m?.content ?? now?.content ?? '') : String(now?.content ?? '')
     const files = (e.m?.attachments ?? now?.attachments ?? []).length
     const deleted = !!e.d
+    // 수정 비교: 버전끼리 바뀐 낱말 (빠진 것 빨간 줄, 새것 초록)
+    const [compare, setCompare] = useState(false)
+    const versions = [...(e.e ?? []).map(h => h.t), ...(deleted ? [] : [current])]
     return (
         <Pressable
             onPress={onOpen}
@@ -195,7 +202,26 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
                         {when(sentAt(id))}
                     </Text>
                 </View>
-                {!deleted &&
+                {compare && versions.length > 1
+                    ? versions.slice(1).map((v, i) => (
+                          <Text key={`d${i}`} variant="text-md/normal" style={{ color: P.text, marginBottom: 2 }}>
+                              <Text variant="text-xs/bold" style={{ color: P.muted }}>
+                                  {`${i + 1} → ${i + 2}  `}
+                              </Text>
+                              {diff(emojis(versions[i]), emojis(v)).map((part, j) => (
+                                  <Text
+                                      key={j}
+                                      variant="text-md/normal"
+                                      style={part.k === 'del' ? { color: P.danger, textDecorationLine: 'line-through', backgroundColor: P.dangerSoft } : part.k === 'add' ? { color: P.add, backgroundColor: P.addSoft } : { color: P.text }}
+                                  >
+                                      {part.t}
+                                  </Text>
+                              ))}
+                          </Text>
+                      ))
+                    : null}
+                {!compare &&
+                    !deleted &&
                     (e.e ?? []).map((h, i) => (
                         <Text key={i} variant="text-md/normal" style={{ color: P.muted }}>
                             {emojis(h.t) || ' '}
@@ -221,6 +247,7 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
                     <Text variant="text-xs/medium" style={{ color: P.muted, flex: 1 }}>
                         {[deleted ? `Deleted ${when(e.d!)}` : `Edited ${e.e?.length ?? 0} time(s)`, e.h ? "Hidden in chat" : "", where(e)].filter(Boolean).join(', ')}
                     </Text>
+                    {versions.length > 1 ? <Button text={compare ? 'Versions' : 'Compare'} variant="secondary" size="sm" onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setCompare(v => !v))} style={{ marginRight: 6 }} /> : null}
                     <Button text={armed ? 'Tap again to delete' : 'Delete log'} variant={armed ? 'destructive' : 'secondary'} size="sm" onPress={del} />
                 </View>
             </View>
@@ -234,8 +261,19 @@ interface Filters {
     places: string[]
     channels: string[]
     users: string[]
+    /** 날짜 YYYY-MM-DD (그날 포함) */
+    from?: string
+    to?: string
 }
 const EMPTY: Filters = { kinds: [], places: [], channels: [], users: [] }
+
+/** YYYY-MM-DD → 그날 0시(끝이면 다음 날 0시) ms. 틀린 글이면 undefined */
+export function dayMs(v: string | undefined, end = false): number | undefined {
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec((v ?? '').trim())
+    if (!m) return
+    const d = new Date(+m[1], +m[2] - 1, +m[3] + (end ? 1 : 0))
+    return Number.isFinite(d.getTime()) ? d.getTime() : undefined
+}
 const DM = 'dm'
 
 interface Item {
@@ -351,7 +389,28 @@ export function LogsScreen({ navigation }: { navigation?: any }) {
     return <LogsView />
 }
 
+/** 로그 보기: 위에 종류 탭 (메시지, 반응, 채널, 프로필, 통계) */
 export function LogsView() {
+    const { Text } = Design as any
+    const P = palette()
+    const [tab, setTab] = useState<Tab>('messages')
+    return (
+        <View style={{ flex: 1 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 10, gap: 6 }}>
+                {TABS.map(([k, label]) => (
+                    <Pressable key={k} accessibilityRole="tab" accessibilityLabel={label} onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setTab(k))} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, justifyContent: 'center', backgroundColor: tab === k ? P.brand : P.input }}>
+                        <Text variant="text-sm/semibold" style={{ color: tab === k ? P.onBrand : P.text }}>
+                            {label}
+                        </Text>
+                    </Pressable>
+                ))}
+            </ScrollView>
+            {tab === 'messages' ? <MessagesView /> : <MoreTab tab={tab} />}
+        </View>
+    )
+}
+
+function MessagesView() {
     const { Text, Button } = Design as any
     const P = palette()
     const SearchIcon: any = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
@@ -456,8 +515,30 @@ export function LogsView() {
         .filter(x => !f.places.length || f.places.includes(x.k.place))
         .filter(x => !f.channels.length || f.channels.includes(x.k.channel))
         .filter(x => !f.users.length || f.users.includes(x.k.user))
+        .filter(x => {
+            const t = x.e.d ?? x.e.at
+            const a = dayMs(f.from)
+            const b = dayMs(f.to, true)
+            return (a === undefined || t >= a) && (b === undefined || t < b)
+        })
         .map(x => [x.id, x.e] as [string, Entry])
-    const active = f.kinds.length + f.places.length + f.channels.length + f.users.length
+    const dateOn = (dayMs(f.from) !== undefined ? 1 : 0) + (dayMs(f.to, true) !== undefined ? 1 : 0)
+    const active = f.kinds.length + f.places.length + f.channels.length + f.users.length + dateOn
+    // 저장한 검색
+    const [naming, setNaming] = useState<string | null>(null)
+    const searches = settings().searches ?? []
+    const applySearch = (sv: SavedSearch) => {
+        anim()
+        setQ(sv.q)
+        setF({ ...EMPTY, ...sv.f })
+    }
+    const saveSearch = () => {
+        const name = (naming ?? '').trim()
+        if (!name) return
+        setSettings({ searches: [...searches.filter(x => x.name !== name), { name, q, f }] })
+        setNaming(null)
+        force(n => n + 1)
+    }
     // 필터 패널에서 고른 것도 검색창 안에 알약으로 보인다 (누르면 빠진다)
     const pills: Array<{ key: string; label: string; img?: string; drop(): void }> = [
         ...f.kinds.map(v => ({ key: 'k' + v, label: `is: ${kinds.find(k => k.v === v)?.label ?? v}`, drop: () => setF(o => ({ ...o, kinds: o.kinds.filter(x => x !== v) })) })),
@@ -587,6 +668,22 @@ export function LogsView() {
                         <ChipRow title="Server or DMs" items={places} selected={f.places} onToggle={v => (anim(), setF({ ...f, places: toggle(f.places, v), channels: [] }))} />
                         <ChipRow title="Channel" items={channels} selected={f.channels} onToggle={v => (anim(), setF({ ...f, channels: toggle(f.channels, v) }))} />
                         <ChipRow title="User" items={users} selected={f.users} onToggle={v => (anim(), setF({ ...f, users: toggle(f.users, v) }))} />
+                        <Text variant="text-xs/bold" style={{ color: P.muted, marginTop: 10, marginBottom: 6, letterSpacing: 0.4 }}>
+                            DATE
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            {(['from', 'to'] as const).map(k => (
+                                <RNTextInput
+                                    key={k}
+                                    value={f[k] ?? ''}
+                                    onChangeText={(v: string) => setF(o => ({ ...o, [k]: v }))}
+                                    placeholder={k === 'from' ? 'From YYYY-MM-DD' : 'To YYYY-MM-DD'}
+                                    placeholderTextColor={P.muted}
+                                    keyboardType="numbers-and-punctuation"
+                                    style={{ flex: 1, height: 38, borderRadius: 10, paddingHorizontal: 10, backgroundColor: P.input, color: P.text, borderWidth: 1, borderColor: f[k] && dayMs(f[k]) === undefined ? P.danger : 'transparent' }}
+                                />
+                            ))}
+                        </View>
                         {active ? (
                             <Pressable onPress={() => (anim(), setF(EMPTY))} style={{ marginTop: 12, alignSelf: 'flex-start' }}>
                                 <Text variant="text-sm/semibold" style={{ color: P.link }}>
@@ -595,6 +692,37 @@ export function LogsView() {
                             </Pressable>
                         ) : null}
                     </View>
+                ) : null}
+                {searches.length || q.trim() || active ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginTop: 10 }} contentContainerStyle={{ gap: 6, alignItems: 'center' }}>
+                        {searches.map(sv => (
+                            <Pressable key={sv.name} accessibilityLabel={`saved ${sv.name}`} onPress={() => applySearch(sv)} onLongPress={() => (setSettings({ searches: searches.filter(x => x !== sv) }), force(n => n + 1))} style={{ height: 30, paddingHorizontal: 12, borderRadius: 15, justifyContent: 'center', backgroundColor: P.brandSoft }}>
+                                <Text variant="text-sm/medium" style={{ color: P.text }}>
+                                    {sv.name}
+                                </Text>
+                            </Pressable>
+                        ))}
+                        {(q.trim() || active) && naming === null ? (
+                            <Pressable accessibilityLabel="Save search" onPress={() => setNaming('')} style={{ height: 30, paddingHorizontal: 12, borderRadius: 15, justifyContent: 'center', borderWidth: 1, borderColor: P.border }}>
+                                <Text variant="text-sm/semibold" style={{ color: P.link }}>
+                                    + Save search
+                                </Text>
+                            </Pressable>
+                        ) : null}
+                        {naming !== null ? (
+                            <RNTextInput
+                                autoFocus
+                                value={naming}
+                                onChangeText={setNaming}
+                                onSubmitEditing={saveSearch}
+                                onBlur={() => (naming.trim() ? saveSearch() : setNaming(null))}
+                                placeholder="Name this search"
+                                placeholderTextColor={P.muted}
+                                returnKeyType="done"
+                                style={{ minWidth: 160, height: 32, borderRadius: 10, paddingHorizontal: 10, backgroundColor: P.input, color: P.text }}
+                            />
+                        ) : null}
+                    </ScrollView>
                 ) : null}
                 <Text variant="text-xs/medium" style={{ color: P.muted, marginTop: 10 }}>
                     {all.length ? `${entries.length} of ${all.length} log(s)` : 'No logs yet.'}

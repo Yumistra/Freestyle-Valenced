@@ -2,7 +2,9 @@ import { Tokens } from '@valenced/discord/common/tokens'
 import { Stores } from '@valenced/discord/flux'
 import { processColor } from 'react-native'
 import { takeChanged } from './logger'
-import { logs } from './store'
+import { removedReactions } from './events'
+import { formatClock } from './time'
+import { logs, settings } from './store'
 
 const MESSAGE_ROW = 1
 const UPDATE = 2
@@ -37,8 +39,16 @@ export function setNative(v: boolean) {
     native = v
 }
 
-const red = () => themeColor('TEXT_FEEDBACK_CRITICAL', '#f23f43')
-const gray = () => themeColor('TEXT_MUTED', '#949ba4')
+/** 설정에서 고른 색 (#rrggbb), 없으면 테마 색 */
+function picked(hex: string | undefined, token: string, fallback: string) {
+    if (hex && /^#[0-9a-f]{6}$/i.test(hex)) {
+        const c = processColor(hex) as number
+        if (typeof c === 'number') return c
+    }
+    return themeColor(token, fallback)
+}
+const red = () => picked(settings().deletedColor, 'TEXT_FEEDBACK_CRITICAL', '#f23f43')
+const gray = () => picked(settings().editedColor, 'TEXT_MUTED', '#949ba4')
 
 const text = (content: string) => ({ type: 'text', content })
 
@@ -98,6 +108,9 @@ const label = (color: number | null | undefined, content: string) => text(`${LAB
 
 /** 이 시각에 보냈다면 메시지 옆에 나올 시간 글자 (디스코드가 만드는 그대로) */
 function timeOf(at: number, args: any, generate: (a: any) => any, fallback?: string) {
+    // 초, 12시간제를 골랐으면 우리 모양으로
+    const custom = formatClock(at)
+    if (custom) return custom
     try {
         const rec = args.message
         const ts = rec?.timestamp
@@ -112,24 +125,37 @@ function timeOf(at: number, args: any, generate: (a: any) => any, fallback?: str
 /** 예전 내용 한 줄씩: "예전 내용 (수정됨) 시간" (예전 내용은 흐리게, 뒤는 디스코드 수정 표시·시간 모양) */
 function history(edits: Array<{ t: string; at: number }>, edited: string, row: any, args: any, generate: (a: any) => any, full: (a: any) => any) {
     const out: any[] = []
+    const withTime = settings().showEditTime !== false
     for (const { t, at } of edits) {
         if (!native) {
             // 꾸밈 없이: "예전 내용 (수정됨) 시간"
-            out.push(...(contentOf(t, args, generate) ?? [text(t)]), text(` ${edited} ${timeOf(at, args, full)}`), text('\n'))
+            out.push(...(contentOf(t, args, generate) ?? [text(t)]), text(` ${edited}${withTime ? ` ${timeOf(at, args, full)}` : ''}`), text('\n'))
             continue
         }
-        out.push(
-            text(FADE_START),
-            ...(contentOf(t, args, generate) ?? [text(t)]),
-            text(FADE_END),
-            text(' '),
-            label(row.message.editedColor, edited),
-            text(' '),
-            label(row.message.timestampColor, timeOf(at, args, full)),
-            text('\n'),
-        )
+        out.push(text(FADE_START), ...(contentOf(t, args, generate) ?? [text(t)]), text(FADE_END), text(' '), label(row.message.editedColor, edited))
+        if (withTime) out.push(text(' '), label(row.message.timestampColor, timeOf(at, args, full)))
+        out.push(text('\n'))
     }
     return out
+}
+
+/** 이 메시지에서 빠진 반응 한 줄: "Removed reactions: 👍 Alice, :cat: Bob" */
+function reactionLine(id: string, row: any): any[] {
+    const list = removedReactions(id)
+    if (!list.length) return []
+    const who = (u: string) => {
+        if (!u) return 'everyone'
+        try {
+            const x = (Stores as any).UserStore?.getUser?.(u)
+            return x?.globalName ?? x?.username ?? 'someone'
+        } catch {
+            return 'someone'
+        }
+    }
+    const parts = list.slice(-6).map(r => `${r.em.id ? `:${r.em.name}:` : r.em.name} ${who(r.u)}`)
+    const more = list.length > 6 ? `, +${list.length - 6}` : ''
+    const body = `Removed reaction${list.length > 1 ? 's' : ''}: ${parts.join(', ')}${more}`
+    return native ? [text('\n'), label(row.message.timestampColor, body)] : [text(`\n${body}`)]
 }
 
 export function styleRow(row: any, args: any, generate: (a: any) => any, full: (a: any) => any = generate) {
@@ -142,8 +168,15 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
     }
     if (takeChanged(id)) row.changeType = UPDATE
     const e = logs()[id]
+    // 빠진 반응은 기록이 없는 메시지에도 붙는다
+    const reactions = reactionLine(id, row)
+    if (reactions.length && (!e || e.h)) {
+        row.message.content = [...(Array.isArray(row.message.content) ? row.message.content : []), ...reactions]
+        return
+    }
     if (!e || e.h) return
-    if (e.e?.length) {
+    const s = settings()
+    if (e.e?.length && s.showHistoryInChat !== false) {
         // 디스코드가 메시지 옆에 붙이는 "(수정됨)" 글자 그대로
         const raw = typeof row.message.edited === 'string' && row.message.edited.trim() ? row.message.edited.trim() : 'edited'
         const edited = raw.startsWith('(') ? raw : `(${raw})`
@@ -156,10 +189,23 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
         }
         row.message.content = [...lines, ...stripHistory(Array.isArray(row.message.content) ? row.message.content : [])]
     }
+    const tail: any[] = []
+    if (e.d && s.showDeleteTime !== false) {
+        const t = `deleted ${timeOf(e.d, args, full)}`
+        tail.push(native ? label(red(), t) : text(t))
+    }
+    if (tail.length || reactions.length) {
+        const body = Array.isArray(row.message.content) ? row.message.content : []
+        row.message.content = [...body, ...(tail.length ? [text(body.length ? ' ' : ''), ...tail] : []), ...reactions]
+    }
     if (!e.d) return
     // 지워진 메시지는 줄 전체 빨간 배경 + 글자도 빨간색 (본문·시간)
     const color = red()
     row.backgroundHighlight = { backgroundColor: argb(color, bgAlpha), gutterColor: argb(color, 0xff) }
     row.message.textColor = color
     row.message.timestampColor = color
+    if (s.colorDeletedNames) {
+        row.message.usernameColor = color
+        if ('roleColor' in row.message) row.message.roleColor = color
+    }
 }

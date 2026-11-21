@@ -28,6 +28,10 @@ private object Hooks {
             scope.registerNativeMethod("yumistra.message-logger.takePushed", TakePushed)
             scope.registerNativeMethod("yumistra.message-logger.tray", ReadTray)
             scope.registerNativeMethod("yumistra.message-logger.status", Status)
+            scope.registerNativeMethod("yumistra.message-logger.notify", Notify)
+            scope.registerNativeMethod("yumistra.message-logger.export", Export)
+            scope.registerNativeMethod("yumistra.message-logger.takeCompanion", TakeCompanion)
+            Extras.companionFile = java.io.File(scope.storageDir, "companion.jsonl")
             scope.withAppContext(KeepContext)
             val client = scope.classLoader.loadClass("com.discord.notifications.client.NotificationClient")
             val ms = client.declaredMethods
@@ -91,6 +95,7 @@ private object Hooks {
     }
 
     fun stop() {
+        Extras.unregister(Tray.context)
         unhook?.unhook()
         unhook = null
         decoUnhook?.unhook()
@@ -132,6 +137,8 @@ private object Status : Function1<List<Any?>, Any?> {
 private object KeepContext : Function1<android.content.Context, Unit> {
     override fun invoke(ctx: android.content.Context) {
         Tray.context = ctx.applicationContext ?: ctx
+        // 알림 앱이 보내는 기록 받기
+        Extras.register(Tray.context ?: ctx)
     }
 }
 

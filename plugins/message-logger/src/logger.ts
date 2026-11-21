@@ -3,6 +3,7 @@ import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { compare, forget, importPushes, remember, updateSeen } from './away'
 import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
+import { notifyDeleted, pruneEvents } from './events'
 import { allowed } from './filters'
 import { keepMs, logs, save, seen, settings, type Entry } from './store'
 
@@ -174,6 +175,8 @@ function keepDeleted(channelId: string, id: string, guildId?: string): 'store' |
     e.d = Date.now()
     e.at = e.d
     e.m = record ? rawOf(record, guildId) : remembered
+    // 알림용으로는 멘션 목록이 필요하다 (rawOf 는 비운다)
+    notifyDeleted({ ...e.m, mentions: record?.mentions ?? remembered?.mentions ?? [] }, e.g)
     changed.add(id)
     forget(id)
     save()
@@ -234,6 +237,7 @@ export function expire() {
         reallyRemove(id, e)
     }
     if (any) save()
+    pruneEvents()
 }
 
 /** 로그를 없애고 화면도 원래대로 (지운 메시지면 진짜로 지움) */
