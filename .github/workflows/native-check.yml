@@ -3,7 +3,7 @@ name: Native build check
 # main 이 아닌 브랜치에서 네이티브(Kotlin) 부분이 컴파일되는지 확인하고, 테스트용 plugin.jar 를 올린다 (배포 안 함)
 on:
   push:
-    branches-ignore: [main, test-jars, 'helper-*']
+    branches-ignore: [main, test-jars, 'helper-*', watch-apk]
   workflow_dispatch:
 
 permissions:
