@@ -1,6 +1,6 @@
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
-import { compare, forget, importPushes, remember, updateSeen } from './away'
+import { compare, forget, importPushes, remember, slim, updateSeen } from './away'
 import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
 import { notifyDeleted, pruneEvents } from './events'
@@ -226,7 +226,20 @@ function withDeleted(payload: any) {
 /** 보관 기간이 지난 로그를 지운다. 지금 보이는 지운 메시지는 진짜로 지운다 */
 export function expire() {
     // 예전 버전이 넣은 잘못된 수정 기록 치우기
-    if (cleanEdits()) save()
+    let fixed = cleanEdits()
+    // 예전 버전이 알림 앱에서 받아 그대로 둔 메시지: 빠진 사용자 정보를 채운다 (디스코드 사용자 검색이 튕기지 않게)
+    for (const e of Object.values(logs())) {
+        const a = e.m?.author
+        const badMentions = Array.isArray(e.m?.mentions) && e.m.mentions.some((x: any) => typeof x !== 'object')
+        if (a && (a.discriminator === undefined || a.public_flags === undefined || badMentions)) {
+            const x = slim(e.m)
+            if (x) {
+                e.m = x
+                fixed = true
+            }
+        }
+    }
+    if (fixed) save()
     const now = Date.now()
     const limit = keepMs()
     const all = logs()

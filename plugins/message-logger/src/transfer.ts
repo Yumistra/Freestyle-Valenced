@@ -1,6 +1,7 @@
 import { callNativeMethod } from '@valenced/modules/native'
 import { readFile } from '@valenced/modules/native/fs'
 import { NativeModules } from 'react-native'
+import { slim } from './away'
 import { allowed } from './filters'
 import { markChanged } from './logger'
 import { addEdit, events, logs, save, settings, type Entry, type Event } from './store'
@@ -111,7 +112,9 @@ export async function pullCompanion(): Promise<number> {
         } catch {
             continue
         }
-        const m = x?.m
+        // 앱이 보낸 메시지는 사용자 정보가 일부 빠져 있다 (discriminator 등).
+        // 그대로 채팅에 다시 넣으면 디스코드의 사용자 검색이 그 빈 칸에서 튕긴다 → 플러그인이 쓰는 모양으로 채운다
+        const m = slim(x?.m)
         if (!m?.id || !m.channel_id) continue
         const g = x.g ?? m.guild_id
         if (s.ignoreBots && m.author?.bot) continue
