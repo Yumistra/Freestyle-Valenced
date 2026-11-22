@@ -126,6 +126,8 @@ export async function pullCompanion(): Promise<number> {
         } else if (x.t === 'edit' && s.logEdits && typeof x.before === 'string') {
             // 앱은 3일 동안 같은 기록을 다시 보낸다: 이미 있으면 건너뛴다 (지운 뒤, 같은 글도)
             if (!addEdit(e, x.before, at, typeof m.content === 'string' ? m.content : undefined)) continue
+            // 앱이 잡은 수정은 디스코드에 그 메시지가 없을 수 있다: 보낸 사람과 지금 내용을 같이 둔다
+            if (!e.d) e.m = m
         } else continue
         e.at = Math.max(e.at ?? 0, at)
         all[m.id] = e

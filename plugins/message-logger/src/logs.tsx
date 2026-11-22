@@ -173,7 +173,7 @@ function Row({ id, e, onOpen, onDelete }: { id: string; e: Entry; onOpen(): void
     const a = authorOf(id, e)
     const name = a?.globalName ?? a?.global_name ?? a?.username ?? 'Unknown'
     const now = S.MessageStore?.getMessage?.(e.c, id)
-    const current = e.d ? String(e.m?.content ?? now?.content ?? '') : String(now?.content ?? '')
+    const current = e.d ? String(e.m?.content ?? now?.content ?? '') : String(now?.content ?? e.m?.content ?? '')
     const files = (e.m?.attachments ?? now?.attachments ?? []).length
     const deleted = !!e.d
     // 수정 비교: 버전끼리 바뀐 낱말 (빠진 것 빨간 줄, 새것 초록)
