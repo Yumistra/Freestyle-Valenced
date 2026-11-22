@@ -127,7 +127,7 @@ private object Before : XC_MethodHook() {
         } catch (_: Throwable) {
         }
         try {
-            RowBackground.update(param.thisObject as? android.view.View)
+            RowBackground.update(param.thisObject as? android.view.View, text)
         } catch (_: Throwable) {
         }
     }

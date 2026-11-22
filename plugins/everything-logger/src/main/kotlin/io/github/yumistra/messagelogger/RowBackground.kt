@@ -35,10 +35,13 @@ internal object RowBackground {
     /** 우리 배경을 깐 줄의 글자 (다른 메시지로 다시 쓰일 때 배경을 치우려고) */
     private val owners = WeakHashMap<TextView, Boolean>()
 
-    fun update(view: View?) {
+    /**
+     * incoming: 곧 들어갈 글 (글을 넣기 직전에 불리므로 tv.text 는 아직 예전 글이다).
+     * 대부분의 메시지는 수정 기록도 없고 우리 배경도 없다: 그런 줄은 할 일을 만들지 않는다
+     */
+    fun update(view: View?, incoming: CharSequence? = null) {
         val tv = view as? TextView ?: return
-        // 대부분의 메시지는 수정 기록도 없고 우리 배경도 없다: 줄마다 할 일을 만들지 않는다
-        if (markOf(tv) == null && owners[tv] == null) return
+        if (!hasMark(incoming) && markOf(tv) == null && owners[tv] == null) return
         val r = object : Runnable {
             override fun run() {
                 try {
@@ -114,6 +117,12 @@ internal object RowBackground {
             p = p.parent
         }
         return found
+    }
+
+    private fun hasMark(t: CharSequence?): Boolean {
+        val sp = t as? Spanned ?: return false
+        val marks = sp.getSpans(0, sp.length, HistoryMark::class.java)
+        return marks != null && marks.size > 0
     }
 
     fun markOf(tv: TextView): HistoryMark? {
