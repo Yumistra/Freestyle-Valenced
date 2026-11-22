@@ -4,7 +4,7 @@ import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { removeEvent } from './events'
-import { avatarUrl, closeSettings, palette, toMessage, where } from './logs'
+import { avatarUrl, goToMessage, palette, where } from './logs'
 import { events, logs, onChange, save, seen, type Event } from './store'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -160,14 +160,7 @@ function Reactions() {
     const items = events()
         .filter(e => e.k === 'r')
         .reverse()
-    const open = (c: string, m: string) => {
-        closeSettings(nav)
-        setTimeout(() => {
-            try {
-                toMessage?.(c, m)
-            } catch {}
-        }, 350)
-    }
+    const open = (c: string, m: string, g?: string) => goToMessage(nav, c, m, g)
     return (
         <List
             items={items}
@@ -177,7 +170,7 @@ function Reactions() {
                 const u = e.u ? userOrSnap(e.u, e.un) : undefined
                 const img = emojiUrl(e.em)
                 return (
-                    <Card key={e.id} label={`reaction ${e.id}`} onPress={() => open(e.c, e.m)}>
+                    <Card key={e.id} label={`reaction ${e.id}`} onPress={() => open(e.c, e.m, e.g)}>
                         <Head u={u} title={`${e.u ? nameOf(u) : 'Everyone'} removed ${emojiText(e.em)}`} sub={[where(e), when(e.at)].filter(Boolean).join(', ')} />
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                             {img ? <Image source={{ uri: img }} style={{ width: 28, height: 28 }} /> : <Text variant="text-lg/normal">{e.em.name}</Text>}

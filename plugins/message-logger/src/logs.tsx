@@ -3,6 +3,7 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { getModules } from '@valenced/modules/finders'
+import { callNativeMethod } from '@valenced/modules/native'
 import { withProps } from '@valenced/modules/finders/filters'
 import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
@@ -140,6 +141,33 @@ export function where(e: { c: string; g?: string }) {
 }
 
 /** 설정 화면들을 닫는다 (안쪽 목록부터 맨 처음 화면까지) */
+/**
+ * 그 메시지로 간다: 설정을 닫고, 알림을 눌렀을 때처럼 메시지 링크를 디스코드 자신에게 연다
+ * (디스코드가 그 서버, 채널을 열고 메시지까지 내려 준다). 안 되면 디스코드 안의 이동 함수로.
+ */
+export function goToMessage(nav: any, channelId: string, messageId: string, guildId?: string) {
+    closeSettings(nav)
+    let g = guildId
+    if (!g) {
+        try {
+            g = (Stores as any).ChannelStore?.getChannel?.(channelId)?.guild_id ?? undefined
+        } catch {}
+    }
+    const url = `https://discord.com/channels/${g ?? '@me'}/${channelId}/${messageId}`
+    setTimeout(() => {
+        ;(callNativeMethod as any)('yumistra.message-logger.openLink', [url])
+            .then((r: any) => {
+                const v = r && typeof r === 'object' && 'result' in r ? r.result : r
+                if (v !== 'ok') throw new Error(String(v))
+            })
+            .catch(() => {
+                try {
+                    toMessage?.(channelId, messageId)
+                } catch {}
+            })
+    }, 350)
+}
+
 export function closeSettings(nav: any) {
     let n = nav
     let guard = 0
@@ -556,14 +584,7 @@ function MessagesView() {
         setQ(base + prefix)
         setTimeout(() => input.current?.focus?.(), 0)
     }
-    const open = (id: string, e: Entry) => {
-        closeSettings(nav)
-        setTimeout(() => {
-            try {
-                toMessage?.(e.c, id)
-            } catch {}
-        }, 350)
-    }
+    const open = (id: string, e: Entry) => goToMessage(nav, e.c, id, e.g)
     return (
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 12, paddingBottom: 48 }}>
             <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>

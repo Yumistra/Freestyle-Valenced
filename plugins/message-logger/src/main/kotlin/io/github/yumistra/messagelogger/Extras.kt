@@ -83,6 +83,19 @@ internal object Extras {
         return f.absolutePath
     }
 
+    /** 메시지 링크를 이 디스코드에서 연다 (알림을 눌렀을 때와 같이, 디스코드가 그 메시지로 간다) */
+    fun openLink(args: List<Any?>): Any? {
+        val ctx = Tray.context ?: return "error: no context"
+        val url = args.getOrNull(0)?.toString() ?: return "error: no url"
+        if (!url.startsWith("https://discord.com/channels/")) return "error: not a message link"
+        return try {
+            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            "ok"
+        } catch (t: Throwable) {
+            "error: $t"
+        }
+    }
+
     fun takeCompanion(): Any? {
         val f = companionFile ?: return ""
         synchronized(this) {
@@ -148,6 +161,10 @@ internal object Notify : Function1<List<Any?>, Any?> {
 
 internal object Export : Function1<List<Any?>, Any?> {
     override fun invoke(args: List<Any?>): Any? = Extras.export(args)
+}
+
+internal object OpenLink : Function1<List<Any?>, Any?> {
+    override fun invoke(args: List<Any?>): Any? = Extras.openLink(args)
 }
 
 internal object TakeCompanion : Function1<List<Any?>, Any?> {
