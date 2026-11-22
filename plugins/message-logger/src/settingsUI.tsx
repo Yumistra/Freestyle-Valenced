@@ -9,7 +9,7 @@ import { FilterSettings } from './filtersUI'
 import { clearAll, expire } from './logger'
 import { LOGS_ROUTE } from './logs'
 import { SERVERS_ROUTE } from './servers'
-import { bind, KEEP_OPTIONS, logs, onChange, seen, setSettings, settings, type Settings } from './store'
+import { bindIfNone, KEEP_OPTIONS, logs, onChange, seen, setSettings, settings, type Settings } from './store'
 import { exportLogs, importLogs } from './transfer'
 
 /**
@@ -316,7 +316,7 @@ export function registerGroups(cleanup: (...f: any[]) => void) {
 }
 
 export function SettingsPage({ api }: { api?: any }) {
-    if (api?.jsonStorage) bind(api.jsonStorage)
+    if (api?.jsonStorage) bindIfNone(api.jsonStorage)
     const { s } = useSettings()
     const nav = useNav()
     const { st, missing } = useWatchStatus(false)

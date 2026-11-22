@@ -118,13 +118,37 @@ export function bind(s: any) {
     storage = s
 }
 
+/** 설정 화면이 넘겨준 저장소: 이미 읽은 저장소가 있으면 그대로 둔다 */
+export function bindIfNone(s: any) {
+    if (!storage?.cache && s) storage = s
+}
+
+/**
+ * 저장된 내용을 아직 못 읽었거나 플러그인이 꺼진 뒤에는 쓰지 않는다.
+ * (읽기 전의 빈 내용으로 쓰면 저장된 로그와 설정이 전부 지워진다)
+ */
+function ready(): boolean {
+    const c = storage?.cache
+    return !!c && typeof c === 'object'
+}
+
+/** 플러그인이 꺼질 때: 기다리던 저장을 지금 하고, 그 뒤로는 아무것도 쓰지 않는다 */
+export function unbind() {
+    if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+        if (ready()) writeNow()
+    }
+    storage = undefined
+}
+
 export function settings(): Settings {
     const c = storage?.cache ?? {}
     return { ...DEFAULTS, ...(c.settings ?? {}) }
 }
 
 export function setSettings(patch: Partial<Settings>) {
-    if (!storage) return
+    if (!storage || !ready()) return
     storage.cache = { ...(storage.cache ?? {}), settings: { ...settings(), ...patch } }
     save(true)
 }
@@ -185,13 +209,21 @@ export function save(now = false) {
     }
     if (!storage) return
     clearTimeout(timer)
-    const write = () => {
-        try {
-            storage.set({ ...(storage.cache ?? {}), logs: logs(), seen: seen(), notes: notes(), events: events(), profiles: profiles(), settings: settings() }, true)
-        } catch {}
-    }
-    if (now) write()
-    else timer = setTimeout(write, 3000)
+    timer = undefined
+    if (now) writeNow()
+    else
+        timer = setTimeout(() => {
+            timer = undefined
+            writeNow()
+        }, 3000)
+}
+
+function writeNow() {
+    if (!ready()) return
+    const s = storage
+    try {
+        s.set({ ...s.cache, logs: logs(), seen: seen(), notes: notes(), events: events(), profiles: profiles(), settings: settings() }, true)
+    } catch {}
 }
 
 export const keepMs = () => Math.max(1, settings().keepHours) * 3600_000

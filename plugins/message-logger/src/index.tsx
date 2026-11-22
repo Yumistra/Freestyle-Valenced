@@ -21,7 +21,7 @@ import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { pullCompanion } from './transfer'
 import { autoCollect } from './companion'
 import { registerGroups, SettingsPage } from './settingsUI'
-import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
+import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, unbind, type Settings } from './store'
 
 /**
  * Message Logger: 지운 메시지는 빨간, 수정한 메시지는 연한 회색으로 핑(노란 배경)과 같은 모양으로 남긴다.
@@ -129,6 +129,8 @@ export default plugin({
         cleanup(
             () => clearInterval(timer),
             () => clearInterval(companionTimer),
+            // 마지막에: 기다리던 저장을 마치고 더는 쓰지 않는다 (업데이트로 예전 것과 새것이 겹칠 때 지워지지 않게)
+            () => unbind(),
             () => sub?.remove?.(),
             ...(intercept() as any[]),
             ...(interceptEvents() as any[]),
