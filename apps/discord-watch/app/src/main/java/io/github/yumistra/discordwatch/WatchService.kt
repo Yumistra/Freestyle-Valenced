@@ -20,7 +20,7 @@ import org.json.JSONObject
 /** 플러그인에 보여 줄 상태 */
 object Status {
     @Volatile var running = false
-    @Volatile var state = "꺼짐"
+    @Volatile var state = "Off"
     @Volatile var user = ""
     @Volatile var userId = ""
     @Volatile var discordOpen = false
@@ -47,7 +47,7 @@ class WatchService : Service() {
             try {
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (t: Throwable) {
-                Status.state = "켜지 못했어요: ${t.javaClass.simpleName}"
+                Status.state = "Could not start: ${t.javaClass.simpleName}"
             }
         }
 
@@ -101,12 +101,12 @@ class WatchService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Status.running = true
-        val n = running("연결하는 중")
+        val n = running("Connecting")
         if (Build.VERSION.SDK_INT >= 34) startForeground(RUN_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(RUN_ID, n)
         if (gateway == null) {
             val token = Store.token(this)
             if (token.isNullOrBlank()) {
-                Status.state = "토큰이 없어요"
+                Status.state = "No token"
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -122,7 +122,7 @@ class WatchService : Service() {
         gateway = null
         Store.flushCache(this)
         Status.running = false
-        if (!Status.state.startsWith("토큰")) Status.state = "꺼짐"
+        if (!Status.state.contains("token")) Status.state = "Off"
         Control.report(this)
         super.onDestroy()
     }
@@ -153,7 +153,7 @@ class WatchService : Service() {
         main.post {
             Control.reportSoon(this)
             try {
-                getSystemService(NotificationManager::class.java).notify(RUN_ID, running("$s, 지운 메시지 ${Status.deleted}개"))
+                getSystemService(NotificationManager::class.java).notify(RUN_ID, running("$s, ${Status.deleted} deleted"))
             } catch (_: Throwable) {
             }
         }
@@ -293,14 +293,14 @@ class WatchService : Service() {
         val name = author?.let { it.optString("global_name").takeIf { n -> n.isNotBlank() && n != "null" } ?: it.optString("username") } ?: "Someone"
         val where = if (!dm) channelNames[channel]?.let { " (#$it)" } ?: "" else ""
         val files = m.optJSONArray("attachments")?.length() ?: 0
-        val text = content.ifBlank { if (files > 0) "[파일 ${files}개]" else "[글 없음]" }
+        val text = content.ifBlank { if (files > 0) "[${files} file(s)]" else "[no text]" }
         val url = "https://discord.com/channels/${guild ?: "@me"}/$channel/${m.optString("id")}"
         val open = Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(Store.target(this)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val id = (System.currentTimeMillis() and 0xffffff).toInt()
         val pi = PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, CH_DEL)
             .setSmallIcon(android.R.drawable.ic_menu_delete)
-            .setContentTitle("$name 님이 메시지를 지웠어요$where")
+            .setContentTitle("$name deleted a message$where")
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setAutoCancel(true)

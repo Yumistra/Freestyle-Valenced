@@ -69,7 +69,7 @@ class ControlActivity : Activity() {
                         WatchService.start(this)
                     } else {
                         WatchService.stop(this)
-                        Status.state = "꺼짐"
+                        Status.state = "Off"
                     }
                 }
                 if (Store.enabled(this) && Store.notify(this)) askNotifications()
@@ -78,7 +78,7 @@ class ControlActivity : Activity() {
                 Store.setEnabled(this, false)
                 WatchService.stop(this)
                 Store.clearToken(this)
-                Status.state = "꺼짐"
+                Status.state = "Off"
                 Status.user = ""
                 Status.userId = ""
             }

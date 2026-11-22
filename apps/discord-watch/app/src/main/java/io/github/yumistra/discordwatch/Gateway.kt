@@ -51,7 +51,7 @@ class Gateway(
         val gen = ++generation
         acked = true
         val base = resumeUrl?.takeIf { sessionId != null } ?: "wss://gateway.discord.gg"
-        onState("연결하는 중")
+        onState("Connecting")
         ws = Ws("$base/?v=10&encoding=json", Listener(gen)).also { it.connect() }
     }
 
@@ -66,7 +66,7 @@ class Gateway(
             seq = null
             resumeUrl = null
         }
-        onState("다시 연결 대기 (${delay / 1000}초)")
+        onState("Reconnecting in ${delay / 1000}s")
         handler.postDelayed({ connect() }, delay)
         backoff = (backoff * 2).coerceAtMost(60_000L)
     }
@@ -139,10 +139,10 @@ class Gateway(
                             userId = d.optJSONObject("user")?.optString("id")
                             mySession = sessionId
                             backoff = 2000L
-                            onState("연결됨")
+                            onState("Connected")
                         } else if (type == "RESUMED") {
                             backoff = 2000L
-                            onState("연결됨")
+                            onState("Connected")
                         }
                         try {
                             onDispatch(type, o.opt("d"))
@@ -168,7 +168,7 @@ class Gateway(
                     // 토큰이 틀림, 다시 해 봐야 소용없다
                     4004 -> {
                         stopped = true
-                        onFatal("토큰이 맞지 않아요 (4004)")
+                        onFatal("Invalid token (4004)")
                     }
                     4007, 4009 -> reconnect(resume = false)
                     else -> reconnect(resume = true)

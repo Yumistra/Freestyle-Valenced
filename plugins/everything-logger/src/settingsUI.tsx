@@ -167,7 +167,7 @@ function Notifications() {
  * Discord Watch 는 계정 토큰으로 디스코드 밖에서 따로 접속한다 (셀프봇과 같은 방식, 계정이 정지될 수 있다).
  * 그래서 고급 설정 안에 두고, 처음엔 경고를 보여 주고 두 번 눌러야 켤 수 있게 한다.
  */
-export const WATCH_WARNING = 'This connects your account outside Discord (selfbot). It can get your account banned.'
+export const WATCH_WARNING = 'This connects your account outside Discord (selfbot). It can get your account banned. The author of this plugin is not responsible for what happens to your account.'
 
 function WatchGate({ onUnlock }: { onUnlock: () => void }) {
     const { TableRowGroup, Text, Button } = Design as any

@@ -83,9 +83,11 @@ export function describe(s: WatchStatus | undefined, missing: boolean, me?: stri
     if (missing) return 'Not installed'
     if (!s) return 'Waiting for the app'
     if (!s.hasToken) return 'Off, no account yet'
-    if (!s.enabled) return s.state && s.state !== '꺼짐' ? `Off, ${s.state}` : 'Off'
+    // 예전 앱(1.1.2 까지)은 상태를 한국어로 보낸다
+    const state = s.state === '꺼짐' ? 'Off' : s.state === '연결됨' ? 'Connected' : s.state
+    if (!s.enabled) return state && state !== 'Off' ? `Off, ${state}` : 'Off'
     const parts: string[] = []
-    parts.push(s.state === '연결됨' ? 'Connected' : s.state ?? 'Starting')
+    parts.push(state ?? 'Starting')
     if (s.user) parts.push(s.userId && me && s.userId !== me ? `watching ${s.user} (another account)` : `as ${s.user}`)
     parts.push(`${s.deleted ?? 0} deleted, ${s.edited ?? 0} edited caught`)
     return parts.join(', ')
