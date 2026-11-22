@@ -3,7 +3,7 @@ import { readFile } from '@valenced/modules/native/fs'
 import { NativeModules } from 'react-native'
 import { slim } from './away'
 import { allowed } from './filters'
-import { markChanged } from './logger'
+import { markChanged, showLateDeleted } from './logger'
 import { addEdit, events, logs, save, settings, type Entry, type Event } from './store'
 
 /**
@@ -105,6 +105,7 @@ export async function pullCompanion(): Promise<number> {
     const s = settings()
     const all = logs()
     let n = 0
+    const lateDeleted = new Set<string>()
     for (const line of text.split('\n')) {
         let x: any
         try {
@@ -126,6 +127,7 @@ export async function pullCompanion(): Promise<number> {
             e.d = at
             e.m = e.m ?? m
             e.away = 1
+            lateDeleted.add(String(m.channel_id))
         } else if (x.t === 'edit' && s.logEdits && typeof x.before === 'string') {
             // 앱은 3일 동안 같은 기록을 다시 보낸다: 이미 있으면 건너뛴다 (지운 뒤, 같은 글도)
             if (!addEdit(e, x.before, at, typeof m.content === 'string' ? m.content : undefined)) continue
@@ -140,5 +142,10 @@ export async function pullCompanion(): Promise<number> {
     companionStatus.received += n
     companionStatus.last = Date.now()
     if (n) save(true)
+    if (lateDeleted.size) {
+        try {
+            showLateDeleted(lateDeleted)
+        } catch {}
+    }
     return n
 }

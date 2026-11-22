@@ -1,4 +1,6 @@
 import { Dispatcher } from '@valenced/discord/common/flux'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { compare, forget, importPushes, remember, slim, updateSeen } from './away'
 import { compareNotes } from './tray'
@@ -223,6 +225,33 @@ function withDeleted(payload: any) {
     return { ...payload, messages: all }
 }
 
+/**
+ * 알림 앱이 늦게 넘겨준 "지워진 메시지"를 이미 열려 있는 채팅에 보이게 한다.
+ * 디스코드가 그 채널을 이미 불러 둔 뒤라 끼워 넣을 기회(LOAD_MESSAGES_SUCCESS)가 지나갔으니
+ * 최근 메시지를 다시 불러오게 한다 → 다시 불러올 때 withDeleted 가 제자리에 넣는다.
+ */
+export function showLateDeleted(channelIds: Iterable<string>) {
+    let actions: any
+    try {
+        actions = (lookupModule(withProps('fetchMessages', 'jumpToMessage') as any) as any)?.[0] ?? (lookupModule(withProps('fetchMessages', 'sendMessage') as any) as any)?.[0]
+    } catch {}
+    if (typeof actions?.fetchMessages !== 'function') return 0
+    let n = 0
+    for (const c of channelIds) {
+        if (n >= 3) break
+        try {
+            const ms = (Stores as any).MessageStore?.getMessages?.(c)
+            const loaded = !!ms && (ms.ready === true || (ms.length ?? ms._array?.length ?? 0) > 0)
+            if (!loaded) continue
+            // 지금 보이는 곳이 가장 최근 메시지일 때만 (예전 메시지를 보고 있으면 그 자리를 흔들지 않는다)
+            if (ms.hasMoreAfter === true) continue
+            actions.fetchMessages({ channelId: c, limit: 50 })
+            n++
+        } catch {}
+    }
+    return n
+}
+
 /** 보관 기간이 지난 로그를 지운다. 지금 보이는 지운 메시지는 진짜로 지운다 */
 export function expire() {
     // 예전 버전이 넣은 잘못된 수정 기록 치우기
@@ -399,6 +428,15 @@ export function intercept() {
             } catch {}
             return p
         }),
+        ...['LOCAL_MESSAGES_LOADED', 'LOAD_MESSAGES_SUCCESS_CACHED'].map(type =>
+            onFluxEventDispatched(type as any, (p: any) => {
+                try {
+                    return settings().logDeletes ? withDeleted(p) : p
+                } catch {
+                    return p
+                }
+            }),
+        ),
         onFluxEventDispatched('LOAD_MESSAGES_SUCCESS', (p: any) => {
             try {
                 // 자리 비운 사이 바뀐 것부터 찾고, 지워진 걸 제자리에 넣는다
