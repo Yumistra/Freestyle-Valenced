@@ -1,7 +1,7 @@
 import { callNativeMethod } from '@valenced/modules/native'
 import { allowed } from './filters'
 import { cmp, markChanged } from './logger'
-import { addEdit, keepMs, logs, save, seen, SEEN_MAX, settings, type Entry } from './store'
+import { addEdit, buried, keepMs, logs, save, seen, SEEN_MAX, settings, type Entry } from './store'
 
 /**
  * 자리를 비운 사이 (앱이 꺼져 있거나 연결이 끊긴 동안) 지워지거나 고쳐진 메시지 찾기.
@@ -209,7 +209,7 @@ export function compare(payload: any, me?: string) {
             any = true
         }
         for (const [id, x] of Object.entries(seen())) {
-            if (x.m.channel_id !== channelId || all[id]?.d) continue
+            if (x.m.channel_id !== channelId || all[id]?.d || buried(id, x.s)) continue
             const inRange = (cmp(id, min) >= 0 || oldest) && (cmp(id, max) <= 0 || newest)
             if (!inRange) continue
             const now_ = byId.get(id)

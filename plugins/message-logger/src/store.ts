@@ -176,6 +176,38 @@ export function logs(): Record<string, Entry> {
     return c.logs
 }
 
+/**
+ * 사용자가 지운 로그의 표시 (메시지 ID → 지운 시각).
+ * 알림 앱은 같은 기록을 3일 동안 다시 보내고, 다른 곳에서도 같은 기록이 다시 들어올 수 있다.
+ * 지운 시각 전에 생긴 기록은 다시 넣지 않는다 (그 뒤에 새로 생긴 일, 예: 나중에 진짜로 지워짐은 넣는다).
+ */
+export function gone(): Record<string, number> {
+    const c = storage?.cache
+    if (!c) return {}
+    if (!c.gone || typeof c.gone !== 'object') c.gone = {}
+    return c.gone
+}
+export function bury(id: string) {
+    gone()[id] = Date.now()
+}
+/** 사용자가 지운 로그인지 (at: 그 기록이 생긴 시각, 지운 시각보다 앞이면 다시 넣지 않는다) */
+export function buried(id: string, at: number) {
+    const t = gone()[id]
+    return typeof t === 'number' && at <= t
+}
+/** 알림 앱이 다시 보내는 기간(3일)이나 보관 기간 중 긴 것보다 오래된 표시는 치운다 */
+export function pruneGone() {
+    const all = gone()
+    const limit = Date.now() - Math.max(keepMs(), 4 * 86400_000)
+    let any = false
+    for (const [id, t] of Object.entries(all))
+        if (t < limit) {
+            delete all[id]
+            any = true
+        }
+    return any
+}
+
 /** 기억해 둘 본 메시지 수 상한 */
 export const SEEN_MAX = 3000
 
@@ -249,7 +281,7 @@ function writeNow() {
     if (!ready()) return
     const s = storage
     try {
-        s.set({ ...s.cache, logs: logs(), seen: seen(), notes: notes(), events: events(), profiles: profiles(), settings: settings() }, true)
+        s.set({ ...s.cache, logs: logs(), gone: gone(), seen: seen(), notes: notes(), events: events(), profiles: profiles(), settings: settings() }, true)
     } catch {}
 }
 

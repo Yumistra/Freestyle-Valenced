@@ -4,7 +4,7 @@ import { NativeModules } from 'react-native'
 import { slim } from './away'
 import { allowed } from './filters'
 import { markChanged, showLateDeleted } from './logger'
-import { addEdit, events, logs, save, settings, type Entry, type Event } from './store'
+import { addEdit, buried, events, logs, save, settings, type Entry, type Event } from './store'
 
 /**
  * 로그 내보내기, 가져오기, 그리고 알림 앱(디스코드가 꺼져 있을 때 기록하는 앱)이 보낸 기록 합치기.
@@ -121,6 +121,8 @@ export async function pullCompanion(): Promise<number> {
         if (s.ignoreBots && m.author?.bot) continue
         if (!allowed({ ...m, guild_id: g })) continue
         const at = Number(x.at) || Date.now()
+        // 사용자가 지운 로그는 앱이 다시 보내도 넣지 않는다
+        if (buried(String(m.id), at)) continue
         const e: Entry = all[m.id] ?? { c: String(m.channel_id), at }
         if (g) e.g = String(g)
         if (x.t === 'delete' && s.logDeletes && !e.d) {

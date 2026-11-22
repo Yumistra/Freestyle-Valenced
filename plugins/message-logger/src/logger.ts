@@ -5,7 +5,7 @@ import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
 import { notifyDeleted, pruneEvents } from './events'
 import { allowed } from './filters'
-import { addEdit, cleanEdits, events, keepMs, logs, save, seen, settings, type Entry } from './store'
+import { addEdit, bury, cleanEdits, events, keepMs, logs, pruneGone, save, seen, settings, type Entry } from './store'
 
 const EPHEMERAL = 1 << 6
 const S = () => Stores as any
@@ -315,6 +315,7 @@ export function expire() {
         removeFiles(e.f)
         reallyRemove(id, e)
     }
+    if (pruneGone()) any = true
     if (any) save()
     pruneEvents()
 }
@@ -348,6 +349,7 @@ export function removeOne(id: string) {
     const e = all[id]
     if (!e) return
     delete all[id]
+    bury(id)
     removeFiles(e.f)
     reallyRemove(id, e)
     save(true)
@@ -358,6 +360,7 @@ export function clearMessages() {
     const all = logs()
     for (const [id, e] of Object.entries(all)) {
         delete all[id]
+        bury(id)
         removeFiles(e.f)
         reallyRemove(id, e)
     }
