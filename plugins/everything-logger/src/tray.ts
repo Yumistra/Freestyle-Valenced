@@ -10,7 +10,7 @@ import { addEdit, keepMs, logs, save, settings, type Entry } from './store'
  *  - 불러온 범위 안인데 그 시각 메시지가 없다 → 그사이 지워짐 (그 시각으로 ID 를 만들어 제자리에 넣는다)
  */
 
-const NS = 'yumistra.message-logger'
+const NS = 'yumistra.everything-logger'
 const EPOCH = 1420070400000
 const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
 

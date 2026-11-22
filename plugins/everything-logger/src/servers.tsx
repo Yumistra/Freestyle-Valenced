@@ -5,7 +5,7 @@ import { FlatList, Image } from 'react-native'
 import { onChange, setSettings, settings } from './store'
 
 /** "고른 서버만 기록"에 넣을 서버 고르기 (설정 안의 새 화면) */
-export const SERVERS_ROUTE = 'yumistra.message-logger.servers'
+export const SERVERS_ROUTE = 'yumistra.everything-logger.servers'
 
 const S = () => Stores as any
 

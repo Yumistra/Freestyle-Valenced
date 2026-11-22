@@ -1,4 +1,4 @@
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { rowIcon } from './icons'
 import { Tokens } from '@valenced/discord/common/tokens'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
@@ -23,7 +23,7 @@ function tokenColor(names: string[], fallback: string) {
     return fallback
 }
 
-const ICON: Record<string, string> = { user: 'UserIcon', channel: 'TextIcon', server: 'ServerIcon', unknown: 'IdIcon' }
+const ICON: Record<string, string> = { user: 'UserIcon', channel: 'HashmarkIcon', server: 'ServerIcon', unknown: 'IdIcon' }
 
 /** 두 번 눌러 지우기 (처음 누르면 빨갛게, 3초 안에 한 번 더) */
 function DeleteButton({ onDelete }: { onDelete: () => void }) {
@@ -74,7 +74,7 @@ function ListGroup({ list, title, hint, children }: { list: 'allow' | 'block'; t
                 return (
                     <TableRow
                         key={id}
-                        icon={<TableRowAssetIcon name={ICON[kind]} />}
+                        icon={rowIcon(ICON[kind])}
                         label={nameOf(id)}
                         subLabel={KIND_LABEL[kind]}
                         trailing={

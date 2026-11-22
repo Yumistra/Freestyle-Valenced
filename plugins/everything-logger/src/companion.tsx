@@ -1,4 +1,4 @@
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { rowIcon } from './icons'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
@@ -13,7 +13,7 @@ import { companionStatus, pullCompanion } from './transfer'
  * 여기서 켜고 끈다. 명령은 네이티브(Companion.kt)가 앱의 투명한 Activity 로 보내고, 앱은 상태를 방송으로 돌려준다.
  */
 
-const NS = 'yumistra.message-logger'
+const NS = 'yumistra.everything-logger'
 export const APK_URL = 'https://github.com/Yumistra/Freestyle-Valenced/raw/watch-apk/DiscordWatch.apk'
 
 export interface WatchStatus {
@@ -162,12 +162,12 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
     return (
         <TableRowGroup title="Discord Watch">
             <TableRow
-                icon={<TableRowAssetIcon name="ShieldIcon" />}
+                icon={rowIcon('MobilePhoneShareIcon')}
                 label="Discord Watch"
                 subLabel={`${sub}${companionStatus.last ? `, ${companionStatus.received} added` : ''}`}
             />
             {missing ? (
-                <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Download the app" arrow onPress={() => Linking.openURL(APK_URL)} />
+                <TableRow icon={rowIcon('CloudDownloadIcon')} label="Download the app" arrow onPress={() => Linking.openURL(APK_URL)} />
             ) : (
                 <>
                     {st?.hasToken ? (
@@ -178,11 +178,11 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                         />
                     ) : null}
                     <TableRow
-                        icon={<TableRowAssetIcon name="UserIcon" />}
+                        icon={rowIcon('UserCheckIcon')}
                         label={st?.hasToken ? 'Use this account' : 'Turn on with this account'}
                         onPress={() => turnOn(currentToken())}
                     />
-                    <TableRow icon={<TableRowAssetIcon name="LinkIcon" />} label="Paste a token" arrow onPress={() => setPaste(p => !p)} />
+                    <TableRow icon={rowIcon('KeyIcon')} label="Paste a token" arrow onPress={() => setPaste(p => !p)} />
                     {paste ? (
                         <View style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
                             <TextInput label="Token" value={token} placeholder="Token of the account to watch" onChange={setToken} secureTextEntry autoCapitalize="none" autoCorrect={false} size="md" />
@@ -193,11 +193,11 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                         <TableRow label="Another account is watched" />
                     ) : null}
                     {st?.hasToken && st?.battery === false ? (
-                        <TableRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Keep running in the background" arrow onPress={() => send('battery')} />
+                        <TableRow icon={rowIcon('TimerIcon')} label="Keep running in the background" arrow onPress={() => send('battery')} />
                     ) : null}
                     {st?.hasToken ? (
                         <TableRow
-                            icon={<TableRowAssetIcon name="DownloadIcon" />}
+                            icon={rowIcon('DownloadIcon')}
                             label="Get logs now"
                             subLabel={st?.queued ? `${st.queued} waiting` : undefined}
                             onPress={() =>
@@ -211,7 +211,7 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                             }
                         />
                     ) : null}
-                    {st?.hasToken ? <TableRow icon={<TableRowAssetIcon name="TrashIcon" />} label="Remove the account from the app" onPress={() => send('clearToken')} /> : null}
+                    {st?.hasToken ? <TableRow icon={rowIcon('UserMinusIcon')} label="Remove the account from the app" onPress={() => send('clearToken')} /> : null}
                 </>
             )}
             {msg ? <TableRow label={msg} /> : null}

@@ -1,10 +1,10 @@
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { rowIcon } from './icons'
 import { Design } from '@valenced/discord/design'
 import { refreshSettings, registerSettingsItem } from '@valenced/discord/modules/settings'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useLayoutEffect, useState } from 'react'
-import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
-import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { LayoutAnimation, ScrollView, View } from 'react-native'
+import { openColorPicker, SUGGESTED, toInt } from './colorPicker'
 import { CompanionGroup, sendCompanion, useWatchStatus } from './companion'
 import { FilterSettings } from './filtersUI'
 import { clearAll, expire } from './logger'
@@ -18,49 +18,17 @@ import { exportLogs, importLogs } from './transfer'
  * (값은 그대로, 자리만 나눴다)
  */
 
-const PARENT = 'yumistra.message-logger'
+const PARENT = 'yumistra.everything-logger'
 const routeOf = (key: string) => `${PARENT}.group.${key}`
-
-/** 색 고르기 창에 보이는 추천 색 */
-const SUGGESTED = [0xf23f43, 0xff7a45, 0xf0b232, 0x23a55a, 0x00a8fc, 0x5865f2, 0xb45cf6, 0xeb459e, 0x949ba4]
-const PICKER = 'modules/color_picker/native/showCustomColorPickerActionSheet.tsx'
-
-const toInt = (hex: string) => (/^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : undefined)
-const toHex = (n: number) => `#${(n & 0xffffff).toString(16).padStart(6, '0')}`
-
-/** 디스코드의 색 고르기 창 (프로필 테마 색과 같은 것). 못 찾으면 false */
-function openPicker(color: number, onPick: (hex: string) => void): boolean {
-    let mod: any
-    try {
-        const un = getModuleWithImportedPath(PICKER, (m: any) => (mod = m)) as any
-        if (typeof un === 'function') un()
-    } catch {}
-    const show = mod?.default ?? mod?.showCustomColorPickerActionSheet
-    if (typeof show !== 'function') return false
-    try {
-        show({ color, suggestedColors: SUGGESTED, onSelect: (c: number) => onPick(toHex(c)) })
-        return true
-    } catch {
-        return false
-    }
-}
 
 /** 색 한 줄: 누르면 디스코드 색 고르기 창. 고른 색이 있으면 테마 색으로 되돌리는 줄도 */
 function ColorRow({ label, value, theme, onPick }: { label: string; value: string; theme: string; onPick: (v: string) => void }) {
     const { TableRow, Text } = Design as any
-    const [fallback, setFallback] = useState(false)
     const shown = value || theme
     const swatch = <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: shown, borderWidth: 1, borderColor: 'rgba(128,128,128,0.4)' }} />
     return (
         <>
-            <TableRow label={label} trailing={swatch} onPress={() => openPicker(toInt(value) ?? toInt(theme) ?? SUGGESTED[0], onPick) || setFallback(v => !v)} />
-            {fallback ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}>
-                    {SUGGESTED.map(n => (
-                        <Pressable key={n} accessibilityLabel={`${label} ${toHex(n)}`} onPress={() => (onPick(toHex(n)), setFallback(false))} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: toHex(n), borderWidth: value === toHex(n) ? 3 : 0, borderColor: '#ffffff' }} />
-                    ))}
-                </View>
-            ) : null}
+            <TableRow label={label} trailing={swatch} onPress={() => openColorPicker(toInt(value) ?? toInt(theme) ?? SUGGESTED[0], onPick)} />
             {value ? (
                 <TableRow
                     label={
@@ -115,16 +83,16 @@ function WhatToLog() {
     return (
         <Page>
             <TableRowGroup title="Messages">
-                <TableSwitchRow icon={<TableRowAssetIcon name="TrashIcon" />} label="Deleted messages" value={s.logDeletes} onValueChange={(logDeletes: boolean) => set({ logDeletes })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="PencilIcon" />} label="Edited messages" value={s.logEdits} onValueChange={(logEdits: boolean) => set({ logEdits })} />
-                <TableSwitchRow label="Log DMs and group DMs" value={s.logDms} onValueChange={(logDms: boolean) => set({ logDms })} />
-                <TableSwitchRow label="Ignore my messages" value={s.ignoreSelf} onValueChange={(ignoreSelf: boolean) => set({ ignoreSelf })} />
-                <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
+                <TableSwitchRow icon={rowIcon('TrashIcon')} label="Deleted messages" value={s.logDeletes} onValueChange={(logDeletes: boolean) => set({ logDeletes })} />
+                <TableSwitchRow icon={rowIcon('PencilIcon')} label="Edited messages" value={s.logEdits} onValueChange={(logEdits: boolean) => set({ logEdits })} />
+                <TableSwitchRow icon={rowIcon('ChatIcon')} label="Log DMs and group DMs" value={s.logDms} onValueChange={(logDms: boolean) => set({ logDms })} />
+                <TableSwitchRow icon={rowIcon('UserCircleIcon')} label="Ignore my messages" value={s.ignoreSelf} onValueChange={(ignoreSelf: boolean) => set({ ignoreSelf })} />
+                <TableSwitchRow icon={rowIcon('AppsIcon')} label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
             </TableRowGroup>
             <TableRowGroup title="Other changes">
-                <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="TextIcon" />} label="Deleted channels and threads" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="UserIcon" />} label="Profile changes" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
+                <TableSwitchRow icon={rowIcon('ReactionIcon')} label="Removed reactions" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
+                <TableSwitchRow icon={rowIcon('HashmarkIcon')} label="Deleted channels and threads" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
+                <TableSwitchRow icon={rowIcon('UserIcon')} label="Profile changes" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
             </TableRowGroup>
         </Page>
     )
@@ -138,7 +106,7 @@ function WhoAndWhere() {
         <Page>
             <TableRowGroup title="Servers">
                 <TableSwitchRow label="Only log chosen servers" value={s.onlyServersOn} onValueChange={(onlyServersOn: boolean) => set({ onlyServersOn })} />
-                {s.onlyServersOn ? <TableRow icon={<TableRowAssetIcon name="ServerIcon" />} label="Choose servers" subLabel={`${(s.onlyServers ?? []).length} chosen`} arrow onPress={() => nav?.navigate?.(SERVERS_ROUTE)} /> : null}
+                {s.onlyServersOn ? <TableRow icon={rowIcon('ServerIcon')} label="Choose servers" subLabel={`${(s.onlyServers ?? []).length} chosen`} arrow onPress={() => nav?.navigate?.(SERVERS_ROUTE)} /> : null}
             </TableRowGroup>
             <FilterSettings set={set} />
         </Page>
@@ -177,13 +145,13 @@ function Notifications() {
     return (
         <Page>
             <TableRowGroup title="While Discord runs">
-                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Notify when a DM or mention is deleted" value={s.notifyDeletes} onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })} />
+                <TableSwitchRow icon={rowIcon('BellIcon')} label="Notify when a DM or mention is deleted" value={s.notifyDeletes} onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })} />
             </TableRowGroup>
             <TableRowGroup title="While Discord is closed">
                 {st?.hasToken && !missing ? (
                     <>
                         <TableSwitchRow
-                            icon={<TableRowAssetIcon name="BellIcon" />}
+                            icon={rowIcon('BellIcon')}
                             label="Notify when a DM or mention is deleted"
                             subLabel={st?.notifPermission === false && st?.notify ? 'Blocked' : undefined}
                             value={!!st?.notify}
@@ -206,8 +174,8 @@ function WhileClosed() {
         <Page>
             <CompanionGroup />
             <TableRowGroup title="Without the app">
-                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Remember notifications" value={s.rememberPushes} onValueChange={(rememberPushes: boolean) => set({ rememberPushes })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Find changes when you come back" value={s.detectAway} onValueChange={(detectAway: boolean) => set({ detectAway })} />
+                <TableSwitchRow icon={rowIcon('BellZIcon')} label="Remember notifications" value={s.rememberPushes} onValueChange={(rememberPushes: boolean) => set({ rememberPushes })} />
+                <TableSwitchRow icon={rowIcon('ClockIcon')} label="Find changes when you come back" value={s.detectAway} onValueChange={(detectAway: boolean) => set({ detectAway })} />
             </TableRowGroup>
         </Page>
     )
@@ -236,7 +204,7 @@ function Storage() {
                 ))}
             </TableRadioGroup>
             <TableRowGroup title="Attachments">
-                <TableSwitchRow icon={<TableRowAssetIcon name="ImageIcon" />} label="Save deleted attachments" value={s.saveAttachments} onValueChange={(saveAttachments: boolean) => set({ saveAttachments })} />
+                <TableSwitchRow icon={rowIcon('ImagesIcon')} label="Save deleted attachments" value={s.saveAttachments} onValueChange={(saveAttachments: boolean) => set({ saveAttachments })} />
             </TableRowGroup>
             <Stack spacing={8}>
                 <NavButton icon="DownloadIcon" label="Export logs" arrow={false} onPress={() => run(async () => `Saved to ${await exportLogs()}`)} />
@@ -273,7 +241,7 @@ const GROUPS: Group[] = [
     {
         key: 'chat',
         title: 'In chat',
-        icon: 'PencilIcon',
+        icon: 'ChatIcon',
         screen: InChat,
     },
     {
@@ -285,13 +253,13 @@ const GROUPS: Group[] = [
     {
         key: 'closed',
         title: 'While Discord is closed',
-        icon: 'ClockIcon',
+        icon: 'MobilePhoneIcon',
         screen: WhileClosed,
     },
     {
         key: 'storage',
         title: 'Storage',
-        icon: 'DownloadIcon',
+        icon: 'SaveIcon',
         screen: Storage,
     },
 ]
@@ -346,47 +314,18 @@ export function registerGroups(cleanup: (...f: any[]) => void) {
 /** 디스코드 Row Button (카드 모양 큰 버튼), 없으면 표 줄 */
 function NavButton({ icon, label, sub, onPress, arrow = true }: { icon: string; label: string; sub?: string; onPress: () => void; arrow?: boolean; key?: string }) {
     const { RowButton, TableRow } = Design as any
-    if (RowButton) return <RowButton icon={<TableRowAssetIcon name={icon} />} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
-    return <TableRow icon={<TableRowAssetIcon name={icon} />} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
-}
-
-/** 숫자들: 디스코드 Tag Group (읽기 전용 태그), 없으면 글 */
-function Counts({ items }: { items: string[] }) {
-    const { TagGroup, Text } = Design as any
-    if (TagGroup) return <TagGroup label="Logs" items={items.map((label, i) => ({ id: String(i), label }))} />
-    return (
-        <Text variant="text-sm/medium" color="text-muted">
-            {items.join(', ')}
-        </Text>
-    )
+    if (RowButton) return <RowButton icon={rowIcon(icon)} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
+    return <TableRow icon={rowIcon(icon)} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
 }
 
 export function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bindIfNone(api.jsonStorage)
     useSettings()
     const nav = useNav()
-    const all = Object.values(logs())
-    const ev = events()
-    const deleted = all.filter(e => e.d).length
-    const edited = all.filter(e => !e.d && e.e?.length).length
-    const away = all.filter(e => e.away).length
     const { Stack } = Design as any
     return (
         <Page>
-            <Stack spacing={12}>
-                <Counts
-                    items={[
-                        `${deleted} deleted`,
-                        `${edited} edited`,
-                        `${ev.filter(e => e.k === 'r').length} reactions`,
-                        `${ev.filter(e => e.k === 'c').length} channels`,
-                        `${ev.filter(e => e.k === 'p').length} profiles`,
-                        `${away} while away`,
-                        `${Object.keys(seen()).length} remembered`,
-                    ]}
-                />
-                <NavButton icon="ChatXIcon" label="View logs" onPress={() => nav?.navigate?.(LOGS_ROUTE)} />
-            </Stack>
+            <NavButton icon="ClipboardListIcon" label="View logs" onPress={() => nav?.navigate?.(LOGS_ROUTE)} />
             <Stack spacing={8}>
                 {GROUPS.map(g => (
                     <NavButton key={g.key} icon={g.icon} label={g.title} onPress={() => nav?.navigate?.(routeOf(g.key))} />
@@ -397,3 +336,6 @@ export function SettingsPage({ api }: { api?: any }) {
 }
 
 export { sendCompanion }
+
+/** 시험용: 그룹 화면들 */
+export const groupScreens = () => GROUPS.map(g => ({ key: g.key, title: g.title, Screen: g.screen }))

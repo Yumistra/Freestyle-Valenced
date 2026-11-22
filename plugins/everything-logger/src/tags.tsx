@@ -1,7 +1,7 @@
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { iconComponent } from './icons'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, TextInput as RNTextInput, View } from 'react-native'
 import { ChipRow, dayMs, DM, palette, toggle, type Item } from './logs'
@@ -199,7 +199,7 @@ export function TagSearchBox<T>({ value, onChange, placeholder, items, groups, s
                 ) : null}
             </View>
             <Pressable accessibilityLabel="filters" onPress={() => (anim(), setOpen(!open))} hitSlop={8} style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: open || active ? P.brandSoft : P.input }}>
-                <TableRowAssetIcon name="FiltersHorizontalIcon" />
+                {(() => { const C = iconComponent("FiltersHorizontalIcon"); return C ? <C size="md" color={P.text} /> : null })()}
                 {active ? (
                     <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: P.brand, alignItems: 'center', justifyContent: 'center' }}>
                         <Text variant="text-xs/bold" style={{ color: P.onBrand }}>

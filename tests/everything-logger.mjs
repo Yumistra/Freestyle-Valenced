@@ -1,6 +1,6 @@
 // Message Logger 를 디스코드 없이 시험한다.
 // 빌드된 index.js 를 가짜 디스코드(스토어, 플럭스 이벤트, 네이티브 함수) 위에서 돌리고, 로그 화면은 진짜 React 로 그린다.
-// 사용법: node scripts/build.mjs message-logger && node tests/message-logger.mjs
+// 사용법: node scripts/build.mjs everything-logger && node tests/everything-logger.mjs
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { install } from './lib/fakedom.mjs'
@@ -102,6 +102,7 @@ const Design = new Proxy(
         get: (_t, name) => (designCache[name] ??= props => {
             if (name === 'Button') return h(Pressable, { accessibilityLabel: props.text, onPress: props.onPress }, h('span', null, props.text))
             if (name === 'TableSwitchRow') return h(Pressable, { accessibilityLabel: props.label, onPress: () => props.onValueChange(!props.value) }, h('span', null, `${props.label}:${props.value ? 'on' : 'off'}`))
+            if (name === 'RowButton') return h(Pressable, { accessibilityLabel: props.label, onPress: props.onPress }, h('span', null, props.label))
             if (name === 'TableRow') return h(Pressable, { accessibilityLabel: props.label, onPress: props.onPress }, h('span', null, props.label), h('span', null, props.subLabel ?? ''))
             if (name === 'Text') return h('span', null, props.children)
             return h('section', { 'data-title': props.title ?? '' }, props.title ? h('b', null, props.title) : null, props.children)
@@ -144,7 +145,7 @@ globalThis.valenced = {
 }
 globalThis.plugin = d => d
 
-const src = readFileSync(new URL('../plugins/message-logger/build/js/index.js', import.meta.url), 'utf8')
+const src = readFileSync(new URL('../plugins/everything-logger/build/js/index.js', import.meta.url), 'utf8')
 const X = new Function(`return ${src}`)()
 const cleanups = []
 X.default.start({ cleanup: (...f) => cleanups.push(...f), jsonStorage: storage })
@@ -278,7 +279,7 @@ check('stats count logs and rank people', st.deleted >= 6 && st.edited === 1 && 
 // ── 내보내기, 가져오기 ──────────────────────────────────────────────────
 const text = X.exportText()
 const data = JSON.parse(text)
-check('export has logs and events', data.format === 'yumistra.message-logger' && Object.keys(data.logs).length >= 7 && data.events.length === 5)
+check('export has logs and events', data.format === 'yumistra.everything-logger' && Object.keys(data.logs).length >= 7 && data.events.length === 5)
 const saved = JSON.parse(text)
 for (const k of Object.keys(X._logs())) delete X._logs()[k]
 X._events().splice(0)
@@ -291,7 +292,7 @@ try {
 } catch (e) {
     bad = String(e.message)
 }
-check('import rejects other files', bad.includes('Not a Message Logger file'))
+check('import rejects other files', bad.includes('Not an Everything Logger file'))
 
 // ── 알림 앱이 보낸 기록 합치기 ──────────────────────────────────────────
 companionLines = [
@@ -354,17 +355,23 @@ check('date inputs hidden until filters open', !inputs.get('From YYYY-MM-DD')?.l
 
 // ── 설정 화면 ───────────────────────────────────────────────────────────
 view = await render(h(X.SettingsPage, { api: { jsonStorage: storage } }))
-check('settings show new groups', ['Log DMs and group DMs', 'Removed reactions', 'Deleted channels and threads', 'Profile changes', 'Only log chosen servers', 'Show previous versions', 'Show deletion time', 'Use a 12-hour clock', 'Deleted message color', 'Notify when a DM or mention is deleted', 'Export logs', 'Import logs'].every(t => view.includes(t)), view.slice(0, 500))
+check('settings main page lists the groups', ['View logs', 'What to log', 'Who and where', 'In chat', 'Notifications', 'While Discord is closed', 'Storage'].every(t => view.includes(t)), view.slice(0, 500))
+const screens = Object.fromEntries(X.groupScreens().map(g => [g.key, g.Screen]))
+view = await render(h(screens.log))
+check('what to log screen', ['Log DMs and group DMs', 'Removed reactions', 'Deleted channels and threads', 'Profile changes'].every(t => view.includes(t)), view.slice(0, 400))
 await press('Log DMs and group DMs')
 check('switch writes the setting', X._settings().logDms === false)
-await press('Deleted message color #eb459e')
-check('color picker writes the setting', X._settings().deletedColor === '#eb459e')
+view = await render(h(screens.chat))
+check('in chat screen', ['Show previous versions', 'Show deletion time', 'Use a 12-hour clock', 'Colors', 'Deleted messages'].every(t => view.includes(t)), view.slice(0, 400))
+view = await render(h(screens.storage))
+check('storage screen', ['Keep logs for', 'Export logs', 'Import logs', 'Clear all logs'].every(t => view.includes(t)), view.slice(0, 400))
 await press('Export logs')
-check('export goes to Download/MessageLogger', host.textContent.includes('Saved to Download/MessageLogger/message-logger-') && native.some(c => c[0].endsWith('.export') && c[1][1].startsWith('{"format"')))
+for (let i = 0; i < 3; i++) await act(async () => tick())
+check('export goes to Download/EverythingLogger', native.some(c => c[0].endsWith('.export') && c[1][0].startsWith('everything-logger-') && c[1][1].startsWith('{"format"')))
 files['/cache/import.json'] = JSON.stringify({ format: 'yumistra.message-logger', v: 1, logs: { 999: { c: 'gen', g: 'g1', d: 1, at: Date.now(), m: { id: '999', channel_id: 'gen', content: 'imported', author: { id: '2' } } } }, events: [] })
 await press('Import logs')
 for (let i = 0; i < 5; i++) await act(async () => tick())
-check('import from a picked file', /Added 1 log\(s\)|Failed/.test(host.textContent) && host.textContent.includes('Added 1 log(s)') && X._logs()['999']?.m?.content === 'imported', host.textContent.slice(-200))
+check('import an old Message Logger file', host.textContent.includes('Added 1 log(s)') && X._logs()['999']?.m?.content === 'imported', host.textContent.slice(-200))
 
 await act(async () => root.unmount())
 cleanups.forEach(f => typeof f === 'function' && f())

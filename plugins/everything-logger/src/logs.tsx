@@ -5,7 +5,7 @@ import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { getModules } from '@valenced/modules/finders'
 import { callNativeMethod } from '@valenced/modules/native'
 import { withProps } from '@valenced/modules/finders/filters'
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { iconComponent } from './icons'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
@@ -160,7 +160,7 @@ export function goToMessage(nav: any, channelId: string, messageId: string, guil
     }
     const url = `https://discord.com/channels/${g ?? '@me'}/${channelId}/${messageId}`
     setTimeout(() => {
-        ;(callNativeMethod as any)('yumistra.message-logger.openLink', [url])
+        ;(callNativeMethod as any)('yumistra.everything-logger.openLink', [url])
             .then((r: any) => {
                 const v = r && typeof r === 'object' && 'result' in r ? r.result : r
                 if (v !== 'ok') throw new Error(String(v))
@@ -479,7 +479,7 @@ const SEARCH_HINTS: Array<[string, string]> = [
 
 export const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
 
-export const LOGS_ROUTE = 'yumistra.message-logger.logs'
+export const LOGS_ROUTE = 'yumistra.everything-logger.logs'
 
 /** 설정 안의 새 화면 (위쪽 화살표, 뒤로 가기는 디스코드가 알아서) */
 export function LogsScreen({ navigation }: { navigation?: any }) {
@@ -726,7 +726,7 @@ function MessagesView() {
                         hitSlop={8}
                         style={{ marginLeft: 8, width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: showFilters || active ? P.brandSoft : P.input }}
                     >
-                        <TableRowAssetIcon name="FiltersHorizontalIcon" />
+                        {(() => { const C = iconComponent("FiltersHorizontalIcon"); return C ? <C size="md" color={P.text} /> : null })()}
                         {active ? (
                             <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: P.brand, alignItems: 'center', justifyContent: 'center' }}>
                                 <Text variant="text-xs/bold" style={{ color: P.onBrand }}>

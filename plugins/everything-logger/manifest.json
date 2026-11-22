@@ -1,11 +1,11 @@
 {
 	"format": 1,
-	"id": "yumistra.message-logger",
+	"id": "yumistra.everything-logger",
 	"name": "Everything Logger",
 	"description": "Keeps deleted and edited messages, removed reactions, deleted channels and profile changes.",
 	"author": "Yumistra",
 	"icon": "ChatXIcon",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}

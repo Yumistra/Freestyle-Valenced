@@ -92,6 +92,8 @@ export interface Settings {
     notifyDeletes: boolean
     /** 저장한 검색 */
     searches: SavedSearch[]
+    /** 디스코드 색 고르기 창 모듈 번호 (같은 빌드일 때 바로 불러오려고) */
+    pickerModule?: { id: number; build: string }
 }
 
 export interface SavedSearch {

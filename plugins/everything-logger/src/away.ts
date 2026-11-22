@@ -15,7 +15,7 @@ import { addEdit, buried, keepMs, logs, save, seen, SEEN_MAX, settings, type Ent
  */
 
 const EPHEMERAL = 1 << 6
-const NATIVE = 'yumistra.message-logger.takePushed'
+const NATIVE = 'yumistra.everything-logger.takePushed'
 
 /** 설정 화면의 상태 표시용 */
 export const status = { native: 'unknown' as 'unknown' | 'ok' | 'missing', imported: 0, lastPush: 0, lastError: '' }

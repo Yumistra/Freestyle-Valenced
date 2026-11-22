@@ -1,4 +1,4 @@
-import TableRowAssetIcon from '@valenced/components/TableRowAssetIcon'
+import { rowIcon } from './icons'
 import { Constants } from '@valenced/discord/common/constants'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { Tokens } from '@valenced/discord/common/tokens'
@@ -22,7 +22,7 @@ import { onChange, settings } from './store'
  * 각 화면은 설정 안의 새 화면(route)으로 열린다.
  */
 
-export const PICKER_ROUTE = 'yumistra.message-logger.picker'
+export const PICKER_ROUTE = 'yumistra.everything-logger.picker'
 type List = 'allow' | 'block'
 interface Params {
     list: List
@@ -174,7 +174,7 @@ function dms(): Item[] {
 
 function Avatar({ item }: { item: Item }) {
     if (item.image) return <Image source={{ uri: item.image }} style={{ width: 32, height: 32, borderRadius: 16 }} />
-    return <TableRowAssetIcon name={item.icon} />
+    return rowIcon(item.icon)
 }
 
 function useToggle(list: List) {

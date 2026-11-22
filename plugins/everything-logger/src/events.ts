@@ -12,7 +12,7 @@ import { events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event,
  */
 
 const S = () => Stores as any
-const NOTIFY = 'yumistra.message-logger.notify'
+const NOTIFY = 'yumistra.everything-logger.notify'
 
 const myId = (): string | undefined => {
     try {

@@ -71,7 +71,7 @@ internal object Tray {
     private fun str(c: CharSequence?): String = c?.toString() ?: ""
 }
 
-/** 플러그인 JS 가 묻는 네이티브 상태 (yumistra.message-logger.status) */
+/** 플러그인 JS 가 묻는 네이티브 상태 (yumistra.everything-logger.status) */
 internal object Diag {
     @Volatile
     var hooked = ""

@@ -13,7 +13,7 @@ import { patchSheet } from './sheet'
 import { setNative, setPills, styleRow } from './rows'
 import { interceptEvents } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
-import { pullCompanion } from './transfer'
+import { migrateOld, pullCompanion } from './transfer'
 import { autoCollect } from './companion'
 import { patchReactors } from './reactors'
 import { registerGroups, SettingsPage } from './settingsUI'
@@ -31,7 +31,7 @@ const patched = new WeakSet<object>()
  * 예전 내용·시간을 만드는 중 (그 안에서 불리는 generate 는 어느 층이든 꾸미지 않는다).
  * 플러그인을 다시 설치·업데이트해서 예전 인스턴스가 남아 있어도 같이 보도록 전역에 둔다
  */
-const INNER = Symbol.for('yumistra.message-logger.inner')
+const INNER = Symbol.for('yumistra.everything-logger.inner')
 const g: any = globalThis as any
 const innerCount = () => g[INNER] ?? 0
 const enter = () => {
@@ -45,6 +45,12 @@ export default plugin({
     jsonStorage: { load: true, default: {} },
     start({ cleanup, jsonStorage }: any) {
         bind(jsonStorage)
+        // 처음 켤 때 한 번: 예전 Message Logger 의 로그와 설정을 가져온다
+        migrateOld(jsonStorage)
+            .then(n => {
+                if (n) expire()
+            })
+            .catch(() => {})
         registerPicker(cleanup)
         // 저장된 로그가 불러와지면 오래된 것부터 정리
         const me = () => {
@@ -75,7 +81,7 @@ export default plugin({
             cleanup(
                 registerSettingsItem(LOGS_ROUTE, {
                     type: 'route',
-                    parent: 'yumistra.message-logger',
+                    parent: 'yumistra.everything-logger',
                     unsearchable: true,
                     usePredicate: () => false,
                     useTitle: () => 'Logs',
@@ -93,7 +99,7 @@ export default plugin({
             cleanup(
                 registerSettingsItem(SERVERS_ROUTE, {
                     type: 'route',
-                    parent: 'yumistra.message-logger',
+                    parent: 'yumistra.everything-logger',
                     unsearchable: true,
                     usePredicate: () => false,
                     useTitle: () => 'Servers to log',
@@ -200,4 +206,5 @@ export { allowed } from './filters'
 export { styleRow, setNative } from './rows'
 export { LogsView } from './logs'
 export { SettingsPage }
+export { groupScreens } from './settingsUI'
 export { logs as _logs, events as _events, settings as _settings, setSettings as _setSettings } from './store'

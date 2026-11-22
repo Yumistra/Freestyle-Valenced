@@ -10,7 +10,7 @@ import { addEdit, buried, events, logs, save, settings, type Entry, type Event }
  * 로그 내보내기, 가져오기, 그리고 알림 앱(디스코드가 꺼져 있을 때 기록하는 앱)이 보낸 기록 합치기.
  */
 
-const NS = 'yumistra.message-logger'
+const NS = 'yumistra.everything-logger'
 const unwrap = (r: any) => (r && typeof r === 'object' && 'result' in r ? r.result : r)
 const call = async (name: string, args: any[]) => {
     const r: any = await (callNativeMethod as any)(`${NS}.${name}`, args)
@@ -18,7 +18,9 @@ const call = async (name: string, args: any[]) => {
     return unwrap(r)
 }
 
-export const FORMAT = 'yumistra.message-logger'
+export const FORMAT = 'yumistra.everything-logger'
+/** Message Logger 때 내보낸 파일 */
+const OLD_FORMAT = 'yumistra.message-logger'
 
 /** 지금 로그를 JSON 글로 */
 export function exportText(): string {
@@ -35,7 +37,7 @@ export async function exportLogs(): Promise<string> {
 
 /** 두 로그 합치기 (이미 있는 건 수정 기록만 더한다). 더한 개수 */
 export function mergeData(data: any): number {
-    if (!data || data.format !== FORMAT) throw new Error('Not an Everything Logger file')
+    if (!data || (data.format !== FORMAT && data.format !== OLD_FORMAT)) throw new Error('Not an Everything Logger file')
     const mine = logs()
     let added = 0
     for (const [id, e] of Object.entries((data.logs ?? {}) as Record<string, Entry>)) {
@@ -149,5 +151,57 @@ export async function pullCompanion(): Promise<number> {
             showLateDeleted(lateDeleted)
         } catch {}
     }
+    return n
+}
+
+// ── Message Logger 에서 옮겨 오기 (플러그인 ID 가 바뀌었다) ─────────────
+const KEYS = ['logs', 'seen', 'notes', 'profiles', 'gone'] as const
+
+/**
+ * 처음 켤 때 한 번: 예전 Message Logger 의 저장 내용(로그, 기억, 기록, 설정)을 가져온다.
+ * 이미 있는 건 덮지 않고 합친다. 가져온 로그 수를 돌려준다.
+ */
+export async function migrateOld(storage: any): Promise<number> {
+    const c = storage?.cache
+    if (!c || typeof c !== 'object' || c.migrated) return 0
+    let text = ''
+    try {
+        text = String((await call('migrate', [])) ?? '')
+    } catch {
+        return 0
+    }
+    if (!text.trim() || text.startsWith('error')) {
+        c.migrated = Date.now()
+        save(true)
+        return 0
+    }
+    let old: any
+    try {
+        old = JSON.parse(text)
+    } catch {
+        return 0
+    }
+    if (old && typeof old === 'object' && !old.logs && old.data && typeof old.data === 'object') old = old.data
+    let n = 0
+    for (const k of KEYS) {
+        const src = old?.[k]
+        if (!src || typeof src !== 'object') continue
+        const dst = (c[k] && typeof c[k] === 'object' ? c[k] : (c[k] = {})) as Record<string, any>
+        for (const [id, v] of Object.entries(src))
+            if (!(id in dst)) {
+                dst[id] = v
+                if (k === 'logs') n++
+            }
+    }
+    if (Array.isArray(old?.events)) {
+        const ev: any[] = Array.isArray(c.events) ? c.events : (c.events = [])
+        const have = new Set(ev.map(e => e?.id))
+        for (const e of old.events) if (e?.id && !have.has(e.id)) ev.push(e)
+        ev.sort((a, b) => (a?.at ?? 0) - (b?.at ?? 0))
+    }
+    // 설정: 이쪽에서 아직 아무것도 안 바꿨으면 예전 설정을 그대로
+    if (old?.settings && typeof old.settings === 'object' && (!c.settings || !Object.keys(c.settings).length)) c.settings = { ...old.settings }
+    c.migrated = Date.now()
+    save(true)
     return n
 }
