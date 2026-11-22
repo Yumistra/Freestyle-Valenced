@@ -49,6 +49,13 @@ function picked(hex: string | undefined, token: string, fallback: string) {
     return themeColor(token, fallback)
 }
 const red = () => picked(settings().deletedColor, 'TEXT_FEEDBACK_CRITICAL', '#f23f43')
+
+/** 지운 표시 색 (설정에서 고른 색, 없으면 지금 테마의 빨간색)을 css 색 글자로, alpha 0~1 */
+export function redCss(alpha = 1) {
+    const c = red()
+    if (typeof c !== 'number') return alpha >= 1 ? '#f23f43' : `rgba(242,63,67,${alpha})`
+    return `rgba(${(c >> 16) & 0xff},${(c >> 8) & 0xff},${c & 0xff},${alpha})`
+}
 const gray = () => picked(settings().editedColor, 'TEXT_MUTED', '#949ba4')
 
 const text = (content: string) => ({ type: 'text', content })
