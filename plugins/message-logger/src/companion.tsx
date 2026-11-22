@@ -91,15 +91,11 @@ export function describe(s: WatchStatus | undefined, missing: boolean, me?: stri
     return parts.join(', ')
 }
 
-export function CompanionGroup() {
-    const { TableRowGroup, TableRow, TableSwitchRow, TextInput, Button } = Design as any
+/** 앱 상태 (설정을 보는 동안 1초마다 읽는다). ask 면 열 때 앱에 상태를 한 번 묻는다 */
+export function useWatchStatus(ask = true) {
     const [st, setSt] = useState<WatchStatus | undefined>()
     const [missing, setMissing] = useState(false)
     const [msg, setMsg] = useState('')
-    const [paste, setPaste] = useState(false)
-    const [token, setToken] = useState('')
-    const me = myId()
-
     const send = async (cmd: string, data?: Record<string, unknown>) => {
         const r = await sendCompanion(cmd, data)
         if (r === 'missing') setMissing(true)
@@ -107,12 +103,10 @@ export function CompanionGroup() {
         else setMissing(false)
         return r
     }
-
     useEffect(() => {
         let alive = true
         readCompanion().then(s => alive && setSt(s))
-        send('status')
-        // 설정을 보는 동안 앱이 보내는 상태를 1초마다 읽는다 (네이티브가 받아 둔 것)
+        if (ask) send('status')
         const t = setInterval(() => {
             readCompanion().then(s => alive && s && setSt(s))
         }, 1000)
@@ -121,6 +115,35 @@ export function CompanionGroup() {
             clearInterval(t)
         }
     }, [])
+    return { st, missing, msg, setMsg, send }
+}
+
+/**
+ * 디스코드가 켜지거나 돌아올 때 Discord Watch 에 모아 둔 기록을 보내 달라고 한다.
+ * 앱이 없거나 계정이 없으면 하지 않는다. 앱을 여는 것도 디스코드를 잠깐 멈추게 하니 (돌아오면 다시 불린다) 10분에 한 번만.
+ * 보낸 기록은 네이티브가 받아 파일에 두고, 잠시 뒤 합친다.
+ */
+let lastAsk = 0
+let noApp = false
+export async function autoCollect() {
+    if (noApp) return
+    const known = await readCompanion()
+    if (known && !known.hasToken) return
+    const now = Date.now()
+    if (now - lastAsk < 10 * 60_000) return
+    lastAsk = now
+    const r = await sendCompanion('deliver')
+    if (r === 'missing') noApp = true
+    if (r !== 'ok') return
+    for (const ms of [2000, 6000]) setTimeout(() => pullCompanion().catch(() => {}), ms)
+}
+
+export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
+    const { TableRowGroup, TableRow, TableSwitchRow, TextInput, Button } = Design as any
+    const { st, missing, msg, setMsg, send } = useWatchStatus()
+    const [paste, setPaste] = useState(false)
+    const [token, setToken] = useState('')
+    const me = myId()
 
     const turnOn = (t: string | undefined) => {
         if (!t || t.trim().length < 20) return setMsg('Could not read the token')
@@ -129,17 +152,19 @@ export function CompanionGroup() {
             if (r === 'ok') {
                 setPaste(false)
                 setToken('')
+                noApp = false
+                onTurnedOn?.()
             }
         })
     }
 
     const sub = describe(st, missing, me)
     return (
-        <TableRowGroup title="Companion app">
+        <TableRowGroup title="Discord Watch">
             <TableRow
                 icon={<TableRowAssetIcon name="ShieldIcon" />}
                 label="Discord Watch"
-                subLabel={`${sub}. Catches deleted and edited messages while Discord is closed.${companionStatus.last ? ` Sent ${companionStatus.received} log(s) so far.` : ''}`}
+                subLabel={`${sub}. Catches deleted and edited messages while Discord is closed, they show up in View logs when you open Discord.${companionStatus.last ? ` Added ${companionStatus.received} so far.` : ''}`}
             />
             {missing ? (
                 <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Download the app" subLabel="Install it, then come back here" arrow onPress={() => Linking.openURL(APK_URL)} />
@@ -168,18 +193,6 @@ export function CompanionGroup() {
                     {st?.userId && me && st.userId !== me ? (
                         <TableRow label="Another account is watched" subLabel="Its deleted messages show in View logs, not in chat" />
                     ) : null}
-                    {st?.hasToken ? (
-                        <TableSwitchRow
-                            icon={<TableRowAssetIcon name="BellIcon" />}
-                            label="Notify deleted DMs and mentions"
-                            subLabel={st?.notifPermission === false && st?.notify ? 'Notifications are blocked for the app, tap to allow' : 'While Discord is closed'}
-                            value={!!st?.notify}
-                            onValueChange={(notify: boolean) => send('setup', { notify })}
-                        />
-                    ) : null}
-                    {st?.hasToken && st?.notifPermission === false && st?.notify ? (
-                        <TableRow label="Allow notifications" arrow onPress={() => send('setup', { notify: true, enabled: !!st?.enabled })} />
-                    ) : null}
                     {st?.hasToken && st?.battery === false ? (
                         <TableRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Keep running in the background" subLabel="Lets the app ignore battery optimization" arrow onPress={() => send('battery')} />
                     ) : null}
@@ -192,7 +205,7 @@ export function CompanionGroup() {
                                 send('deliver').then(() =>
                                     setTimeout(() => {
                                         pullCompanion()
-                                            .then(n => setMsg(`Added ${n} log(s)`))
+                                            .then(n => setMsg(n ? `Added ${n} new log(s)` : 'Everything is already in View logs'))
                                             .catch(() => {})
                                     }, 1500),
                                 )

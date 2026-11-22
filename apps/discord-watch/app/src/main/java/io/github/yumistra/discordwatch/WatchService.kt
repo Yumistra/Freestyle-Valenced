@@ -252,9 +252,11 @@ class WatchService : Service() {
         if (before == after) return
         val next = JSONObject(old.toString()).put("content", after)
         Store.remember(this, next)
-        Store.enqueue(this, JSONObject().put("t", "edit").put("at", System.currentTimeMillis()).put("g", old.opt("guild_id") ?: JSONObject.NULL).put("m", next).put("before", before))
+        val line = JSONObject().put("t", "edit").put("at", System.currentTimeMillis()).put("g", old.opt("guild_id") ?: JSONObject.NULL).put("m", next).put("before", before)
+        Store.enqueue(this, line)
         Status.edited++
-        if (Status.discordOpen) deliver(this)
+        // 디스코드가 켜져 있으면 바로 받는다 (꺼져 있으면 아무도 안 받고, 켤 때 플러그인이 전부 다시 달라고 한다)
+        sendNow(line)
         main.post { Control.reportSoon(this) }
     }
 
@@ -266,8 +268,14 @@ class WatchService : Service() {
         if (g != null) line.put("g", g)
         Store.enqueue(this, line)
         Status.deleted++
-        if (Status.discordOpen) deliver(this) else maybeNotify(m, channel, g)
+        sendNow(line)
+        if (!Status.discordOpen) maybeNotify(m, channel, g)
         main.post { Control.reportSoon(this) }
+    }
+
+    private fun sendNow(line: JSONObject) {
+        send(this, Store.target(this), line.toString() + "\n")
+        Status.lastSent = System.currentTimeMillis()
     }
 
     private fun maybeNotify(m: JSONObject, channel: String, guild: String?) {
