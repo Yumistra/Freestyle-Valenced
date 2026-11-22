@@ -21,7 +21,7 @@ import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { pullCompanion } from './transfer'
 import { autoCollect } from './companion'
 import { registerGroups, SettingsPage } from './settingsUI'
-import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, unbind, type Settings } from './store'
+import { bind, flush, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, unbind, type Settings } from './store'
 
 /**
  * Message Logger: 지운 메시지는 빨간, 수정한 메시지는 연한 회색으로 핑(노란 배경)과 같은 모양으로 남긴다.
@@ -115,6 +115,8 @@ export default plugin({
             .catch(() => {})
         // 앱으로 돌아올 때마다 그동안 온 알림을 가져온다
         const sub: any = (AppState as any)?.addEventListener?.('change', (state: string) => {
+            // 뒤로 가면 바로 저장한다 (그대로 꺼져도 방금 잡은 게 남게)
+            if (state !== 'active') flush()
             if (state === 'active') pull()
         })
         const timer = setInterval(() => {

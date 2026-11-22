@@ -1,7 +1,7 @@
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
 import { allowed, guildOf, isFriend } from './filters'
-import { events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event } from './store'
+import { events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event, type UserSnap } from './store'
 
 /**
  * 메시지 말고 다른 기록:
@@ -63,7 +63,17 @@ function onReactionRemove(p: any) {
     if (settings().ignoreBots && u && S().UserStore?.getUser?.(u)?.bot) return
     if (!allowed({ channel_id: p.channelId, guild_id: p.guildId, author: { id: u } })) return
     const em = p.emoji ?? {}
-    push({ k: 'r', id: eid(), c: String(p.channelId), g: p.guildId ?? guildOf({ channel_id: p.channelId }), m: String(p.messageId), u, em: { id: em.id ?? undefined, name: String(em.name ?? '?'), animated: !!em.animated }, at: Date.now() })
+    const un = u ? snapOf(u) : undefined
+    push({ k: 'r', id: eid(), c: String(p.channelId), g: p.guildId ?? guildOf({ channel_id: p.channelId }), m: String(p.messageId), u, em: { id: em.id ?? undefined, name: String(em.name ?? '?'), animated: !!em.animated }, at: Date.now(), ...(un ? { un } : {}) })
+}
+
+/** 지금 디스코드가 아는 사용자 모습 (나중에 몰라도 이름이 보이게 같이 남긴다) */
+export function snapOf(id: string): UserSnap | undefined {
+    try {
+        const x = S().UserStore?.getUser?.(id)
+        if (!x) return
+        return { id, username: x.username, global_name: x.globalName ?? x.global_name ?? null, avatar: x.avatar ?? null }
+    } catch {}
 }
 
 // ── 채널, 스레드 ────────────────────────────────────────────────────────

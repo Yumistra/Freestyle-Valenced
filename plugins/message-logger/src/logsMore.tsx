@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { removeEvent } from './events'
 import { avatarUrl, closeSettings, palette, toMessage, where } from './logs'
-import { events, logs, onChange, seen, type Event } from './store'
+import { events, logs, onChange, save, seen, type Event } from './store'
+import { lookupModule } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
 import { when } from './time'
 
 /** 로그 보기의 다른 탭: 반응, 채널, 프로필, 통계 */
@@ -27,6 +29,44 @@ function userOf(id: string, fallback?: any) {
     } catch {
         return fallback
     }
+}
+/**
+ * 디스코드가 모르는 사용자 (서버 멤버 목록에 안 불러온 사람)는 프로필을 한 번 받아 온다.
+ * 한 사람당 한 번, 1초 간격으로만. 받아 오면 다시 그린다.
+ */
+const asked = new Set<string>()
+const queue: string[] = []
+let pumping = false
+function fetchUser(id: string) {
+    if (!id || asked.has(id)) return
+    asked.add(id)
+    queue.push(id)
+    if (pumping) return
+    pumping = true
+    const next = () => {
+        const u = queue.shift()
+        if (!u) {
+            pumping = false
+            return
+        }
+        try {
+            const A = (lookupModule(withProps('fetchProfile') as any) as any)?.[0]
+            const r = A?.fetchProfile?.(u)
+            Promise.resolve(r)
+                .catch(() => {})
+                .then(() => save())
+        } catch {}
+        setTimeout(next, 1000)
+    }
+    next()
+}
+
+/** 사용자: 디스코드가 아는 모습, 없으면 기록할 때 남긴 모습. 둘 다 없으면 받아 온다 */
+function userOrSnap(id: string, snap?: any) {
+    const u = userOf(id)
+    if (u) return u
+    if (!snap?.username) fetchUser(id)
+    return snap ?? { id }
 }
 const nameOf = (u: any) => u?.globalName ?? u?.global_name ?? u?.username ?? 'Unknown'
 const emojiText = (em: { id?: string; name: string }) => (em.id ? `:${em.name}:` : em.name)
@@ -134,7 +174,7 @@ function Reactions() {
             empty="No removed reactions yet."
             render={e => {
                 if (e.k !== 'r') return null
-                const u = e.u ? userOf(e.u) : undefined
+                const u = e.u ? userOrSnap(e.u, e.un) : undefined
                 const img = emojiUrl(e.em)
                 return (
                     <Card key={e.id} label={`reaction ${e.id}`} onPress={() => open(e.c, e.m)}>
@@ -205,7 +245,7 @@ function Profiles() {
             empty="No profile changes yet. Friends and people you DM are watched."
             render={e => {
                 if (e.k !== 'p') return null
-                const u = userOf(e.u, { id: e.u })
+                const u = userOrSnap(e.u)
                 const pic = (hash: string) => (hash ? `https://cdn.discordapp.com/avatars/${e.u}/${hash}.png?size=96` : avatarUrl({ id: e.u }))
                 return (
                     <Card key={e.id} label={`profile ${e.id}`}>

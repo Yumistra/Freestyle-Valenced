@@ -22,6 +22,14 @@ export interface Entry {
     f?: string[]
 }
 
+/** 기록할 때 알던 사용자 모습 (나중에 디스코드가 그 사용자를 모를 때 쓴다) */
+export interface UserSnap {
+    id?: string
+    username?: string
+    global_name?: string | null
+    avatar?: string | null
+}
+
 /** 본 메시지 (자리를 비운 사이 지워졌는지·고쳐졌는지 비교하려고) */
 export interface Seen {
     /** API 형태 메시지 */
@@ -94,7 +102,7 @@ export interface SavedSearch {
 
 /** 메시지 말고 다른 기록 (반응, 채널, 프로필) */
 export type Event =
-    | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number }
+    | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number; un?: UserSnap }
     | { k: 'c'; id: string; c: string; g?: string; name: string; type: number; parent?: string; msgs: any[]; at: number }
     | { k: 'p'; id: string; u: string; field: 'username' | 'name' | 'avatar' | 'status'; from: string; to: string; at: number }
 
@@ -130,6 +138,14 @@ export function bindIfNone(s: any) {
 function ready(): boolean {
     const c = storage?.cache
     return !!c && typeof c === 'object'
+}
+
+/** 기다리던 저장을 지금 한다 (디스코드가 뒤로 갈 때: 그 뒤에 꺼지면 3초 기다리던 게 사라진다) */
+export function flush() {
+    if (!timer) return
+    clearTimeout(timer)
+    timer = undefined
+    if (ready()) writeNow()
 }
 
 /** 플러그인이 꺼질 때: 기다리던 저장을 지금 하고, 그 뒤로는 아무것도 쓰지 않는다 */
@@ -215,7 +231,7 @@ export function save(now = false) {
         timer = setTimeout(() => {
             timer = undefined
             writeNow()
-        }, 3000)
+        }, 1000)
 }
 
 function writeNow() {
