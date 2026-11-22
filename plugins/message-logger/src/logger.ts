@@ -1,6 +1,4 @@
 import { Dispatcher } from '@valenced/discord/common/flux'
-import { lookupModule } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { compare, forget, importPushes, remember, slim, updateSeen } from './away'
 import { compareNotes } from './tray'
@@ -226,30 +224,67 @@ function withDeleted(payload: any) {
 }
 
 /**
- * 알림 앱이 늦게 넘겨준 "지워진 메시지"를 이미 열려 있는 채팅에 보이게 한다.
- * 디스코드가 그 채널을 이미 불러 둔 뒤라 끼워 넣을 기회(LOAD_MESSAGES_SUCCESS)가 지나갔으니
- * 최근 메시지를 다시 불러오게 한다 → 다시 불러올 때 withDeleted 가 제자리에 넣는다.
+ * 이미 불러 둔 채팅에 남겨 둔 지운 메시지를 제자리에 넣는다.
+ * 디스코드는 다시 켜질 때 메시지를 LOAD_MESSAGES_SUCCESS 가 아니라 백그라운드 동기화(BACKGROUND_SYNC_CHANNEL_MESSAGES)나
+ * 저장해 둔 것으로 채우기도 하고, 알림 앱은 몇 초 늦게 넘겨준다 → 끼워 넣을 기회를 놓친 것을 여기서 넣는다.
+ * 디스코드 채널 메시지 목록(ChannelMessages)의 mergeDelta 는 새 메시지를 시간 순서대로 정렬해 넣는다.
  */
 export function showLateDeleted(channelIds: Iterable<string>) {
-    let actions: any
-    try {
-        actions = (lookupModule(withProps('fetchMessages', 'jumpToMessage') as any) as any)?.[0] ?? (lookupModule(withProps('fetchMessages', 'sendMessage') as any) as any)?.[0]
-    } catch {}
-    if (typeof actions?.fetchMessages !== 'function') return 0
+    if (!settings().logDeletes) return 0
+    const store = (Stores as any).MessageStore
     let n = 0
-    for (const c of channelIds) {
-        if (n >= 3) break
+    for (const c of new Set(channelIds)) {
         try {
-            const ms = (Stores as any).MessageStore?.getMessages?.(c)
-            const loaded = !!ms && (ms.ready === true || (ms.length ?? ms._array?.length ?? 0) > 0)
-            if (!loaded) continue
-            // 지금 보이는 곳이 가장 최근 메시지일 때만 (예전 메시지를 보고 있으면 그 자리를 흔들지 않는다)
-            if (ms.hasMoreAfter === true) continue
-            actions.fetchMessages({ channelId: c, limit: 50 })
-            n++
+            const cm = store?.getMessages?.(c)
+            if (!cm || typeof cm.mergeDelta !== 'function') continue
+            const arr: any[] = typeof cm.toArray === 'function' ? cm.toArray() : cm._array ?? []
+            if (!arr.length && cm.ready !== true) continue
+            const ids = arr.map(m => String(m.id)).sort(cmp)
+            const min = ids[0]
+            const max = ids[ids.length - 1]
+            const extra: any[] = []
+            for (const [id, e] of Object.entries(logs())) {
+                if (!e.d || !e.m || e.h || e.c !== c) continue
+                if (typeof cm.has === 'function' ? cm.has(id) : ids.includes(id)) continue
+                const afterOldest = !min || cmp(id, min) >= 0 || cm.hasMoreBefore === false
+                const beforeNewest = !max || cmp(id, max) <= 0 || cm.hasMoreAfter !== true
+                if (afterOldest && beforeNewest) extra.push(e.m)
+            }
+            if (!extra.length) continue
+            const next = cm.mergeDelta(extra, [], [])
+            const CM = cm.constructor
+            if (next && typeof CM?.commit === 'function') CM.commit(next)
+            n += extra.length
+            for (const m of extra) changed.add(String(m.id))
+        } catch {}
+    }
+    if (n) {
+        try {
+            store?.emitChange?.()
         } catch {}
     }
     return n
+}
+
+/** 백그라운드 동기화로 지워진 메시지 (MESSAGE_DELETE 없이 deleted_message_ids 로 온다) 도 남긴다 */
+function keepSynced(p: any) {
+    const all = p?.changesByChannelId
+    if (!all || typeof all !== 'object' || !settings().logDeletes) return p
+    for (const [c, ch] of Object.entries<any>(all)) {
+        const ids: any[] = Array.isArray(ch?.deleted_message_ids) ? ch.deleted_message_ids : []
+        if (!ids.length) continue
+        const keep = new Set<string>()
+        for (const id of ids) {
+            try {
+                if (keepDeleted(c, String(id), ch.guild_id ?? p.guildId) === 'store') keep.add(String(id))
+            } catch {}
+        }
+        if (keep.size) {
+            ch.deleted_message_ids = ids.filter(id => !keep.has(String(id)))
+            for (const id of keep) rerenderLater(c, id)
+        }
+    }
+    return p
 }
 
 /** 보관 기간이 지난 로그를 지운다. 지금 보이는 지운 메시지는 진짜로 지운다 */
@@ -425,6 +460,20 @@ export function intercept() {
             } catch {}
             try {
                 if (!p?.optimistic && p?.message && !p.isPushNotification) remember([{ ...p.message, guild_id: p.message.guild_id ?? p.guildId }], myId())
+            } catch {}
+            return p
+        }),
+        onFluxEventDispatched('BACKGROUND_SYNC_CHANNEL_MESSAGES' as any, (p: any) => {
+            try {
+                keepSynced(p)
+                const ids = Object.keys(p?.changesByChannelId ?? {})
+                if (ids.length) setTimeout(() => showLateDeleted(ids), 300)
+            } catch {}
+            return p
+        }),
+        onFluxEventDispatched('CHANNEL_SELECT' as any, (p: any) => {
+            try {
+                if (p?.channelId) setTimeout(() => showLateDeleted([String(p.channelId)]), 300)
             } catch {}
             return p
         }),
