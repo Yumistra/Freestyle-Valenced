@@ -18,7 +18,8 @@ import { patchSheet } from './sheet'
 import { setNative, styleRow } from './rows'
 import { interceptEvents } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
-import { companionStatus, exportLogs, importLogs, pullCompanion } from './transfer'
+import { exportLogs, importLogs, pullCompanion } from './transfer'
+import { CompanionGroup } from './companion'
 import { bind, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, type Settings } from './store'
 
 /**
@@ -136,7 +137,7 @@ function SettingsPage({ api }: { api?: any }) {
                     <TableSwitchRow
                         icon={<TableRowAssetIcon name="BellIcon" />}
                         label="Notify when a DM or mention is deleted"
-                        subLabel={`Phone notification while Discord runs.${companionStatus.last ? ` Companion app sent ${companionStatus.received} log(s).` : ''}`}
+                        subLabel="Phone notification while Discord runs"
                         value={s.notifyDeletes}
                         onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })}
                     />
@@ -165,6 +166,7 @@ function SettingsPage({ api }: { api?: any }) {
                         onValueChange={(detectAway: boolean) => set({ detectAway })}
                     />
                 </TableRowGroup>
+                <CompanionGroup />
                 <TableRadioGroup
                     title="Keep logs for"
                     defaultValue={String(s.keepHours)}
@@ -285,8 +287,13 @@ export default plugin({
                 expire()
             } catch {}
         }, 10 * 60_000)
+        // 알림 앱이 보내 둔 기록 (켜 있는 동안 받은 것) 을 자주 합친다
+        const companionTimer = setInterval(() => {
+            pullCompanion().catch(() => {})
+        }, 30_000)
         cleanup(
             () => clearInterval(timer),
+            () => clearInterval(companionTimer),
             () => sub?.remove?.(),
             ...(intercept() as any[]),
             ...(interceptEvents() as any[]),

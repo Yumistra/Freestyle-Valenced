@@ -31,6 +31,8 @@ private object Hooks {
             scope.registerNativeMethod("yumistra.message-logger.notify", Notify)
             scope.registerNativeMethod("yumistra.message-logger.export", Export)
             scope.registerNativeMethod("yumistra.message-logger.takeCompanion", TakeCompanion)
+            scope.registerNativeMethod("yumistra.message-logger.companion", CompanionSend)
+            scope.registerNativeMethod("yumistra.message-logger.companionStatus", CompanionRead)
             Extras.companionFile = java.io.File(scope.storageDir, "companion.jsonl")
             scope.withAppContext(KeepContext)
             val client = scope.classLoader.loadClass("com.discord.notifications.client.NotificationClient")

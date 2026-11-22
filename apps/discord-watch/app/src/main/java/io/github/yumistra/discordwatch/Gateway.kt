@@ -2,14 +2,8 @@ package io.github.yumistra.discordwatch
 
 import android.os.Handler
 import android.os.HandlerThread
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * 디스코드 게이트웨이 연결 하나 (읽기만 한다: 연결 유지에 필요한 하트비트, 로그인, 이어 붙이기 말고는 아무것도 보내지 않는다).
@@ -24,9 +18,7 @@ class Gateway(
 ) {
     private val thread = HandlerThread("gateway").apply { start() }
     private val handler = Handler(thread.looper)
-    private val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
-
-    private var ws: WebSocket? = null
+    private var ws: Ws? = null
     private var seq: Long? = null
     private var sessionId: String? = null
     private var resumeUrl: String? = null
@@ -47,7 +39,7 @@ class Gateway(
         handler.post {
             stopped = true
             generation++
-            ws?.close(1000, null)
+            ws?.close(1000)
             ws = null
             handler.removeCallbacksAndMessages(null)
             thread.quitSafely()
@@ -60,8 +52,7 @@ class Gateway(
         acked = true
         val base = resumeUrl?.takeIf { sessionId != null } ?: "wss://gateway.discord.gg"
         onState("연결하는 중")
-        val req = Request.Builder().url("$base/?v=10&encoding=json").build()
-        ws = client.newWebSocket(req, Listener(gen))
+        ws = Ws("$base/?v=10&encoding=json", Listener(gen)).also { it.connect() }
     }
 
     private fun reconnect(resume: Boolean, delay: Long = backoff) {
@@ -115,10 +106,10 @@ class Gateway(
         send(2, JSONObject().put("token", token).put("capabilities", 16 or 512).put("properties", props).put("presence", presence).put("compress", false))
     }
 
-    private inner class Listener(private val gen: Int) : WebSocketListener() {
+    private inner class Listener(private val gen: Int) : Ws.Listener {
         private fun current() = gen == generation && !stopped
 
-        override fun onMessage(webSocket: WebSocket, text: String) {
+        override fun onText(text: String) {
             handler.post {
                 if (!current()) return@post
                 val o = try {
@@ -162,14 +153,9 @@ class Gateway(
             }
         }
 
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            webSocket.close(1000, null)
-            closed(code, reason)
-        }
+        override fun onClosed(code: Int, reason: String) = closed(code, reason)
 
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = closed(code, reason)
-
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+        override fun onFailure(t: Throwable) {
             handler.post {
                 if (current()) reconnect(resume = true)
             }

@@ -17,10 +17,12 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 화면에 보여 줄 상태 */
+/** 플러그인에 보여 줄 상태 */
 object Status {
+    @Volatile var running = false
     @Volatile var state = "꺼짐"
     @Volatile var user = ""
+    @Volatile var userId = ""
     @Volatile var discordOpen = false
     @Volatile var deleted = 0
     @Volatile var edited = 0
@@ -42,7 +44,11 @@ class WatchService : Service() {
 
         fun start(ctx: Context) {
             val i = Intent(ctx, WatchService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            } catch (t: Throwable) {
+                Status.state = "켜지 못했어요: ${t.javaClass.simpleName}"
+            }
         }
 
         fun stop(ctx: Context) {
@@ -94,6 +100,7 @@ class WatchService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Status.running = true
         val n = running("연결하는 중")
         if (Build.VERSION.SDK_INT >= 34) startForeground(RUN_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(RUN_ID, n)
         if (gateway == null) {
@@ -114,7 +121,9 @@ class WatchService : Service() {
         gateway?.stop()
         gateway = null
         Store.flushCache(this)
-        Status.state = "꺼짐"
+        Status.running = false
+        if (!Status.state.startsWith("토큰")) Status.state = "꺼짐"
+        Control.report(this)
         super.onDestroy()
     }
 
@@ -127,7 +136,9 @@ class WatchService : Service() {
     }
 
     private fun running(text: String): Notification {
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        // 누르면 디스코드를 연다 (이 앱은 화면이 없다)
+        val launch = packageManager.getLaunchIntentForPackage(Store.target(this)) ?: Intent()
+        val open = PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CH_RUN)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Discord Watch")
@@ -140,6 +151,7 @@ class WatchService : Service() {
     private fun onState(s: String) {
         Status.state = s
         main.post {
+            Control.reportSoon(this)
             try {
                 getSystemService(NotificationManager::class.java).notify(RUN_ID, running("$s, 지운 메시지 ${Status.deleted}개"))
             } catch (_: Throwable) {
@@ -151,6 +163,7 @@ class WatchService : Service() {
         Status.state = reason
         main.post {
             Store.setEnabled(this, false)
+            Control.report(this)
             stopSelf()
         }
     }
@@ -174,6 +187,7 @@ class WatchService : Service() {
 
     private fun ready(d: JSONObject) {
         me = d.optJSONObject("user")?.optString("id")
+        Status.userId = me ?: ""
         Status.user = d.optJSONObject("user")?.let { it.optString("global_name").takeIf { n -> n.isNotBlank() && n != "null" } ?: it.optString("username") } ?: ""
         dms.clear()
         d.optJSONArray("private_channels")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.optString("id")?.let(dms::add) }
@@ -185,6 +199,7 @@ class WatchService : Service() {
             }
         }
         sessions(d.optJSONArray("sessions"))
+        main.post { Control.reportSoon(this) }
     }
 
     /** 디스코드 앱(휴대폰)이 연결돼 있는지: 우리 말고 다른 모바일 세션 */
@@ -200,7 +215,7 @@ class WatchService : Service() {
         val was = Status.discordOpen
         Status.discordOpen = open
         // 디스코드가 켜지면 그동안 쌓인 기록을 보낸다
-        if (open && !was) main.postDelayed({ deliver(this) }, 5000)
+        if (open && !was) main.postDelayed({ deliver(this); Control.report(this) }, 5000)
     }
 
     private fun slim(m: JSONObject): JSONObject {
@@ -240,6 +255,7 @@ class WatchService : Service() {
         Store.enqueue(this, JSONObject().put("t", "edit").put("at", System.currentTimeMillis()).put("g", old.opt("guild_id") ?: JSONObject.NULL).put("m", next).put("before", before))
         Status.edited++
         if (Status.discordOpen) deliver(this)
+        main.post { Control.reportSoon(this) }
     }
 
     private fun deleted(id: String, channel: String, guild: String) {
@@ -251,6 +267,7 @@ class WatchService : Service() {
         Store.enqueue(this, line)
         Status.deleted++
         if (Status.discordOpen) deliver(this) else maybeNotify(m, channel, g)
+        main.post { Control.reportSoon(this) }
     }
 
     private fun maybeNotify(m: JSONObject, channel: String, guild: String?) {

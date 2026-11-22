@@ -105,6 +105,7 @@ internal object Extras {
         if (receiver != null) return
         val r = CompanionReceiver()
         val filter = IntentFilter(COMPANION_ACTION)
+        filter.addAction(Companion.ACTION_STATUS)
         try {
             if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(r, filter, Context.RECEIVER_EXPORTED) else ctx.registerReceiver(r, filter)
             receiver = r
@@ -129,6 +130,11 @@ internal class CompanionReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= 34) {
             val from = sentFromPackage
             if (from != null && from != Extras.COMPANION_PACKAGE) return
+        }
+        if (intent.action == Companion.ACTION_STATUS) {
+            val json = intent.getStringExtra("json") ?: return
+            if (json.length < 100_000) Companion.status = json
+            return
         }
         val lines = intent.getStringExtra("lines") ?: return
         if (lines.length > 4_000_000) return

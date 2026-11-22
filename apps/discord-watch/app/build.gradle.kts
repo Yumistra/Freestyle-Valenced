@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.yumistra.discordwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     // 업데이트가 덮어써지게 늘 같은 키로 서명한다
@@ -39,8 +39,4 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-}
-
-dependencies {
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

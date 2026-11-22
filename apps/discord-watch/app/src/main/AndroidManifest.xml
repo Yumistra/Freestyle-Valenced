@@ -9,8 +9,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 어떤 디스코드(복제본, 다른 패키지 이름)가 열었는지 확인하고 기록을 보내려고 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
-    <!-- 기록을 보낼 디스코드 앱이 보이게 (패키지 이름은 바꿀 수 있다) -->
     <queries>
         <package android:name="com.discord" />
         <intent>
@@ -21,23 +22,17 @@
     <application
         android:label="Discord Watch"
         android:icon="@android:drawable/ic_menu_view"
-        android:theme="@style/AppTheme"
         android:allowBackup="false">
 
-        <!-- 홈 화면 아이콘 없음. 디스코드(Message Logger 플러그인)만 deep link 로 연다 -->
+        <!-- 화면도 홈 화면 아이콘도 없음. Message Logger 플러그인이 이 투명한 Activity 로 명령을 보낸다 -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ControlActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:launchMode="standard"
             android:excludeFromRecents="true"
-            android:taskAffinity="">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="discordwatch" />
-            </intent-filter>
-        </activity>
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density" />
 
         <service
             android:name=".WatchService"

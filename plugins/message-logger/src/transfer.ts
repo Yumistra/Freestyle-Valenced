@@ -125,7 +125,9 @@ export async function pullCompanion(): Promise<number> {
             e.away = 1
         } else if (x.t === 'edit' && s.logEdits && typeof x.before === 'string') {
             const edits = (e.e ??= [])
-            if (!edits.some(h => h.at === at)) edits.push({ t: x.before, at })
+            // 앱은 3일 동안 같은 기록을 다시 보낸다: 이미 있으면 건너뛴다
+            if (edits.some(h => h.at === at)) continue
+            edits.push({ t: x.before, at })
         } else continue
         e.at = Math.max(e.at ?? 0, at)
         all[m.id] = e
