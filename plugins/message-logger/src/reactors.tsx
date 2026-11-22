@@ -21,6 +21,8 @@ import { when } from './time'
 const NAME = 'modules/user_profile/native/DiscordTag.tsx'
 const CONTENT = 'modules/reactions/native/MessageReactionsContent.tsx'
 const ROW = 'design/void/Form/native/FormRow.tsx'
+const TAP = 'modules/messages/native/MessagesUtils.tsx'
+const EMOJI = 'utils/EmojiUtils.tsx'
 
 /** 줄 전체 (프로필 사진까지) 를 덮는 표시가 켜졌는지. 안 켜졌으면 이름 칸에만 표시 */
 let rowPatched = false
@@ -34,10 +36,11 @@ export const sameEmoji = (a: any, b: any) => (a?.id ? String(a.id) === String(b?
 export function removedFor(messageId: string, emoji: any, present: Set<string>) {
     const last = new Map<string, any>()
     for (const r of removedReactions(messageId)) {
-        if (!r.u || present.has(r.u) || !sameEmoji(r.em, emoji)) continue
+        if (!r.u || !sameEmoji(r.em, emoji)) continue
         last.set(r.u, r)
     }
-    return [...last.values()]
+    // 마지막 기록이 "다시 반응함"이면 지운 사람이 아니다
+    return [...last.values()].filter(r => !r.back && !present.has(r.u))
 }
 
 /** 목록에 넣을 사용자 객체: 디스코드 사용자 객체의 복사본에 지운 시각 표시 (원본은 건드리지 않는다) */
@@ -120,6 +123,86 @@ export function countLabel(count: number | null, removed: number, numeric: numbe
 
 let rawGet: ((...a: any[]) => any) | undefined
 
+/** 지금 그 이모지에 반응해 있는 사람들 (디스코드가 불러 둔 만큼, 우리가 덧붙인 사람 빼고) */
+function presentOf(channelId: string, messageId: string, emoji: any) {
+    try {
+        const out = rawGet?.(channelId, messageId, emoji, 100, 0)
+        const all: any[] = out ? Array.from(typeof out.values === 'function' ? out.values() : Object.values(out)) : []
+        return new Set(all.filter(u => !u?.[MARK]).map(u => String(u?.id)))
+    } catch {
+        return new Set<string>()
+    }
+}
+
+// ── 채팅의 반응 버튼 ─────────────────────────────────────────────────────
+// 네이티브 부분(Pills.kt)이 이모지 설명 끝의 표시를 보고 버튼 숫자 옆에 빨간 (n) 을 그린다.
+export const PILL_START = '\uE010'
+export const PILL_END = '\uE011'
+const pillMark = (n: number, color: number, only: boolean) => `${PILL_START}${n},${color | 0}${only ? ',f' : ''}${PILL_END}`
+
+let emojiUtils: any
+const srcs = new Map<string, string>()
+
+function srcFor(em: any): string | undefined {
+    const known = srcs.get(emojiKey(em))
+    if (known) return known
+    if (em?.id) return `https://cdn.discordapp.com/emojis/${em.id}.${em.animated ? 'gif' : 'webp'}?size=48`
+    try {
+        const u = (emojiUtils?.default ?? emojiUtils)?.getURL?.(em?.name)
+        if (typeof u === 'string' && u) return u
+    } catch {}
+}
+
+/** 버튼 탭으로 온 반응이 우리가 넣은 "모두 지운 이모지" 버튼인지 */
+export const isFakePill = (reaction: any) => {
+    const d = String(reaction?.emoji?.displayName ?? '')
+    return d.includes(PILL_START) && d.includes(`,f${PILL_END}`)
+}
+
+/**
+ * 채팅 줄(row.message.reactions)에: 사람이 지운 이모지는 설명 끝에 (n) 표시,
+ * 모두 지워서 사라진 이모지는 (n) 버튼을 새로 넣는다. 바꾼 게 있으면 true.
+ */
+export function decoratePills(message: any, color: number): boolean {
+    if (!settings().logReactions || !message?.id || !Array.isArray(message.reactions)) return false
+    const id = String(message.id)
+    const list = removedReactions(id).filter((r: any) => r.u)
+    if (!list.length) return false
+    const ch = String(message.channelId ?? message.channel_id ?? list[0].c)
+    const left = new Map<string, any>()
+    for (const r of list) if (!left.has(emojiKey(r.em))) left.set(emojiKey(r.em), r.em)
+    let changed = false
+    const out = message.reactions.map((x: any) => {
+        const key = emojiKey(x?.emoji)
+        if (x?.emoji?.src) srcs.set(key, x.emoji.src)
+        if (!left.has(key)) return x
+        left.delete(key)
+        if ((x?.burst_count ?? 0) > 0 || !x?.emoji) return x
+        const n = removedFor(id, x.emoji, presentOf(ch, id, x.emoji)).length
+        if (!n) return x
+        changed = true
+        const label = String(x.emoji.displayName ?? x.emoji.name ?? '')
+        return { ...x, emoji: { ...x.emoji, displayName: label + pillMark(n, color, false) } }
+    })
+    for (const em of left.values()) {
+        const n = removedFor(id, em, presentOf(ch, id, em)).length
+        const src = n ? srcFor(em) : undefined
+        if (!n || !src) continue
+        changed = true
+        out.push({
+            count: n,
+            me: false,
+            me_burst: false,
+            burst_count: 0,
+            burst_colors: [],
+            count_details: { normal: n, burst: 0 },
+            emoji: { id: em.id ? String(em.id) : null, name: em.name, src, displayName: String(em.name ?? '') + pillMark(n, color, true), animated: !!em.animated },
+        })
+    }
+    if (changed) message.reactions = out
+    return changed
+}
+
 /** 반응 목록 창의 탭들: 사람이 지운 이모지는 숫자 옆에 빨간 (n), 모두 지워서 메시지에서 사라진 이모지는 빨간 (n) 탭으로 넣는다 */
 export function withRemovedTabs(p: any) {
     const reactions: any[] = Array.isArray(p?.reactions) ? p.reactions : []
@@ -129,21 +212,12 @@ export function withRemovedTabs(p: any) {
     if (!list.length) return reactions
     const groups = new Map<string, any>()
     for (const r of list) if (!groups.has(emojiKey(r.em))) groups.set(emojiKey(r.em), r.em)
-    const presentOf = (emoji: any) => {
-        try {
-            const out = rawGet?.(p.channelId, mid, emoji, 100, 0)
-            const all: any[] = out ? Array.from(typeof out.values === 'function' ? out.values() : Object.values(out)) : []
-            return new Set(all.filter(u => !u?.[MARK]).map(u => String(u?.id)))
-        } catch {
-            return new Set<string>()
-        }
-    }
     const out = reactions.map(x => {
         const key = emojiKey(x?.emoji)
         if (!groups.has(key)) return x
         groups.delete(key)
         if ((x?.burst_count ?? 0) > 0) return x
-        const n = removedFor(mid, x.emoji, presentOf(x.emoji)).length
+        const n = removedFor(mid, x.emoji, presentOf(String(p.channelId), mid, x.emoji)).length
         if (!n) return x
         const c = typeof x.count === 'number' ? x.count : Number(x.count) || 0
         return { ...x, count: countLabel(c, n, c + n) }
@@ -207,6 +281,28 @@ export function patchReactors(cleanup: (...f: any[]) => void) {
         getModuleWithImportedPath(CONTENT, (m: any) => {
             if (m) patchTabs(m)
             else cleanup(waitForModuleWithImportedPath(CONTENT, (x: any) => patchTabs(x)) as any)
+        }) as any,
+    )
+    // 채팅의 "모두 지운 이모지" 버튼을 눌러도 반응이 달리지 않게
+    const patchTap = (mod: any) => {
+        if (typeof mod?.handleAddOrRemoveReaction !== 'function') return
+        cleanup(
+            instead(mod, 'handleAddOrRemoveReaction', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                if (isFakePill(args?.[2])) return
+                return orig.apply(this, args)
+            }),
+        )
+    }
+    cleanup(
+        getModuleWithImportedPath(TAP, (m: any) => {
+            if (m) patchTap(m)
+            else cleanup(waitForModuleWithImportedPath(TAP, (x: any) => patchTap(x)) as any)
+        }) as any,
+    )
+    cleanup(
+        getModuleWithImportedPath(EMOJI, (m: any) => {
+            if (m) emojiUtils = m
+            else cleanup(waitForModuleWithImportedPath(EMOJI, (x: any) => (emojiUtils = x)) as any)
         }) as any,
     )
     // 줄 전체

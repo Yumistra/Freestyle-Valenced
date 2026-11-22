@@ -1,5 +1,5 @@
 import { Tokens } from '@valenced/discord/common/tokens'
-import { sameEmoji } from './reactors'
+import { decoratePills, sameEmoji } from './reactors'
 import { Stores } from '@valenced/discord/flux'
 import { processColor } from 'react-native'
 import { takeChanged } from './logger'
@@ -38,6 +38,11 @@ function themeColor(name: string, fallback: string) {
 let native = false
 export function setNative(v: boolean) {
     native = v
+}
+/** 네이티브 부분이 채팅 반응 버튼에 빨간 (n) 을 그릴 수 있는지 */
+let pills = false
+export function setPills(v: boolean) {
+    pills = v
 }
 
 /** 설정에서 고른 색 (#rrggbb), 없으면 테마 색 */
@@ -155,6 +160,14 @@ function history(edits: Array<{ t: string; at: number }>, edited: string, row: a
 function reactionLine(id: string, row: any): any[] {
     let list = removedReactions(id)
     if (!list.length) return []
+    // 반응 버튼에 빨간 (n) 으로 보여 줄 수 있으면 글 줄은 안 쓴다 (사람 없이 모두 지운 기록만 글로)
+    if (pills && native) {
+        try {
+            decoratePills(row.message, red())
+        } catch {}
+        list = list.filter(r => !r.u)
+        if (!list.length) return []
+    }
     let left: any[] = []
     try {
         const msg = (Stores as any).MessageStore?.getMessage?.(list[0].c, id)

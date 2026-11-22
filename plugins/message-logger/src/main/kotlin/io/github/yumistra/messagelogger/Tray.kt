@@ -122,6 +122,7 @@ internal object Diag {
         o.put("drawn", drawn)
         o.put("miss", miss)
         o.put("context", Tray.context != null)
+        o.put("pills", Pills.hooked)
         return o.toString()
     }
 }

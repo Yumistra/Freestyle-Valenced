@@ -102,7 +102,7 @@ export interface SavedSearch {
 
 /** 메시지 말고 다른 기록 (반응, 채널, 프로필) */
 export type Event =
-    | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number; un?: UserSnap }
+    | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number; un?: UserSnap; back?: number }
     | { k: 'c'; id: string; c: string; g?: string; name: string; type: number; parent?: string; msgs: any[]; at: number }
     | { k: 'p'; id: string; u: string; field: 'username' | 'name' | 'avatar' | 'status'; from: string; to: string; at: number }
 

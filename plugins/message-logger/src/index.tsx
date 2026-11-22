@@ -15,7 +15,7 @@ import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
 import { registerPicker } from './picker'
 import { FilterSettings } from './filtersUI'
 import { patchSheet } from './sheet'
-import { setNative, styleRow } from './rows'
+import { setNative, setPills, styleRow } from './rows'
 import { interceptEvents } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { pullCompanion } from './transfer'
@@ -62,9 +62,19 @@ export default plugin({
         // 네이티브 부분이 켜져 있는지 묻고, 대답하면 수정 기록을 꾸며서 보여 준다
         setNative(false)
         nativeStatus()
-            .then(r => setNative(!!r && !String(r).startsWith('error')))
+            .then(r => {
+                setNative(!!r && !String(r).startsWith('error'))
+                try {
+                    setPills(!!JSON.parse(String(r)).pills)
+                } catch {
+                    setPills(false)
+                }
+            })
             .catch(() => setNative(false))
-        cleanup(() => setNative(false))
+        cleanup(() => {
+            setNative(false)
+            setPills(false)
+        })
         // 로그 보기는 디스코드 설정 화면처럼 새 화면으로 넘어간다 (목록에는 안 보이는 경로)
         try {
             cleanup(

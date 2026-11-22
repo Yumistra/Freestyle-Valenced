@@ -94,6 +94,12 @@ private object Hooks {
         } catch (t: Throwable) {
             Diag.error = t.toString()
         }
+        // 채팅 아래 반응 버튼의 빨간 (n)
+        try {
+            Pills.start(scope.classLoader)
+        } catch (t: Throwable) {
+            Diag.error = t.toString()
+        }
         unhook = XposedBridge.hookMethod(set ?: return, Before)
     }
 
@@ -101,6 +107,7 @@ private object Hooks {
         Extras.unregister(Tray.context)
         unhook?.unhook()
         unhook = null
+        Pills.stop()
         decoUnhook?.unhook()
         decoUnhook = null
         bgUnhook?.unhook()

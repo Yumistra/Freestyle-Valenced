@@ -68,6 +68,23 @@ function onReactionRemove(p: any) {
     push({ k: 'r', id: eid(), c: String(p.channelId), g: p.guildId ?? guildOf({ channel_id: p.channelId }), m: String(p.messageId), u, em: { id: em.id ?? undefined, name: String(em.name ?? '?'), animated: !!em.animated }, at: Date.now(), ...(un ? { un } : {}) })
 }
 
+/** 지운 뒤 같은 이모지로 다시 반응하면 그 기록에 다시 반응한 시각을 적는다 (지운 사람으로 안 세게) */
+export function onReactionAdd(p: any) {
+    if (p?.optimistic || !p?.messageId || !p?.userId) return
+    const u = String(p.userId)
+    const m = String(p.messageId)
+    const em = p.emoji ?? {}
+    let changed = false
+    for (const e of events()) {
+        if (e.k !== 'r' || e.m !== m || e.u !== u || e.back) continue
+        const same = em.id ? String(e.em.id ?? '') === String(em.id) : !e.em.id && e.em.name === String(em.name ?? '')
+        if (!same) continue
+        e.back = Date.now()
+        changed = true
+    }
+    if (changed) save()
+}
+
 /** 지금 디스코드가 아는 사용자 모습 (나중에 몰라도 이름이 보이게 같이 남긴다) */
 export function snapOf(id: string): UserSnap | undefined {
     try {
@@ -232,6 +249,7 @@ export function interceptEvents() {
     }
     return [
         onFluxEventDispatched('MESSAGE_REACTION_REMOVE', safe(onReactionRemove)),
+        onFluxEventDispatched('MESSAGE_REACTION_ADD', safe(onReactionAdd)),
         onFluxEventDispatched(
             'MESSAGE_REACTION_REMOVE_EMOJI',
             safe(p => onReactionRemove({ ...p, userId: '' })),
