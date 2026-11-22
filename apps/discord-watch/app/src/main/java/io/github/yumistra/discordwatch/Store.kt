@@ -172,9 +172,4 @@ object Store {
         val f = queueFile(ctx)
         return if (f.exists()) f.readLines().count { it.isNotBlank() } else 0
     }
-
-    @Synchronized
-    fun clearQueue(ctx: Context) {
-        queueFile(ctx).delete()
-    }
 }

@@ -71,56 +71,18 @@ internal object Tray {
     private fun str(c: CharSequence?): String = c?.toString() ?: ""
 }
 
-/** 설정 화면 상태 표시용 */
+/** 플러그인 JS 가 묻는 네이티브 상태 (yumistra.message-logger.status) */
 internal object Diag {
     @Volatile
     var hooked = ""
 
     @Volatile
-    var calls = 0
-
-    @Volatile
     var error = ""
-
-    @Volatile
-    var deco = false
-
-    @Volatile
-    var listDraws = 0
-
-    @Volatile
-    var bgSet = 0
-
-    @Volatile
-    var listName = ""
-
-    private val lists = java.util.LinkedHashSet<String>()
-
-    fun seen(v: Any) {
-        if (lists.size >= 8) return
-        lists.add(v.javaClass.name + "@" + Integer.toHexString(System.identityHashCode(v)))
-    }
-
-    @Volatile
-    var marked = 0
-
-    @Volatile
-    var drawn = 0
-
-    @Volatile
-    var miss = ""
 
     fun json(): String {
         val o = JSONObject()
         o.put("hooked", hooked)
-        o.put("calls", calls)
         o.put("error", if (error.length > 100) error.substring(0, 100) else error)
-        o.put("deco", deco)
-        o.put("bgSet", bgSet)
-        o.put("listName", listName)
-        o.put("marked", marked)
-        o.put("drawn", drawn)
-        o.put("miss", miss)
         o.put("context", Tray.context != null)
         o.put("pills", Pills.hooked)
         return o.toString()

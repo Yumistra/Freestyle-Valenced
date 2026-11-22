@@ -52,9 +52,27 @@ export function removeEvent(id: string) {
 }
 
 // ── 반응 ────────────────────────────────────────────────────────────────
-/** 이 메시지에서 빠진 반응들 (채팅 아래 표시용) */
-export function removedReactions(messageId: string) {
-    return events().filter((e): e is Extract<Event, { k: 'r' }> => e.k === 'r' && e.m === messageId)
+type ReactionEvent = Extract<Event, { k: 'r' }>
+const NONE: ReactionEvent[] = []
+/**
+ * 메시지별 빠진 반응 색인. 채팅 줄을 그릴 때마다 불리므로 기록 전체를 매번 훑지 않는다.
+ * 기록 목록이 바뀌면(다른 배열, 길이, 처음, 마지막) 다시 만든다.
+ */
+let index: { ref: Event[]; len: number; first?: Event; last?: Event; by: Map<string, ReactionEvent[]> } | undefined
+/** 이 메시지에서 빠진 반응들 (채팅 아래 표시용, 오래된 것부터) */
+export function removedReactions(messageId: string): ReactionEvent[] {
+    const all = events()
+    if (!index || index.ref !== all || index.len !== all.length || index.first !== all[0] || index.last !== all[all.length - 1]) {
+        const by = new Map<string, ReactionEvent[]>()
+        for (const e of all) {
+            if (e.k !== 'r') continue
+            const list = by.get(e.m)
+            if (list) list.push(e)
+            else by.set(e.m, [e])
+        }
+        index = { ref: all, len: all.length, first: all[0], last: all[all.length - 1], by }
+    }
+    return index.by.get(messageId) ?? NONE
 }
 
 function onReactionRemove(p: any) {

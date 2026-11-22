@@ -33,6 +33,8 @@ private const val FADE_ALPHA = 0.6f
  * 뒤에서부터 처리해서 앞쪽 표시 위치가 바뀌지 않게 한다.
  */
 internal fun styleMarkers(text: SpannableStringBuilder, view: View? = null) {
+    // 표시 글자(\uE000~\uE007)가 하나도 없으면 (거의 모든 메시지) 바로 끝낸다
+    if (!hasMarker(text)) return
     styleBackground(text, view)
     if (indexOf(text, FADE_START) < 0 && indexOf(text, LABEL_START) < 0) return
     var guard = 0
@@ -105,6 +107,16 @@ private fun parse(v: String): Int? = try {
 
 /** 수정 기록이 어디부터 어디까지인지 표시만 한다 (그리는 건 RowBackground) */
 internal class HistoryMark(val bg: Int, val bar: Int)
+
+private fun hasMarker(text: CharSequence): Boolean {
+    val n = text.length
+    var i = 0
+    while (i < n) {
+        val c = text[i++]
+        if (c >= FADE_START && c <= BG_END) return true
+    }
+    return false
+}
 
 private fun indexOf(text: CharSequence, c: Char): Int {
     for (i in 0 until text.length) if (text[i] == c) return i

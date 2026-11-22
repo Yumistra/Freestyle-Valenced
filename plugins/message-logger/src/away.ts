@@ -79,9 +79,20 @@ export function remember(messages: any[], me?: string, push = false) {
         any = true
     }
     if (any) {
-        trim()
-        save()
+        trimSoon()
+        save(false, 5000)
     }
+}
+
+/** 기억 정리는 메시지마다 하지 않고 1분에 한 번, 또는 많이 넘쳤을 때만 (전체를 훑으므로) */
+let lastTrim = 0
+let added = 0
+function trimSoon() {
+    const now = Date.now()
+    if (++added < 200 && now - lastTrim < 60_000) return
+    lastTrim = now
+    added = 0
+    trim()
 }
 
 export function forget(id: string) {

@@ -95,7 +95,7 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     return <Button text={armed ? 'Tap again to delete' : 'Delete'} variant={armed ? 'destructive' : 'secondary'} size="sm" onPress={() => (armed ? onDelete() : setArmed(true))} />
 }
 
-function Card({ children, onPress, label }: { children: any; onPress?: () => void; label?: string }) {
+function Card({ children, onPress, label }: { children: any; onPress?: () => void; label?: string; key?: string }) {
     const P = palette()
     return (
         <Pressable accessibilityLabel={label} onPress={onPress} style={{ marginHorizontal: 12, marginVertical: 4, padding: 12, borderRadius: 12, backgroundColor: P.surface, gap: 6 }}>
@@ -186,7 +186,7 @@ function Reactions() {
 // ── 채널 ────────────────────────────────────────────────────────────────
 const THREAD_TYPES = new Set([10, 11, 12])
 
-function ChannelCard({ e }: { e: Extract<Event, { k: 'c' }> }) {
+function ChannelCard({ e }: { e: Extract<Event, { k: 'c' }>; key?: string }) {
     const { Text } = Design as any
     const P = palette()
     const [open, setOpen] = useState(false)

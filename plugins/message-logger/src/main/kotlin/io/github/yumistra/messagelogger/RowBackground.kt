@@ -32,8 +32,13 @@ internal object RowBackground {
     @Volatile
     var removing = false
 
+    /** 우리 배경을 깐 줄의 글자 (다른 메시지로 다시 쓰일 때 배경을 치우려고) */
+    private val owners = WeakHashMap<TextView, Boolean>()
+
     fun update(view: View?) {
         val tv = view as? TextView ?: return
+        // 대부분의 메시지는 수정 기록도 없고 우리 배경도 없다: 줄마다 할 일을 만들지 않는다
+        if (markOf(tv) == null && owners[tv] == null) return
         val r = object : Runnable {
             override fun run() {
                 try {
@@ -48,11 +53,9 @@ internal object RowBackground {
 
     private fun apply(tv: TextView) {
         val has = markOf(tv) != null
-        if (has) Diag.marked++
         val row = rowOf(tv)
         if (row == null) {
             if (has) {
-                Diag.miss = "no row"
                 // 아직 목록에 안 붙었다 (채널을 열거나 메시지로 바로 갈 때). 붙는 순간 다시 한다
                 if (waiting[tv] == null) {
                     waiting[tv] = true
@@ -70,14 +73,13 @@ internal object RowBackground {
             return
         }
         val cur = row.background
+        if (has) owners[tv] = true else owners.remove(tv)
         if (has) {
-            Diag.listName = row.javaClass.name + " in " + (row.parent as Any).javaClass.name
             if (cur is HistoryDrawable) {
                 cur.owner = WeakReference(tv)
                 cur.invalidateSelf()
             } else {
                 row.background = HistoryDrawable(cur, WeakReference(tv), row)
-                Diag.bgSet++
             }
             row.invalidate()
             if (listening[tv] == null) {
@@ -187,7 +189,6 @@ internal class HistoryDrawable(prev: Drawable?, var owner: WeakReference<TextVie
         canvas.drawRect(left, top, bounds.right.toFloat(), bottom, paint)
         paint.color = mark.bar
         canvas.drawRect(left, top, left + gutter, bottom, paint)
-        Diag.drawn++
     }
 
     override fun getPadding(padding: Rect): Boolean = prev?.getPadding(padding) ?: false

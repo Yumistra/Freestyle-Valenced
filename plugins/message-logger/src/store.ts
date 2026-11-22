@@ -216,22 +216,33 @@ export const onChange = (fn: () => void) => {
 }
 
 let timer: any
-/** 잠깐 모았다가 한 번에 쓴다 */
-export function save(now = false) {
+let due = 0
+/**
+ * 잠깐 모았다가 한 번에 쓴다. 메시지가 계속 들어와도 늦어도 delay 안에는 쓴다
+ * (예전처럼 부를 때마다 기다림을 다시 시작하면 바쁜 채널에서는 한참 안 써진다).
+ * 기억해 둔 메시지(seen)만 바뀐 건 조금 더 모아서 (delay 5초) 쓴다: 저장할 때 전체를 다시 쓰기 때문.
+ */
+export function save(now = false, delay = 1000) {
     for (const fn of [...listeners]) {
         try {
             fn()
         } catch {}
     }
     if (!storage) return
+    if (now) {
+        clearTimeout(timer)
+        timer = undefined
+        writeNow()
+        return
+    }
+    const at = Date.now() + delay
+    if (timer && due <= at) return
     clearTimeout(timer)
-    timer = undefined
-    if (now) writeNow()
-    else
-        timer = setTimeout(() => {
-            timer = undefined
-            writeNow()
-        }, 1000)
+    due = at
+    timer = setTimeout(() => {
+        timer = undefined
+        writeNow()
+    }, delay)
 }
 
 function writeNow() {

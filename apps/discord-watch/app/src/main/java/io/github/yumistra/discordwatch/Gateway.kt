@@ -153,7 +153,7 @@ class Gateway(
             }
         }
 
-        override fun onClosed(code: Int, reason: String) = closed(code, reason)
+        override fun onClosed(code: Int, reason: String) = closed(code)
 
         override fun onFailure(t: Throwable) {
             handler.post {
@@ -161,7 +161,7 @@ class Gateway(
             }
         }
 
-        private fun closed(code: Int, reason: String) {
+        private fun closed(code: Int) {
             handler.post {
                 if (!current()) return@post
                 when (code) {

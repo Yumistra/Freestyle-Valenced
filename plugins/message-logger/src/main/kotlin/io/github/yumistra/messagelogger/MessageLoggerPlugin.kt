@@ -88,7 +88,6 @@ private object Hooks {
         }
         try {
             RowBackground.listClass = scope.classLoader.loadClass("androidx.recyclerview.widget.RecyclerView")
-            Diag.deco = true
             // 우리 배경이 깔린 줄에 디스코드가 다른 배경을 넣을 때 (RowBackground.OnSetBackground)
             bgUnhook = XposedBridge.hookMethod(android.view.View::class.java.getDeclaredMethod("setBackgroundDrawable", android.graphics.drawable.Drawable::class.java), OnSetBackground)
         } catch (t: Throwable) {
