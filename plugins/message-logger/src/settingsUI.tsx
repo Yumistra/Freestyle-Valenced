@@ -282,7 +282,21 @@ const GROUPS: Group[] = [
     },
 ]
 
+/**
+ * 그룹 화면 컴포넌트는 그룹마다 한 번만 만든다.
+ * (화면을 열 때마다 새로 만들면, 제목을 바꿀 때 내비게이터가 다시 그리면서 또 새 화면이 되고,
+ *  그게 끝없이 반복돼 화면이 멈춘다)
+ */
+const screens = new Map<string, any>()
 function groupScreen(g: Group) {
+    const made = screens.get(g.key)
+    if (made) return made
+    const C = makeScreen(g)
+    screens.set(g.key, C)
+    return C
+}
+
+function makeScreen(g: Group) {
     return function GroupScreen({ navigation }: { navigation?: any }) {
         useLayoutEffect(() => {
             try {
