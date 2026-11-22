@@ -4,10 +4,11 @@ import { refreshSettings, registerSettingsItem } from '@valenced/discord/modules
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
-import { CompanionGroup, describe, myId, sendCompanion, useWatchStatus } from './companion'
+import { getModuleWithImportedPath } from '@valenced/discord/utils/modules/finders'
+import { CompanionGroup, sendCompanion, useWatchStatus } from './companion'
 import { FilterSettings } from './filtersUI'
 import { clearAll, expire } from './logger'
-import { LOGS_ROUTE } from './logs'
+import { LOGS_ROUTE, palette } from './logs'
 import { SERVERS_ROUTE } from './servers'
 import { bindIfNone, events, KEEP_OPTIONS, logs, onChange, seen, setSettings, settings, type Settings } from './store'
 import { exportLogs, importLogs } from './transfer'
@@ -20,35 +21,57 @@ import { exportLogs, importLogs } from './transfer'
 const PARENT = 'yumistra.message-logger'
 const routeOf = (key: string) => `${PARENT}.group.${key}`
 
-/** 고를 수 있는 색 (비우면 테마 색) */
-const COLORS = ['', '#f23f43', '#ff7a45', '#f0b232', '#23a55a', '#00a8fc', '#5865f2', '#b45cf6', '#eb459e', '#949ba4']
+/** 색 고르기 창에 보이는 추천 색 */
+const SUGGESTED = [0xf23f43, 0xff7a45, 0xf0b232, 0x23a55a, 0x00a8fc, 0x5865f2, 0xb45cf6, 0xeb459e, 0x949ba4]
+const PICKER = 'modules/color_picker/native/showCustomColorPickerActionSheet.tsx'
 
-function ColorRow({ label, value, onPick }: { label: string; value: string; onPick: (v: string) => void }) {
-    const { Text } = Design as any
+const toInt = (hex: string) => (/^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : undefined)
+const toHex = (n: number) => `#${(n & 0xffffff).toString(16).padStart(6, '0')}`
+
+/** 디스코드의 색 고르기 창 (프로필 테마 색과 같은 것). 못 찾으면 false */
+function openPicker(color: number, onPick: (hex: string) => void): boolean {
+    let mod: any
+    try {
+        const un = getModuleWithImportedPath(PICKER, (m: any) => (mod = m)) as any
+        if (typeof un === 'function') un()
+    } catch {}
+    const show = mod?.default ?? mod?.showCustomColorPickerActionSheet
+    if (typeof show !== 'function') return false
+    try {
+        show({ color, suggestedColors: SUGGESTED, onSelect: (c: number) => onPick(toHex(c)) })
+        return true
+    } catch {
+        return false
+    }
+}
+
+/** 색 한 줄: 누르면 디스코드 색 고르기 창. 고른 색이 있으면 테마 색으로 되돌리는 줄도 */
+function ColorRow({ label, value, theme, onPick }: { label: string; value: string; theme: string; onPick: (v: string) => void }) {
+    const { TableRow, Text } = Design as any
+    const [fallback, setFallback] = useState(false)
+    const shown = value || theme
+    const swatch = <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: shown, borderWidth: 1, borderColor: 'rgba(128,128,128,0.4)' }} />
     return (
-        <View style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
-            <Text variant="text-md/semibold" color="text-strong">
-                {label}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                {COLORS.map(c => (
-                    <Pressable
-                        key={c || 'theme'}
-                        accessibilityRole="radio"
-                        accessibilityLabel={`${label} ${c || 'theme'}`}
-                        accessibilityState={{ selected: value === c }}
-                        onPress={() => onPick(c)}
-                        style={{ width: 30, height: 30, borderRadius: 15, borderWidth: value === c ? 3 : 1, borderColor: value === c ? '#ffffff' : 'rgba(128,128,128,0.5)', backgroundColor: c || 'transparent', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                        {!c ? (
-                            <Text variant="text-xs/bold" color="text-muted">
-                                A
-                            </Text>
-                        ) : null}
-                    </Pressable>
-                ))}
-            </View>
-        </View>
+        <>
+            <TableRow label={label} trailing={swatch} onPress={() => openPicker(toInt(value) ?? toInt(theme) ?? SUGGESTED[0], onPick) || setFallback(v => !v)} />
+            {fallback ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}>
+                    {SUGGESTED.map(n => (
+                        <Pressable key={n} accessibilityLabel={`${label} ${toHex(n)}`} onPress={() => (onPick(toHex(n)), setFallback(false))} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: toHex(n), borderWidth: value === toHex(n) ? 3 : 0, borderColor: '#ffffff' }} />
+                    ))}
+                </View>
+            ) : null}
+            {value ? (
+                <TableRow
+                    label={
+                        <Text variant="text-md/medium" color="text-link">
+                            Use theme color
+                        </Text>
+                    }
+                    onPress={() => onPick('')}
+                />
+            ) : null}
+        </>
     )
 }
 
@@ -99,9 +122,9 @@ function WhatToLog() {
                 <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
             </TableRowGroup>
             <TableRowGroup title="Other changes">
-                <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" subLabel="Shown in red in the reactions list and in View logs" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="TextIcon" />} label="Deleted channels and threads" subLabel="Keeps the name and the last messages" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="UserIcon" />} label="Profile changes" subLabel="Username, display name, avatar and status of friends and people you DM" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="TextIcon" />} label="Deleted channels and threads" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="UserIcon" />} label="Profile changes" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
             </TableRowGroup>
         </Page>
     )
@@ -114,7 +137,7 @@ function WhoAndWhere() {
     return (
         <Page>
             <TableRowGroup title="Servers">
-                <TableSwitchRow label="Only log chosen servers" subLabel="Direct messages are not affected" value={s.onlyServersOn} onValueChange={(onlyServersOn: boolean) => set({ onlyServersOn })} />
+                <TableSwitchRow label="Only log chosen servers" value={s.onlyServersOn} onValueChange={(onlyServersOn: boolean) => set({ onlyServersOn })} />
                 {s.onlyServersOn ? <TableRow icon={<TableRowAssetIcon name="ServerIcon" />} label="Choose servers" subLabel={`${(s.onlyServers ?? []).length} chosen`} arrow onPress={() => nav?.navigate?.(SERVERS_ROUTE)} /> : null}
             </TableRowGroup>
             <FilterSettings set={set} />
@@ -140,8 +163,8 @@ function InChat() {
                 <TableSwitchRow label="Use a 12-hour clock" value={s.clock12} onValueChange={(clock12: boolean) => set({ clock12 })} />
             </TableRowGroup>
             <TableRowGroup title="Colors">
-                <ColorRow label="Deleted message color" value={s.deletedColor} onPick={deletedColor => set({ deletedColor })} />
-                <ColorRow label="Edited message color" value={s.editedColor} onPick={editedColor => set({ editedColor })} />
+                <ColorRow label="Deleted messages" value={s.deletedColor} theme={palette().danger} onPick={deletedColor => set({ deletedColor })} />
+                <ColorRow label="Edited messages" value={s.editedColor} theme={palette().muted} onPick={editedColor => set({ editedColor })} />
             </TableRowGroup>
         </Page>
     )
@@ -154,7 +177,7 @@ function Notifications() {
     return (
         <Page>
             <TableRowGroup title="While Discord runs">
-                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Notify when a DM or mention is deleted" subLabel="Phone notification from Discord" value={s.notifyDeletes} onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Notify when a DM or mention is deleted" value={s.notifyDeletes} onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })} />
             </TableRowGroup>
             <TableRowGroup title="While Discord is closed">
                 {st?.hasToken && !missing ? (
@@ -162,14 +185,14 @@ function Notifications() {
                         <TableSwitchRow
                             icon={<TableRowAssetIcon name="BellIcon" />}
                             label="Notify when a DM or mention is deleted"
-                            subLabel={st?.notifPermission === false && st?.notify ? 'Notifications are blocked for Discord Watch' : 'Phone notification from Discord Watch'}
+                            subLabel={st?.notifPermission === false && st?.notify ? 'Blocked' : undefined}
                             value={!!st?.notify}
                             onValueChange={(notify: boolean) => send('setup', { notify })}
                         />
                         {st?.notifPermission === false && st?.notify ? <TableRow label="Allow notifications for Discord Watch" arrow onPress={() => send('setup', { notify: true, enabled: !!st?.enabled })} /> : null}
                     </>
                 ) : (
-                    <TableRow label="Discord Watch is not set up" subLabel="Turn it on in While Discord is closed" />
+                    <TableRow label="Discord Watch is not set up" />
                 )}
             </TableRowGroup>
         </Page>
@@ -183,8 +206,8 @@ function WhileClosed() {
         <Page>
             <CompanionGroup />
             <TableRowGroup title="Without the app">
-                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Remember notifications" subLabel="Keeps messages that came as notifications" value={s.rememberPushes} onValueChange={(rememberPushes: boolean) => set({ rememberPushes })} />
-                <TableSwitchRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Find changes when you come back" subLabel="Compares channels you open with what you saw" value={s.detectAway} onValueChange={(detectAway: boolean) => set({ detectAway })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="BellIcon" />} label="Remember notifications" value={s.rememberPushes} onValueChange={(rememberPushes: boolean) => set({ rememberPushes })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Find changes when you come back" value={s.detectAway} onValueChange={(detectAway: boolean) => set({ detectAway })} />
             </TableRowGroup>
         </Page>
     )
@@ -192,7 +215,7 @@ function WhileClosed() {
 
 function Storage() {
     const { s, set } = useSettings()
-    const { TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, TableRow, Button } = Design as any
+    const { TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, Button, Stack, Text } = Design as any
     const [msg, setMsg] = useState('')
     const run = (f: () => Promise<string>) =>
         f()
@@ -213,13 +236,13 @@ function Storage() {
                 ))}
             </TableRadioGroup>
             <TableRowGroup title="Attachments">
-                <TableSwitchRow icon={<TableRowAssetIcon name="ImageIcon" />} label="Save deleted attachments" subLabel="Keeps images, videos and files of deleted messages on this device, up to 25 MB each" value={s.saveAttachments} onValueChange={(saveAttachments: boolean) => set({ saveAttachments })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="ImageIcon" />} label="Save deleted attachments" value={s.saveAttachments} onValueChange={(saveAttachments: boolean) => set({ saveAttachments })} />
             </TableRowGroup>
-            <TableRowGroup title="Backup">
-                <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Export logs" subLabel="Saves a file in Download/MessageLogger" onPress={() => run(async () => `Saved to ${await exportLogs()}`)} />
-                <TableRow icon={<TableRowAssetIcon name="UploadIcon" />} label="Import logs" subLabel="Adds logs from an exported file, nothing is removed" onPress={() => run(async () => `Added ${await importLogs()} log(s)`)} />
-                {msg ? <TableRow label={msg} /> : null}
-            </TableRowGroup>
+            <Stack spacing={8}>
+                <NavButton icon="DownloadIcon" label="Export logs" arrow={false} onPress={() => run(async () => `Saved to ${await exportLogs()}`)} />
+                <NavButton icon="UploadIcon" label="Import logs" arrow={false} onPress={() => run(async () => `Added ${await importLogs()} log(s)`)} />
+                {msg ? <Text variant="text-sm/medium" color="text-muted">{msg}</Text> : null}
+            </Stack>
             <Button text="Clear all logs" variant="destructive" size="md" disabled={!Object.keys(logs()).length && !events().length} onPress={() => clearAll()} />
         </Page>
     )
@@ -232,10 +255,7 @@ interface Group {
     title: string
     icon: string
     screen: () => any
-    sub: (s: Settings, watch: string) => string
 }
-
-const on = (pairs: Array<[boolean, string]>, none: string) => pairs.filter(p => p[0]).map(p => p[1]).join(', ') || none
 
 const GROUPS: Group[] = [
     {
@@ -243,42 +263,36 @@ const GROUPS: Group[] = [
         title: 'What to log',
         icon: 'ChatXIcon',
         screen: WhatToLog,
-        sub: s => on([[s.logDeletes, 'Deleted'], [s.logEdits, 'edited'], [s.logReactions, 'reactions'], [s.logChannels, 'channels'], [s.logProfiles, 'profiles']], 'Nothing is logged').replace(/^./, c => c.toUpperCase()),
     },
     {
         key: 'who',
         title: 'Who and where',
         icon: 'FiltersHorizontalIcon',
         screen: WhoAndWhere,
-        sub: s => [s.onlyServersOn ? `${(s.onlyServers ?? []).length} servers` : 'All servers', `${(s.allow ?? []).length} whitelisted`, `${(s.block ?? []).length} blacklisted`, ...(s.friendsOnly ? ['friends only'] : [])].join(', '),
     },
     {
         key: 'chat',
         title: 'In chat',
         icon: 'PencilIcon',
         screen: InChat,
-        sub: s => on([[s.showHistoryInChat, 'Previous versions'], [s.showEditTime, 'edit time'], [s.showDeleteTime, 'deletion time']], 'Only colors').replace(/^./, c => c.toUpperCase()),
     },
     {
         key: 'notify',
         title: 'Notifications',
         icon: 'BellIcon',
         screen: Notifications,
-        sub: s => `${s.notifyDeletes ? 'On' : 'Off'} while Discord runs`,
     },
     {
         key: 'closed',
         title: 'While Discord is closed',
         icon: 'ClockIcon',
         screen: WhileClosed,
-        sub: (_s, watch) => `Discord Watch: ${watch}`,
     },
     {
         key: 'storage',
         title: 'Storage',
         icon: 'DownloadIcon',
         screen: Storage,
-        sub: s => `Keep ${KEEP_OPTIONS.find(o => o[0] === s.keepHours)?.[1] ?? `${s.keepHours} hours`}, attachments ${s.saveAttachments ? 'saved' : 'not saved'}`,
     },
 ]
 
@@ -329,29 +343,55 @@ export function registerGroups(cleanup: (...f: any[]) => void) {
     } catch {}
 }
 
+/** 디스코드 Row Button (카드 모양 큰 버튼), 없으면 표 줄 */
+function NavButton({ icon, label, sub, onPress, arrow = true }: { icon: string; label: string; sub?: string; onPress: () => void; arrow?: boolean; key?: string }) {
+    const { RowButton, TableRow } = Design as any
+    if (RowButton) return <RowButton icon={<TableRowAssetIcon name={icon} />} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
+    return <TableRow icon={<TableRowAssetIcon name={icon} />} label={label} subLabel={sub} arrow={arrow} onPress={onPress} />
+}
+
+/** 숫자들: 디스코드 Tag Group (읽기 전용 태그), 없으면 글 */
+function Counts({ items }: { items: string[] }) {
+    const { TagGroup, Text } = Design as any
+    if (TagGroup) return <TagGroup label="Logs" items={items.map((label, i) => ({ id: String(i), label }))} />
+    return (
+        <Text variant="text-sm/medium" color="text-muted">
+            {items.join(', ')}
+        </Text>
+    )
+}
+
 export function SettingsPage({ api }: { api?: any }) {
     if (api?.jsonStorage) bindIfNone(api.jsonStorage)
-    const { s } = useSettings()
+    useSettings()
     const nav = useNav()
-    const { st, missing } = useWatchStatus(false)
     const all = Object.values(logs())
+    const ev = events()
     const deleted = all.filter(e => e.d).length
     const edited = all.filter(e => !e.d && e.e?.length).length
     const away = all.filter(e => e.away).length
-    const remembered = Object.keys(seen()).length
-    const watch = missing ? 'not installed' : describe(st, missing, myId()).replace(/^./, c => c.toLowerCase())
-    const { TableRowGroup, TableRow } = Design as any
+    const { Stack } = Design as any
     return (
         <Page>
-            <TableRowGroup title="Logs">
-                <TableRow icon={<TableRowAssetIcon name="ChatXIcon" />} label="View logs" subLabel={`${deleted} deleted, ${edited} edited`} arrow onPress={() => nav?.navigate?.(LOGS_ROUTE)} />
-                <TableRow label={`${away} found while you were away`} subLabel={`${remembered} messages remembered`} />
-            </TableRowGroup>
-            <TableRowGroup title="Settings">
+            <Stack spacing={12}>
+                <Counts
+                    items={[
+                        `${deleted} deleted`,
+                        `${edited} edited`,
+                        `${ev.filter(e => e.k === 'r').length} reactions`,
+                        `${ev.filter(e => e.k === 'c').length} channels`,
+                        `${ev.filter(e => e.k === 'p').length} profiles`,
+                        `${away} while away`,
+                        `${Object.keys(seen()).length} remembered`,
+                    ]}
+                />
+                <NavButton icon="ChatXIcon" label="View logs" onPress={() => nav?.navigate?.(LOGS_ROUTE)} />
+            </Stack>
+            <Stack spacing={8}>
                 {GROUPS.map(g => (
-                    <TableRow key={g.key} icon={<TableRowAssetIcon name={g.icon} />} label={g.title} subLabel={g.sub(s, watch)} arrow onPress={() => nav?.navigate?.(routeOf(g.key))} />
+                    <NavButton key={g.key} icon={g.icon} label={g.title} onPress={() => nav?.navigate?.(routeOf(g.key))} />
                 ))}
-            </TableRowGroup>
+            </Stack>
         </Page>
     )
 }

@@ -20,7 +20,7 @@ import { registerGroups, SettingsPage } from './settingsUI'
 import { bind, flush, notes, unbind } from './store'
 
 /**
- * Message Logger: 지운 메시지는 빨간, 수정한 메시지는 연한 회색으로 핑(노란 배경)과 같은 모양으로 남긴다.
+ * Everything Logger: 지운 메시지는 빨간, 수정한 메시지는 연한 회색으로 핑(노란 배경)과 같은 모양으로 남긴다.
  * 핑 배경은 메시지 줄 데이터의 backgroundHighlight { backgroundColor, gutterColor } 로 그려지므로 그 색만 바꿔 넣는다.
  * 로그는 저장되어 디스코드를 다시 켜도 남고 (지운 메시지는 채널을 불러올 때 제자리에 다시 넣는다), 보관 시간이 지나면 사라진다.
  */

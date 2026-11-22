@@ -359,7 +359,6 @@ function PickerScreen({ navigation, route }: any) {
                     <TableSwitchRow
                         icon={<Avatar item={{ id: place!, name: '', image: guildIcon(guild), icon: 'ServerIcon' }} />}
                         label="Whole server"
-                        subLabel={`Every channel and member here goes in the ${listName}`}
                         value={has(place!)}
                         onValueChange={() => toggle(place!)}
                         start

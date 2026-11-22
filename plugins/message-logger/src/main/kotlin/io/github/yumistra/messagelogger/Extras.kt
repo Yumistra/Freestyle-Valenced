@@ -16,7 +16,7 @@ import android.provider.MediaStore
 /**
  * JS 가 부르는 것들:
  *  - notify: 지운 메시지 휴대폰 알림 (누르면 디스코드의 그 메시지로)
- *  - export: 로그 JSON 을 Download/MessageLogger 에 저장
+ *  - export: 로그 JSON 을 Download/EverythingLogger 에 저장
  *  - takeCompanion: 알림 앱(디스코드가 꺼져 있을 때 기록하는 앱)이 보내 둔 기록 가져오기
  */
 internal object Extras {
@@ -59,13 +59,13 @@ internal object Extras {
 
     fun export(args: List<Any?>): Any? {
         val ctx = Tray.context ?: return "error: no context"
-        val name = args.getOrNull(0)?.toString() ?: "message-logger.json"
+        val name = args.getOrNull(0)?.toString() ?: "everything-logger.json"
         val json = args.getOrNull(1)?.toString() ?: return "error: empty"
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues()
             values.put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             values.put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/MessageLogger")
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/EverythingLogger")
             val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return "error: could not create the file"
             val out = ctx.contentResolver.openOutputStream(uri) ?: return "error: could not write the file"
             try {
@@ -73,10 +73,10 @@ internal object Extras {
             } finally {
                 out.close()
             }
-            return "Download/MessageLogger/$name"
+            return "Download/EverythingLogger/$name"
         }
         @Suppress("DEPRECATION")
-        val dir = java.io.File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "MessageLogger")
+        val dir = java.io.File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "EverythingLogger")
         dir.mkdirs()
         val f = java.io.File(dir, name)
         f.writeText(json, Charsets.UTF_8)

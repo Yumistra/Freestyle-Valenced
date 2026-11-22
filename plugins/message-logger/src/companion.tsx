@@ -164,10 +164,10 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
             <TableRow
                 icon={<TableRowAssetIcon name="ShieldIcon" />}
                 label="Discord Watch"
-                subLabel={`${sub}. Catches deleted and edited messages while Discord is closed, they show up in View logs when you open Discord.${companionStatus.last ? ` Added ${companionStatus.received} so far.` : ''}`}
+                subLabel={`${sub}${companionStatus.last ? `, ${companionStatus.received} added` : ''}`}
             />
             {missing ? (
-                <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Download the app" subLabel="Install it, then come back here" arrow onPress={() => Linking.openURL(APK_URL)} />
+                <TableRow icon={<TableRowAssetIcon name="DownloadIcon" />} label="Download the app" arrow onPress={() => Linking.openURL(APK_URL)} />
             ) : (
                 <>
                     {st?.hasToken ? (
@@ -180,10 +180,9 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                     <TableRow
                         icon={<TableRowAssetIcon name="UserIcon" />}
                         label={st?.hasToken ? 'Use this account' : 'Turn on with this account'}
-                        subLabel="Uses the account you are logged in with here"
                         onPress={() => turnOn(currentToken())}
                     />
-                    <TableRow icon={<TableRowAssetIcon name="LinkIcon" />} label="Paste a token" subLabel="Watch another account instead" arrow onPress={() => setPaste(p => !p)} />
+                    <TableRow icon={<TableRowAssetIcon name="LinkIcon" />} label="Paste a token" arrow onPress={() => setPaste(p => !p)} />
                     {paste ? (
                         <View style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
                             <TextInput label="Token" value={token} placeholder="Token of the account to watch" onChange={setToken} secureTextEntry autoCapitalize="none" autoCorrect={false} size="md" />
@@ -191,16 +190,16 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                         </View>
                     ) : null}
                     {st?.userId && me && st.userId !== me ? (
-                        <TableRow label="Another account is watched" subLabel="Its deleted messages show in View logs, not in chat" />
+                        <TableRow label="Another account is watched" />
                     ) : null}
                     {st?.hasToken && st?.battery === false ? (
-                        <TableRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Keep running in the background" subLabel="Lets the app ignore battery optimization" arrow onPress={() => send('battery')} />
+                        <TableRow icon={<TableRowAssetIcon name="ClockIcon" />} label="Keep running in the background" arrow onPress={() => send('battery')} />
                     ) : null}
                     {st?.hasToken ? (
                         <TableRow
                             icon={<TableRowAssetIcon name="DownloadIcon" />}
                             label="Get logs now"
-                            subLabel={st?.queued ? `${st.queued} kept in the app for 3 days` : 'Nothing caught yet'}
+                            subLabel={st?.queued ? `${st.queued} waiting` : undefined}
                             onPress={() =>
                                 send('deliver').then(() =>
                                     setTimeout(() => {

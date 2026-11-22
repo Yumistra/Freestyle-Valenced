@@ -25,17 +25,17 @@ export function exportText(): string {
     return JSON.stringify({ format: FORMAT, v: 1, at: Date.now(), logs: logs(), events: events() })
 }
 
-/** 다운로드 폴더(Download/MessageLogger)에 저장하고 경로를 돌려준다 */
+/** 다운로드 폴더(Download/EverythingLogger)에 저장하고 경로를 돌려준다 */
 export async function exportLogs(): Promise<string> {
     const d = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
-    const name = `message-logger-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`
+    const name = `everything-logger-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`
     return String(await call('export', [name, exportText()]))
 }
 
 /** 두 로그 합치기 (이미 있는 건 수정 기록만 더한다). 더한 개수 */
 export function mergeData(data: any): number {
-    if (!data || data.format !== FORMAT) throw new Error('Not a Message Logger file')
+    if (!data || data.format !== FORMAT) throw new Error('Not an Everything Logger file')
     const mine = logs()
     let added = 0
     for (const [id, e] of Object.entries((data.logs ?? {}) as Record<string, Entry>)) {

@@ -107,7 +107,7 @@ export function FilterSettings({ set }: { set: (patch: any) => void }) {
         <>
             <ListGroup list="allow" title="Whitelist" hint="Always logged, even if blacklisted or not a friend.">
                 <TableSwitchRow label="Only log the whitelist" value={s.allowOnly} onValueChange={(allowOnly: boolean) => set({ allowOnly })} />
-                <TableSwitchRow label="Only log friends" subLabel="Messages from people who aren't your friends are not logged" value={s.friendsOnly} onValueChange={(friendsOnly: boolean) => set({ friendsOnly })} />
+                <TableSwitchRow label="Only log friends" value={s.friendsOnly} onValueChange={(friendsOnly: boolean) => set({ friendsOnly })} />
             </ListGroup>
             <ListGroup list="block" title="Blacklist" hint="Never logged. Long press a message to add its author." />
         </>

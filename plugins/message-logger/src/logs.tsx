@@ -79,6 +79,10 @@ export function palette() {
         onBrand: tokenColor(['WHITE', 'TEXT_ON_BRAND'], '#ffffff'),
         add: tokenColor(['TEXT_FEEDBACK_POSITIVE', 'TEXT_POSITIVE', 'STATUS_POSITIVE'], '#23a55a'),
         addSoft: alpha(tokenColor(['TEXT_FEEDBACK_POSITIVE', 'TEXT_POSITIVE', 'STATUS_POSITIVE'], '#23a55a'), 0.15),
+        // 디스코드 태그 (Tag Group) 색
+        tagBg: tokenColor(['CONTROL_SECONDARY_BACKGROUND_DEFAULT', 'BACKGROUND_MOD_SUBTLE'], alpha(muted, 0.16)),
+        tagBorder: tokenColor(['CONTROL_SECONDARY_BORDER_DEFAULT', 'BORDER_SUBTLE'], alpha(muted, 0.3)),
+        tagText: tokenColor(['CONTROL_SECONDARY_TEXT_DEFAULT', 'TEXT_DEFAULT', 'TEXT_NORMAL'], '#dbdee1'),
     }
 }
 
@@ -368,52 +372,65 @@ export interface Item {
     img?: string
 }
 
+/** 디스코드 태그 모양 (필터 태그: 둥근 모서리). 고르면 브랜드 색 */
 export function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void; key?: string }) {
     const { Text } = Design as any
     const P = palette()
     return (
         <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: on }}
+            accessibilityLabel={item.label}
             onPress={onPress}
             style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                height: 32,
+                minHeight: 30,
                 paddingLeft: item.img ? 4 : 12,
-                paddingRight: 10,
-                borderRadius: 16,
-                marginRight: 6,
+                paddingRight: 12,
+                borderRadius: 999,
                 borderWidth: 1,
-                borderColor: on ? P.brand : P.border,
-                backgroundColor: on ? P.brandSoft : 'transparent',
+                borderColor: on ? P.brand : P.tagBorder,
+                backgroundColor: on ? P.brand : P.tagBg,
+                gap: 6,
             }}
         >
-            {item.img ? <Image source={{ uri: item.img }} style={{ width: 22, height: 22, borderRadius: 11, marginRight: 6 }} /> : null}
-            <Text variant="text-sm/medium" numberOfLines={1} style={{ color: P.text, maxWidth: 150 }}>
+            {item.img ? <Image source={{ uri: item.img }} style={{ width: 22, height: 22, borderRadius: 11 }} /> : null}
+            <Text variant="text-sm/medium" numberOfLines={1} style={{ color: on ? P.onBrand : P.tagText, maxWidth: 170 }}>
                 {item.label}
             </Text>
-            <Text variant="text-xs/semibold" style={{ color: P.muted, marginLeft: 6 }}>
+            <Text variant="text-xs/semibold" style={{ color: on ? P.onBrand : P.muted }}>
                 {item.n}
             </Text>
         </Pressable>
     )
 }
 
+/** 줄 단위로 감싸는 태그 묶음 (디스코드 Tag Group 기본 모양). 많으면 처음 몇 개만, "more" 로 펼친다 */
 export function ChipRow({ title, items, selected, onToggle }: { title: string; items: Item[]; selected: string[]; onToggle(v: string): void; key?: string }) {
     const { Text } = Design as any
     const P = palette()
+    const [all, setAll] = useState(false)
     if (!items.length) return null
+    const LIMIT = 12
+    const shown = all ? items : items.slice(0, LIMIT).concat(items.slice(LIMIT).filter(i => selected.includes(i.v)))
     return (
-        <View style={{ marginTop: 10 }}>
-            <Text variant="text-xs/bold" style={{ color: P.muted, marginBottom: 6, letterSpacing: 0.4 }}>
+        <View style={{ marginTop: 12 }}>
+            <Text variant="text-xs/bold" style={{ color: P.muted, marginBottom: 8, letterSpacing: 0.4 }}>
                 {title.toUpperCase()}
             </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: 'row' }}>
-                    {items.map(item => (
-                        <Chip key={item.v} item={item} on={selected.includes(item.v)} onPress={() => onToggle(item.v)} />
-                    ))}
-                </View>
-            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {shown.map(item => (
+                    <Chip key={item.v} item={item} on={selected.includes(item.v)} onPress={() => onToggle(item.v)} />
+                ))}
+                {items.length > LIMIT ? (
+                    <Pressable onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setAll(v => !v))} style={{ minHeight: 30, paddingHorizontal: 12, borderRadius: 999, justifyContent: 'center' }}>
+                        <Text variant="text-sm/semibold" style={{ color: P.link }}>
+                            {all ? 'Less' : `${items.length - LIMIT} more`}
+                        </Text>
+                    </Pressable>
+                ) : null}
+            </View>
         </View>
     )
 }
