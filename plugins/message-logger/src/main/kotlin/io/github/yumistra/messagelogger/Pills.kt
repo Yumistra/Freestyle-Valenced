@@ -2,6 +2,8 @@
 
 package io.github.yumistra.messagelogger
 
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -15,6 +17,9 @@ import de.robv.android.xposed.XposedBridge
 // JS(rows.ts)와 같아야 한다: 반응 이모지 displayName 끝에 붙는 표시  지운수,색,f? 
 private const val MARK_START = ''
 private const val MARK_END = ''
+
+/** 모두 지운 이모지 버튼의 빨간 상자 (알아보려고 따로 만든 종류) */
+internal class RemovedPillBackground : GradientDrawable()
 
 /** 우리가 붙인 빨간 (n) (다음에 다시 그릴 때 알아보고 지우려고 따로 만든 종류) */
 internal class RemovedCountSpan(color: Int) : ForegroundColorSpan(color)
@@ -72,8 +77,11 @@ internal object Pills : XC_MethodHook() {
                     return
                 }
             }
-            // 예전에 붙인 (n) 이 남아 있으면 지운다 (다시 반응해서 표시가 없어진 경우)
-            if (depth > 0) clear(v)
+            // 예전에 붙인 (n), 빨간 상자가 남아 있으면 지운다 (다시 반응해서 표시가 없어진 경우)
+            if (depth > 0) {
+                clear(v)
+                plainBox(v)
+            }
         }
         if (v is ViewGroup) {
             var i = 0
@@ -113,6 +121,39 @@ internal object Pills : XC_MethodHook() {
             p = (p as View).parent
         }
         tv.requestLayout()
+        if (only) redBox(pill, color) else plainBox(pill)
+    }
+
+    /** 원래 상자 (디스코드가 다시 그리지 않고 우리 상자가 남을 때 되돌리려고) */
+    private val original = java.util.WeakHashMap<View, Drawable?>()
+
+    /** 지워진 메시지처럼: 옅은 빨간 바탕 + 빨간 테두리, 모서리는 원래 상자와 같게 */
+    private fun redBox(pill: View, color: Int) {
+        val now = pill.background
+        if (now !is RemovedPillBackground) original[pill] = now
+        val density = try {
+            pill.resources.displayMetrics.density
+        } catch (_: Throwable) {
+            2f
+        }
+        var radius = 8f * density
+        if (now is GradientDrawable && now !is RemovedPillBackground && android.os.Build.VERSION.SDK_INT >= 24) {
+            try {
+                if (now.cornerRadius > 0f) radius = now.cornerRadius
+            } catch (_: Throwable) {
+            }
+        }
+        val bg = RemovedPillBackground()
+        bg.shape = GradientDrawable.RECTANGLE
+        bg.cornerRadius = radius
+        bg.setColor((0x33 shl 24) or (color and 0xffffff))
+        bg.setStroke(Math.max(1, (1.5f * density).toInt()), color)
+        pill.background = bg
+    }
+
+    private fun plainBox(pill: View) {
+        if (pill.background !is RemovedPillBackground) return
+        pill.background = original.remove(pill)
     }
 
     private fun clear(pill: View) {
