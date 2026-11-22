@@ -355,7 +355,7 @@ check('date inputs hidden until filters open', !inputs.get('From YYYY-MM-DD')?.l
 
 // ── 설정 화면 ───────────────────────────────────────────────────────────
 view = await render(h(X.SettingsPage, { api: { jsonStorage: storage } }))
-check('settings main page lists the groups', ['View logs', 'What to log', 'Who and where', 'In chat', 'Notifications', 'While Discord is closed', 'Storage'].every(t => view.includes(t)), view.slice(0, 500))
+check('settings main page lists the groups', ['View logs', 'What to log', 'Who and where', 'In chat', 'Notifications', 'Storage', 'Advanced'].every(t => view.includes(t)), view.slice(0, 500))
 const screens = Object.fromEntries(X.groupScreens().map(g => [g.key, g.Screen]))
 view = await render(h(screens.log))
 check('what to log screen', ['Log DMs and group DMs', 'Removed reactions', 'Deleted channels and threads', 'Profile changes'].every(t => view.includes(t)), view.slice(0, 400))

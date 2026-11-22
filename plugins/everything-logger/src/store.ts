@@ -94,6 +94,8 @@ export interface Settings {
     searches: SavedSearch[]
     /** 디스코드 색 고르기 창 모듈 번호 (같은 빌드일 때 바로 불러오려고) */
     pickerModule?: { id: number; build: string }
+    /** Discord Watch 경고를 보고 켜기로 했다 */
+    watchUnlocked?: boolean
 }
 
 export interface SavedSearch {

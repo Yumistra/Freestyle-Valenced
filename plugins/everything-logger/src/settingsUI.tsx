@@ -147,9 +147,8 @@ function Notifications() {
             <TableRowGroup title="While Discord runs">
                 <TableSwitchRow icon={rowIcon('BellIcon')} label="Notify when a DM or mention is deleted" value={s.notifyDeletes} onValueChange={(notifyDeletes: boolean) => set({ notifyDeletes })} />
             </TableRowGroup>
-            <TableRowGroup title="While Discord is closed">
-                {st?.hasToken && !missing ? (
-                    <>
+            {st?.hasToken && !missing ? (
+                <TableRowGroup title="Discord Watch">
                         <TableSwitchRow
                             icon={rowIcon('BellIcon')}
                             label="Notify when a DM or mention is deleted"
@@ -158,25 +157,50 @@ function Notifications() {
                             onValueChange={(notify: boolean) => send('setup', { notify })}
                         />
                         {st?.notifPermission === false && st?.notify ? <TableRow label="Allow notifications for Discord Watch" arrow onPress={() => send('setup', { notify: true, enabled: !!st?.enabled })} /> : null}
-                    </>
-                ) : (
-                    <TableRow label="Discord Watch is not set up" />
-                )}
-            </TableRowGroup>
+                </TableRowGroup>
+            ) : null}
         </Page>
     )
 }
 
-function WhileClosed() {
+/**
+ * Discord Watch 는 계정 토큰으로 디스코드 밖에서 따로 접속한다 (셀프봇과 같은 방식, 계정이 정지될 수 있다).
+ * 그래서 고급 설정 안에 두고, 처음엔 경고를 보여 주고 두 번 눌러야 켤 수 있게 한다.
+ */
+export const WATCH_WARNING = 'This connects your account outside Discord (selfbot). It can get your account banned.'
+
+function WatchGate({ onUnlock }: { onUnlock: () => void }) {
+    const { TableRowGroup, Text, Button } = Design as any
+    const [armed, setArmed] = useState(false)
+    useEffect(() => {
+        if (!armed) return
+        const t = setTimeout(() => setArmed(false), 4000)
+        return () => clearTimeout(t)
+    }, [armed])
+    return (
+        <TableRowGroup title="Discord Watch">
+            <View style={{ padding: 16, gap: 12 }}>
+                <Text variant="text-md/semibold" style={{ color: palette().danger }}>
+                    {WATCH_WARNING}
+                </Text>
+                <Button text={armed ? 'Tap again to turn it on' : 'Turn on Discord Watch'} variant={armed ? 'destructive' : 'secondary'} size="md" onPress={() => (armed ? onUnlock() : setArmed(true))} />
+            </View>
+        </TableRowGroup>
+    )
+}
+
+function Advanced() {
     const { s, set } = useSettings()
+    const { st } = useWatchStatus(false)
     const { TableRowGroup, TableSwitchRow } = Design as any
+    const unlocked = !!s.watchUnlocked || !!st?.hasToken
     return (
         <Page>
-            <CompanionGroup />
-            <TableRowGroup title="Without the app">
+            <TableRowGroup title="While Discord is closed">
                 <TableSwitchRow icon={rowIcon('BellZIcon')} label="Remember notifications" value={s.rememberPushes} onValueChange={(rememberPushes: boolean) => set({ rememberPushes })} />
                 <TableSwitchRow icon={rowIcon('ClockIcon')} label="Find changes when you come back" value={s.detectAway} onValueChange={(detectAway: boolean) => set({ detectAway })} />
             </TableRowGroup>
+            {unlocked ? <CompanionGroup /> : <WatchGate onUnlock={() => set({ watchUnlocked: true })} />}
         </Page>
     )
 }
@@ -251,16 +275,16 @@ const GROUPS: Group[] = [
         screen: Notifications,
     },
     {
-        key: 'closed',
-        title: 'While Discord is closed',
-        icon: 'MobilePhoneIcon',
-        screen: WhileClosed,
-    },
-    {
         key: 'storage',
         title: 'Storage',
         icon: 'SaveIcon',
         screen: Storage,
+    },
+    {
+        key: 'advanced',
+        title: 'Advanced',
+        icon: 'WrenchIcon',
+        screen: Advanced,
     },
 ]
 
