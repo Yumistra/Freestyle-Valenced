@@ -9,7 +9,7 @@ import { FilterSettings } from './filtersUI'
 import { clearAll, expire } from './logger'
 import { LOGS_ROUTE } from './logs'
 import { SERVERS_ROUTE } from './servers'
-import { bindIfNone, KEEP_OPTIONS, logs, onChange, seen, setSettings, settings, type Settings } from './store'
+import { bindIfNone, events, KEEP_OPTIONS, logs, onChange, seen, setSettings, settings, type Settings } from './store'
 import { exportLogs, importLogs } from './transfer'
 
 /**
@@ -220,7 +220,7 @@ function Storage() {
                 <TableRow icon={<TableRowAssetIcon name="UploadIcon" />} label="Import logs" subLabel="Adds logs from an exported file, nothing is removed" onPress={() => run(async () => `Added ${await importLogs()} log(s)`)} />
                 {msg ? <TableRow label={msg} /> : null}
             </TableRowGroup>
-            <Button text="Clear all logs" variant="destructive" size="md" disabled={!Object.keys(logs()).length} onPress={() => clearAll()} />
+            <Button text="Clear all logs" variant="destructive" size="md" disabled={!Object.keys(logs()).length && !events().length} onPress={() => clearAll()} />
         </Page>
     )
 }

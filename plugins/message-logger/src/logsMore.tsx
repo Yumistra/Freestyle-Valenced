@@ -2,8 +2,10 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useState } from 'react'
-import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
+import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { removeEvent } from './events'
+import { clearKind } from './logger'
 import { avatarUrl, goToMessage, palette, where } from './logs'
 import { events, logs, onChange, save, seen, type Event } from './store'
 import { lookupModule } from '@valenced/modules/finders'
@@ -84,7 +86,7 @@ function useLogsVersion() {
 }
 
 /** 두 번 눌러 지우기 */
-function DeleteButton({ onDelete }: { onDelete: () => void }) {
+export function DeleteButton({ onDelete, text = 'Delete', armedText = 'Tap again to delete', disabled }: { onDelete: () => void; text?: string; armedText?: string; disabled?: boolean }) {
     const { Button } = Design as any
     const [armed, setArmed] = useState(false)
     useEffect(() => {
@@ -92,7 +94,7 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
         const t = setTimeout(() => setArmed(false), 3000)
         return () => clearTimeout(t)
     }, [armed])
-    return <Button text={armed ? 'Tap again to delete' : 'Delete'} variant={armed ? 'destructive' : 'secondary'} size="sm" onPress={() => (armed ? onDelete() : setArmed(true))} />
+    return <Button text={armed ? armedText : text} variant={armed ? 'destructive' : 'secondary'} size="sm" disabled={disabled} onPress={() => (armed ? (setArmed(false), onDelete()) : setArmed(true))} />
 }
 
 function Card({ children, onPress, label }: { children: any; onPress?: () => void; label?: string; key?: string }) {
@@ -132,16 +134,71 @@ function Head({ u, title, sub }: { u: any; title: string; sub: string }) {
     )
 }
 
-function List({ items, render, empty }: { items: Event[]; render: (e: Event) => any; empty: string }) {
-    const { Button } = Design as any
-    const [shown, setShown] = useState(PAGE)
-    if (!items.length) return <Empty text={empty} />
+/** 찾기 칸 (메시지 탭과 같은 모양) */
+export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+    const { Text } = Design as any
+    const P = palette()
+    const SearchIcon: any = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
+    const XIcon: any = lookupGeneratedIconComponent('XSmallIcon' as any) ?? lookupGeneratedIconComponent('CloseSmallIcon' as any)
+    const [focused, setFocused] = useState(false)
     return (
-        <ScrollView contentContainerStyle={{ paddingVertical: 8, paddingBottom: 48 }}>
-            {items.slice(0, shown).map(render)}
-            {items.length > shown ? (
+        <View style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingRight: 6, borderRadius: 12, backgroundColor: P.input, borderWidth: 1, borderColor: focused ? P.brand : 'transparent' }}>
+            {SearchIcon ? <SearchIcon size="sm" color={P.muted} style={{ marginRight: 6 }} /> : null}
+            <RNTextInput
+                value={value}
+                placeholder={placeholder}
+                placeholderTextColor={P.muted}
+                onChangeText={onChange}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                style={{ flex: 1, paddingVertical: 8, fontSize: 16, color: P.text }}
+            />
+            {value ? (
+                <Pressable onPress={() => onChange('')} hitSlop={8} style={{ padding: 4 }}>
+                    {XIcon ? <XIcon size="sm" color={P.muted} /> : <Text variant="text-md/bold" style={{ color: P.muted }}>×</Text>}
+                </Pressable>
+            ) : null}
+        </View>
+    )
+}
+
+/** 찾는 말이 모두 들어 있는지 (띄어쓰기로 나눈 말마다, 대소문자 무시) */
+export function matches(q: string, ...texts: Array<string | undefined | null | false>) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return true
+    const hay = texts.filter(Boolean).join('\n').toLowerCase()
+    return words.every(w => hay.includes(w))
+}
+
+/**
+ * 탭 하나의 목록: 위에 찾기 칸, 개수, "모두 지우기" (두 번 눌러야 지운다), 아래에 카드들.
+ * text(e) 는 찾을 때 볼 글자들 (이름, 이모지, 채널, 내용 등)
+ */
+function List({ items, render, empty, kind, noun, search, text }: { items: Event[]; render: (e: Event) => any; empty: string; kind: 'r' | 'c' | 'p'; noun: string; search: string; text: (e: Event) => Array<string | undefined | null | false> }) {
+    const { Button, Text } = Design as any
+    const P = palette()
+    const [shown, setShown] = useState(PAGE)
+    const [q, setQ] = useState('')
+    if (!items.length) return <Empty text={empty} />
+    const found = q.trim() ? items.filter(e => matches(q, ...text(e))) : items
+    return (
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 8, paddingBottom: 48 }}>
+            <View style={{ paddingHorizontal: 12, paddingBottom: 4, gap: 8 }}>
+                <SearchBox value={q} onChange={v => (setQ(v), setShown(PAGE))} placeholder={search} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text variant="text-xs/medium" style={{ color: P.muted, flex: 1 }}>
+                        {q.trim() ? `${found.length} of ${items.length} ${noun}${found.length ? '' : ', nothing matches'}` : `${items.length} ${noun}`}
+                    </Text>
+                    <DeleteButton text="Delete all" armedText={`Delete all ${items.length}?`} onDelete={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), clearKind(kind))} />
+                </View>
+            </View>
+            {found.slice(0, shown).map(render)}
+            {found.length > shown ? (
                 <View style={{ padding: 12 }}>
-                    <Button text={`Show more (${items.length - shown} left)`} variant="secondary" size="md" onPress={() => setShown(n => n + PAGE)} />
+                    <Button text={`Show more (${found.length - shown} left)`} variant="secondary" size="md" onPress={() => setShown(n => n + PAGE)} />
                 </View>
             ) : null}
         </ScrollView>
@@ -164,6 +221,14 @@ function Reactions() {
     return (
         <List
             items={items}
+            kind="r"
+            noun="removed reaction(s)"
+            search="Search by name, emoji or channel"
+            text={e => {
+                if (e.k !== 'r') return []
+                const u = e.u ? userOf(e.u, e.un) : undefined
+                return [e.u ? nameOf(u) : 'everyone', u?.username, e.un?.username, e.un?.global_name, e.em.name, emojiText(e.em), where(e)]
+            }}
             empty="No removed reactions yet."
             render={e => {
                 if (e.k !== 'r') return null
@@ -220,7 +285,21 @@ function Channels() {
     const items = events()
         .filter(e => e.k === 'c')
         .reverse()
-    return <List items={items} empty="No deleted channels or threads yet." render={e => (e.k === 'c' ? <ChannelCard key={e.id} e={e} /> : null)} />
+    return (
+        <List
+            items={items}
+            kind="c"
+            noun="deleted channel(s)"
+            search="Search by channel, server or message"
+            text={e => {
+                if (e.k !== 'c') return []
+                const guild = e.g ? S().GuildStore?.getGuild?.(e.g)?.name : ''
+                return [e.name, e.c, guild, ...e.msgs.map((m: any) => `${nameOf(m.author)} ${m.content ?? ''}`)]
+            }}
+            empty="No deleted channels or threads yet."
+            render={e => (e.k === 'c' ? <ChannelCard key={e.id} e={e} /> : null)}
+        />
+    )
 }
 
 // ── 프로필 ──────────────────────────────────────────────────────────────
@@ -235,6 +314,14 @@ function Profiles() {
     return (
         <List
             items={items}
+            kind="p"
+            noun="profile change(s)"
+            search="Search by name or what changed"
+            text={e => {
+                if (e.k !== 'p') return []
+                const u = userOf(e.u)
+                return [nameOf(u), u?.username, FIELD[e.field] ?? e.field, e.field === 'avatar' ? '' : e.from, e.field === 'avatar' ? '' : e.to]
+            }}
             empty="No profile changes yet. Friends and people you DM are watched."
             render={e => {
                 if (e.k !== 'p') return null

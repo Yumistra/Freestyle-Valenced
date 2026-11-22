@@ -10,8 +10,8 @@ import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
 import { diff } from './diff'
-import { removeOne } from './logger'
-import { MoreTab, type Tab, TABS } from './logsMore'
+import { clearMessages, removeOne } from './logger'
+import { DeleteButton, MoreTab, type Tab, TABS } from './logsMore'
 import { when } from './time'
 import { logs, seen, setSettings, settings, type Entry, type SavedSearch } from './store'
 
@@ -745,10 +745,23 @@ function MessagesView() {
                         ) : null}
                     </ScrollView>
                 ) : null}
-                <Text variant="text-xs/medium" style={{ color: P.muted, marginTop: 10 }}>
-                    {all.length ? `${entries.length} of ${all.length} log(s)` : 'No logs yet.'}
-                    {all.length && !entries.length && (q.trim() || active) ? ', nothing matches' : ''}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+                    <Text variant="text-xs/medium" style={{ color: P.muted, flex: 1 }}>
+                        {all.length ? `${entries.length} of ${all.length} log(s)` : 'No logs yet.'}
+                        {all.length && !entries.length && (q.trim() || active) ? ', nothing matches' : ''}
+                    </Text>
+                    {all.length ? (
+                        <DeleteButton
+                            text="Delete all"
+                            armedText={`Delete all ${all.length}?`}
+                            onDelete={() => {
+                                anim()
+                                clearMessages()
+                                force(n => n + 1)
+                            }}
+                        />
+                    ) : null}
+                </View>
             </View>
             {entries.slice(0, shown).map(([id, e]) => (
                 <Row

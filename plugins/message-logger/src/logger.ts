@@ -5,7 +5,7 @@ import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
 import { notifyDeleted, pruneEvents } from './events'
 import { allowed } from './filters'
-import { addEdit, cleanEdits, keepMs, logs, save, seen, settings, type Entry } from './store'
+import { addEdit, cleanEdits, events, keepMs, logs, save, seen, settings, type Entry } from './store'
 
 const EPHEMERAL = 1 << 6
 const S = () => Stores as any
@@ -353,7 +353,8 @@ export function removeOne(id: string) {
     save(true)
 }
 
-export function clearAll() {
+/** 메시지 로그만 전부 지운다 (반응, 채널, 프로필 기록은 그대로) */
+export function clearMessages() {
     const all = logs()
     for (const [id, e] of Object.entries(all)) {
         delete all[id]
@@ -361,6 +362,29 @@ export function clearAll() {
         reallyRemove(id, e)
     }
     save(true)
+}
+
+/** 한 종류의 기록만 전부 지운다. 빠진 반응을 지우면 그 메시지들의 반응 버튼도 다시 그린다 */
+export function clearKind(kind: 'r' | 'c' | 'p') {
+    const all = events()
+    const gone = all.filter(e => e.k === kind)
+    if (!gone.length) return
+    all.splice(0, all.length, ...all.filter(e => e.k !== kind))
+    save(true)
+    if (kind !== 'r') return
+    const done = new Set<string>()
+    for (const e of gone) {
+        if (e.k !== 'r' || done.has(e.m)) continue
+        done.add(e.m)
+        if (!getMessage(e.c, e.m)) continue
+        rerenderLater(e.c, e.m, e.g)
+    }
+}
+
+/** 모든 로그: 메시지, 빠진 반응, 지워진 채널, 프로필 변경 */
+export function clearAll() {
+    clearMessages()
+    for (const k of ['r', 'c', 'p'] as const) clearKind(k)
 }
 
 /**
