@@ -2,11 +2,11 @@ import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useState } from 'react'
-import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
-import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
+import { Image, LayoutAnimation, Pressable, ScrollView, View } from 'react-native'
 import { removeEvent } from './events'
 import { clearKind } from './logger'
 import { avatarUrl, goToMessage, palette, where } from './logs'
+import { applyTags, channelTag, dateOk, placeTag, relationTags, TagPanel, TagSearchBox, userTag, whenTags, type Group, type Selected } from './tags'
 import { events, logs, onChange, save, seen, type Event } from './store'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
@@ -134,37 +134,6 @@ function Head({ u, title, sub }: { u: any; title: string; sub: string }) {
     )
 }
 
-/** 찾기 칸 (메시지 탭과 같은 모양) */
-export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-    const { Text } = Design as any
-    const P = palette()
-    const SearchIcon: any = lookupGeneratedIconComponent('MagnifyingGlassIcon' as any)
-    const XIcon: any = lookupGeneratedIconComponent('XSmallIcon' as any) ?? lookupGeneratedIconComponent('CloseSmallIcon' as any)
-    const [focused, setFocused] = useState(false)
-    return (
-        <View style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingRight: 6, borderRadius: 12, backgroundColor: P.input, borderWidth: 1, borderColor: focused ? P.brand : 'transparent' }}>
-            {SearchIcon ? <SearchIcon size="sm" color={P.muted} style={{ marginRight: 6 }} /> : null}
-            <RNTextInput
-                value={value}
-                placeholder={placeholder}
-                placeholderTextColor={P.muted}
-                onChangeText={onChange}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
-                autoCorrect={false}
-                autoCapitalize="none"
-                returnKeyType="search"
-                style={{ flex: 1, paddingVertical: 8, fontSize: 16, color: P.text }}
-            />
-            {value ? (
-                <Pressable onPress={() => onChange('')} hitSlop={8} style={{ padding: 4 }}>
-                    {XIcon ? <XIcon size="sm" color={P.muted} /> : <Text variant="text-md/bold" style={{ color: P.muted }}>×</Text>}
-                </Pressable>
-            ) : null}
-        </View>
-    )
-}
-
 /** 찾는 말이 모두 들어 있는지 (띄어쓰기로 나눈 말마다, 대소문자 무시) */
 export function matches(q: string, ...texts: Array<string | undefined | null | false>) {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean)
@@ -174,23 +143,40 @@ export function matches(q: string, ...texts: Array<string | undefined | null | f
 }
 
 /**
- * 탭 하나의 목록: 위에 찾기 칸, 개수, "모두 지우기" (두 번 눌러야 지운다), 아래에 카드들.
- * text(e) 는 찾을 때 볼 글자들 (이름, 이모지, 채널, 내용 등)
+ * 탭 하나의 목록: 위에 찾기 칸 (고른 태그는 알약으로), 필터 판, 개수, "모두 지우기" (두 번 눌러야 지운다), 아래에 카드들.
+ * text(e) 는 찾을 때 볼 글자들 (이름, 이모지, 채널, 내용 등), groups 는 태그 묶음
  */
-function List({ items, render, empty, kind, noun, search, text }: { items: Event[]; render: (e: Event) => any; empty: string; kind: 'r' | 'c' | 'p'; noun: string; search: string; text: (e: Event) => Array<string | undefined | null | false> }) {
+function List({ items, render, empty, kind, noun, search, text, groups }: { items: Event[]; render: (e: Event) => any; empty: string; kind: 'r' | 'c' | 'p'; noun: string; search: string; text: (e: Event) => Array<string | undefined | null | false>; groups: Group<Event>[] }) {
     const { Button, Text } = Design as any
     const P = palette()
     const [shown, setShown] = useState(PAGE)
     const [q, setQ] = useState('')
+    const [sel, setSel] = useState<Selected>({})
+    const [open, setOpen] = useState(false)
+    const [dates, setDatesState] = useState<{ from?: string; to?: string }>({})
     if (!items.length) return <Empty text={empty} />
-    const found = q.trim() ? items.filter(e => matches(q, ...text(e))) : items
+    const tagged = applyTags(items, groups, sel).filter(e => dateOk(e.at, dates.from, dates.to))
+    const found = q.trim() ? tagged.filter(e => matches(q, ...text(e))) : tagged
+    const filtering = !!q.trim() || found.length !== items.length
     return (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 8, paddingBottom: 48 }}>
             <View style={{ paddingHorizontal: 12, paddingBottom: 4, gap: 8 }}>
-                <SearchBox value={q} onChange={v => (setQ(v), setShown(PAGE))} placeholder={search} />
+                <TagSearchBox
+                    value={q}
+                    onChange={v => (setQ(v), setShown(PAGE))}
+                    placeholder={search}
+                    items={items}
+                    groups={groups}
+                    sel={sel}
+                    setSel={x => (setSel(x), setShown(PAGE))}
+                    open={open}
+                    setOpen={setOpen}
+                    dates={(dates.from ? 1 : 0) + (dates.to ? 1 : 0)}
+                />
+                {open ? <TagPanel items={items} groups={groups} sel={sel} setSel={x => (setSel(x), setShown(PAGE))} from={dates.from} to={dates.to} setDates={(from, to) => setDatesState({ from, to })} /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Text variant="text-xs/medium" style={{ color: P.muted, flex: 1 }}>
-                        {q.trim() ? `${found.length} of ${items.length} ${noun}${found.length ? '' : ', nothing matches'}` : `${items.length} ${noun}`}
+                        {filtering ? `${found.length} of ${items.length} ${noun}${found.length ? '' : ', nothing matches'}` : `${items.length} ${noun}`}
                     </Text>
                     <DeleteButton text="Delete all" armedText={`Delete all ${items.length}?`} onDelete={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), clearKind(kind))} />
                 </View>
@@ -204,6 +190,154 @@ function List({ items, render, empty, kind, noun, search, text }: { items: Event
         </ScrollView>
     )
 }
+
+// ── 태그 묶음 ───────────────────────────────────────────────────────────
+const THREAD_TYPES = new Set([10, 11, 12])
+const FIELD: Record<string, string> = { username: 'username', name: 'display name', avatar: 'avatar', status: 'status' }
+type R = Extract<Event, { k: 'r' }>
+type C = Extract<Event, { k: 'c' }>
+type Pr = Extract<Event, { k: 'p' }>
+const WHEN: Group<Event> = { key: 'when', title: 'When', pill: 'when', of: e => whenTags(e.at) }
+
+/** 반응을 지운 메시지를 보낸 사람 (디스코드가 아는 메시지, 기억해 둔 메시지, 로그에서) */
+function messageAuthor(e: R): any {
+    try {
+        const m = S().MessageStore?.getMessage?.(e.c, e.m)
+        if (m?.author) return m.author
+    } catch {}
+    return (seen() as any)[e.m]?.m?.author ?? logs()[e.m]?.m?.author
+}
+
+export const REACTION_GROUPS: Group<Event>[] = [
+    {
+        key: 'state',
+        title: 'Status',
+        pill: 'is',
+        of: e => {
+            const r = e as R
+            return [r.back ? { v: 'again', label: 'Reacted again' } : { v: 'gone', label: 'Still removed' }, r.u ? { v: 'person', label: 'Removed by a person' } : { v: 'all', label: 'All removed at once' }]
+        },
+    },
+    {
+        key: 'etype',
+        title: 'Emoji type',
+        pill: 'emoji type',
+        of: e => {
+            const em = (e as R).em
+            return em.id ? [{ v: 'custom', label: 'Custom' }, ...(em.animated ? [{ v: 'animated', label: 'Animated' }] : [{ v: 'still', label: 'Not animated' }])] : [{ v: 'unicode', label: 'Standard' }]
+        },
+    },
+    { key: 'emoji', title: 'Emoji', pill: 'emoji', of: e => [{ v: (e as R).em.id ? `i${(e as R).em.id}` : `n${(e as R).em.name}`, label: emojiText((e as R).em), img: emojiUrl((e as R).em) }] },
+    { key: 'place', title: 'Server or DMs', pill: 'server', of: e => placeTag((e as R).c, (e as R).g) },
+    { key: 'channel', title: 'Channel', pill: 'in', of: e => channelTag((e as R).c) },
+    { key: 'user', title: 'Removed by', pill: 'by', of: e => ((e as R).u ? userTag((e as R).u, userOf((e as R).u, (e as R).un)) : []) },
+    { key: 'rel', title: 'Removed by (who)', pill: 'by', of: e => ((e as R).u ? relationTags((e as R).u, userOf((e as R).u, (e as R).un)) : []) },
+    {
+        key: 'author',
+        title: 'Message from',
+        pill: 'message from',
+        of: e => {
+            const a = messageAuthor(e as R)
+            return a?.id ? userTag(String(a.id), a) : [{ v: '?', label: 'Unknown message' }]
+        },
+    },
+    WHEN,
+]
+
+const CHANNEL_TYPES: Record<number, string> = { 0: 'Text', 2: 'Voice', 4: 'Category', 5: 'Announcement', 10: 'Announcement thread', 11: 'Thread', 12: 'Private thread', 13: 'Stage', 15: 'Forum', 16: 'Media' }
+
+export const CHANNEL_GROUPS: Group<Event>[] = [
+    {
+        key: 'kind',
+        title: 'Kind',
+        pill: 'is',
+        of: e => {
+            const c = e as C
+            const t = c.type
+            return [{ v: `t${t}`, label: CHANNEL_TYPES[t] ?? `Type ${t}` }, THREAD_TYPES.has(t) ? { v: 'thread', label: 'Any thread' } : { v: 'channel', label: 'Any channel' }]
+        },
+    },
+    { key: 'place', title: 'Server', pill: 'server', of: e => placeTag((e as C).c, (e as C).g) },
+    {
+        key: 'parent',
+        title: 'Category or parent',
+        pill: 'under',
+        of: e => {
+            const p = (e as C).parent
+            if (!p) return [{ v: 'none', label: 'No parent' }]
+            let name = ''
+            try {
+                name = S().ChannelStore?.getChannel?.(p)?.name ?? ''
+            } catch {}
+            return [{ v: String(p), label: name ? (THREAD_TYPES.has((e as C).type) ? `#${name}` : name) : 'Deleted parent' }]
+        },
+    },
+    {
+        key: 'msgs',
+        title: 'Kept messages',
+        pill: 'messages',
+        of: e => {
+            const n = (e as C).msgs.length
+            return [n ? { v: 'some', label: 'With messages' } : { v: 'none', label: 'No messages' }, n >= 10 ? { v: '10', label: '10 or more' } : n >= 3 ? { v: '3', label: '3 to 9' } : n ? { v: '1', label: '1 to 2' } : { v: '0', label: 'None' }]
+        },
+    },
+    {
+        key: 'author',
+        title: 'People in kept messages',
+        pill: 'with',
+        of: e => {
+            const seenIds = new Set<string>()
+            const out = []
+            for (const m of (e as C).msgs) {
+                const a = m?.author
+                const id = a?.id ? String(a.id) : ''
+                if (!id || seenIds.has(id)) continue
+                seenIds.add(id)
+                out.push(...userTag(id, userOf(id, a)))
+            }
+            return out
+        },
+    },
+    {
+        key: 'content',
+        title: 'Kept message content',
+        pill: 'has',
+        of: e => {
+            const ms = (e as C).msgs
+            const out = []
+            if (ms.some((m: any) => /https?:\/\//.test(m?.content ?? ''))) out.push({ v: 'link', label: 'Links' })
+            if (ms.some((m: any) => m?.attachments)) out.push({ v: 'file', label: 'Attachments' })
+            if (ms.some((m: any) => /<@!?\d+>/.test(m?.content ?? ''))) out.push({ v: 'mention', label: 'Mentions' })
+            return out
+        },
+    },
+    WHEN,
+]
+
+export const PROFILE_GROUPS: Group<Event>[] = [
+    { key: 'field', title: 'What changed', pill: 'changed', of: e => [{ v: (e as Pr).field, label: FIELD[(e as Pr).field] ?? (e as Pr).field }] },
+    {
+        key: 'how',
+        title: 'How',
+        pill: 'how',
+        of: e => {
+            const p = e as Pr
+            return [!p.from ? { v: 'set', label: 'Newly set' } : !p.to ? { v: 'cleared', label: 'Removed' } : { v: 'changed', label: 'Changed' }]
+        },
+    },
+    { key: 'user', title: 'User', pill: 'user', of: e => userTag((e as Pr).u, userOf((e as Pr).u)) },
+    { key: 'rel', title: 'Relationship', pill: 'who', of: e => relationTags((e as Pr).u, userOf((e as Pr).u)) },
+    {
+        key: 'repeat',
+        title: 'Changes by the same person',
+        pill: 'changes',
+        of: e => {
+            const n = events().filter(x => x.k === 'p' && x.u === (e as Pr).u).length
+            return [n >= 5 ? { v: '5', label: '5 or more' } : n >= 2 ? { v: '2', label: '2 to 4' } : { v: '1', label: 'Only once' }]
+        },
+    },
+    WHEN,
+]
 
 function del(id: string) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
@@ -222,6 +356,7 @@ function Reactions() {
         <List
             items={items}
             kind="r"
+            groups={REACTION_GROUPS}
             noun="removed reaction(s)"
             search="Search by name, emoji or channel"
             text={e => {
@@ -249,7 +384,6 @@ function Reactions() {
 }
 
 // ── 채널 ────────────────────────────────────────────────────────────────
-const THREAD_TYPES = new Set([10, 11, 12])
 
 function ChannelCard({ e }: { e: Extract<Event, { k: 'c' }>; key?: string }) {
     const { Text } = Design as any
@@ -289,6 +423,7 @@ function Channels() {
         <List
             items={items}
             kind="c"
+            groups={CHANNEL_GROUPS}
             noun="deleted channel(s)"
             search="Search by channel, server or message"
             text={e => {
@@ -303,7 +438,6 @@ function Channels() {
 }
 
 // ── 프로필 ──────────────────────────────────────────────────────────────
-const FIELD: Record<string, string> = { username: 'username', name: 'display name', avatar: 'avatar', status: 'status' }
 
 function Profiles() {
     const { Text } = Design as any
@@ -315,6 +449,7 @@ function Profiles() {
         <List
             items={items}
             kind="p"
+            groups={PROFILE_GROUPS}
             noun="profile change(s)"
             search="Search by name or what changed"
             text={e => {

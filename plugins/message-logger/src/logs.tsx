@@ -12,6 +12,7 @@ import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput
 import { diff } from './diff'
 import { clearMessages, removeOne } from './logger'
 import { DeleteButton, MoreTab, type Tab, TABS } from './logsMore'
+import { applyTags, relationTags, selectedCount, tagCounts, whenTags, type Group, type Selected, type Tag } from './tags'
 import { when } from './time'
 import { logs, seen, setSettings, settings, type Entry, type SavedSearch } from './store'
 
@@ -292,8 +293,64 @@ interface Filters {
     /** 날짜 YYYY-MM-DD (그날 포함) */
     from?: string
     to?: string
+    /** 더 촘촘한 태그 (언제, 내용, 수정 횟수, 보낸 사람 관계 등) */
+    tags?: Selected
 }
-const EMPTY: Filters = { kinds: [], places: [], channels: [], users: [] }
+const EMPTY: Filters = { kinds: [], places: [], channels: [], users: [], tags: {} }
+
+type LogRow = { id: string; e: Entry; k: ReturnType<typeof facets> }
+export const MSG_GROUPS: Group<LogRow>[] = [
+    { key: 'when', title: 'When', pill: 'when', of: x => whenTags(x.e.d ?? x.e.at) },
+    {
+        key: 'has',
+        title: 'Content',
+        pill: 'has',
+        of: x => {
+            const m = x.e.m ?? (Stores as any).MessageStore?.getMessage?.(x.e.c, x.id)
+            const text = [m?.content ?? '', ...(x.e.e ?? []).map(h => h.t)].join('\n')
+            const out: Tag[] = []
+            if ((m?.attachments ?? []).length) out.push({ v: 'file', label: 'Attachments' })
+            if (/https?:\/\//.test(text)) out.push({ v: 'link', label: 'Links' })
+            if (/<@!?\d+>|<@&\d+>|@everyone|@here/.test(text)) out.push({ v: 'mention', label: 'Mentions' })
+            if (/<a?:\w+:\d+>|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)) out.push({ v: 'emoji', label: 'Emojis' })
+            if ((m?.embeds ?? []).length) out.push({ v: 'embed', label: 'Embeds' })
+            if ((m?.sticker_items ?? m?.stickerItems ?? []).length) out.push({ v: 'sticker', label: 'Stickers' })
+            if (m?.message_reference ?? m?.messageReference) out.push({ v: 'reply', label: 'Replies' })
+            if (/```|`[^`]+`/.test(text)) out.push({ v: 'code', label: 'Code' })
+            if (!(m?.content ?? '').trim() && !(x.e.e ?? []).length) out.push({ v: 'empty', label: 'No text' })
+            const len = (m?.content ?? '').length
+            out.push(len > 200 ? { v: 'long', label: 'Long (200+)' } : len > 0 && len < 20 ? { v: 'short', label: 'Short (under 20)' } : { v: 'mid', label: 'Medium' })
+            return out
+        },
+    },
+    {
+        key: 'edits',
+        title: 'Times edited',
+        pill: 'edits',
+        of: x => {
+            const n = x.e.e?.length ?? 0
+            return [n === 0 ? { v: '0', label: 'Never' } : n === 1 ? { v: '1', label: 'Once' } : n <= 3 ? { v: '2', label: '2 to 3' } : { v: '4', label: '4 or more' }]
+        },
+    },
+    {
+        key: 'how',
+        title: 'Caught',
+        pill: 'caught',
+        of: x => {
+            const out: Tag[] = []
+            out.push(x.e.away ? { v: 'away', label: 'While away or closed' } : { v: 'live', label: 'Live' })
+            if (x.e.n) out.push({ v: 'push', label: 'From a notification' })
+            if (x.e.h) out.push({ v: 'hidden', label: 'Hidden in chat' })
+            if (x.e.f?.length) out.push({ v: 'saved', label: 'Files saved' })
+            if (x.e.d && x.e.m?.timestamp) {
+                const life = x.e.d - Date.parse(x.e.m.timestamp)
+                if (Number.isFinite(life)) out.push(life < 60_000 ? { v: 'fast', label: 'Deleted within a minute' } : life < 3600_000 ? { v: 'hour', label: 'Deleted within an hour' } : { v: 'later', label: 'Deleted later' })
+            }
+            return out
+        },
+    },
+    { key: 'rel', title: 'Sender', pill: 'sender', of: x => relationTags(x.k.user, x.k.author) },
+]
 
 /** YYYY-MM-DD → 그날 0시(끝이면 다음 날 0시) ms. 틀린 글이면 undefined */
 export function dayMs(v: string | undefined, end = false): number | undefined {
@@ -302,16 +359,16 @@ export function dayMs(v: string | undefined, end = false): number | undefined {
     const d = new Date(+m[1], +m[2] - 1, +m[3] + (end ? 1 : 0))
     return Number.isFinite(d.getTime()) ? d.getTime() : undefined
 }
-const DM = 'dm'
+export const DM = 'dm'
 
-interface Item {
+export interface Item {
     v: string
     label: string
     n: number
     img?: string
 }
 
-function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void; key?: string }) {
+export function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void; key?: string }) {
     const { Text } = Design as any
     const P = palette()
     return (
@@ -341,7 +398,7 @@ function Chip({ item, on, onPress }: { item: Item; on: boolean; onPress(): void;
     )
 }
 
-function ChipRow({ title, items, selected, onToggle }: { title: string; items: Item[]; selected: string[]; onToggle(v: string): void }) {
+export function ChipRow({ title, items, selected, onToggle }: { title: string; items: Item[]; selected: string[]; onToggle(v: string): void; key?: string }) {
     const { Text } = Design as any
     const P = palette()
     if (!items.length) return null
@@ -403,7 +460,7 @@ const SEARCH_HINTS: Array<[string, string]> = [
     ['is:', 'is: deleted, edited'],
 ]
 
-const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
+export const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
 
 export const LOGS_ROUTE = 'yumistra.message-logger.logs'
 
@@ -537,7 +594,8 @@ function MessagesView() {
             ['file', 'File'],
         ].filter(([v]) => v.includes(sv)))
             suggestions.push({ key: 'h' + v, label: l, pick: () => setQ(q.slice(0, q.length - lastTok.length) + `has:${v} `) })
-    const entries = all
+    const tagSel = f.tags ?? {}
+    const entries = applyTags(all, MSG_GROUPS, tagSel)
         .filter(searched)
         .filter(x => !f.kinds.length || f.kinds.includes(x.e.d ? 'deleted' : 'edited'))
         .filter(x => !f.places.length || f.places.includes(x.k.place))
@@ -551,7 +609,7 @@ function MessagesView() {
         })
         .map(x => [x.id, x.e] as [string, Entry])
     const dateOn = (dayMs(f.from) !== undefined ? 1 : 0) + (dayMs(f.to, true) !== undefined ? 1 : 0)
-    const active = f.kinds.length + f.places.length + f.channels.length + f.users.length + dateOn
+    const active = f.kinds.length + f.places.length + f.channels.length + f.users.length + dateOn + selectedCount(tagSel)
     // 저장한 검색
     const [naming, setNaming] = useState<string | null>(null)
     const searches = settings().searches ?? []
@@ -576,6 +634,19 @@ function MessagesView() {
             const k = all.find(x => x.k.user === v)?.k
             return { key: 'u' + v, label: `from: ${k?.userName || 'Unknown'}`, img: k?.author ? avatarUrl(k.author) : undefined, drop: () => setF(o => ({ ...o, users: o.users.filter(x => x !== v) })) }
         }),
+        ...MSG_GROUPS.flatMap(g =>
+            (tagSel[g.key] ?? []).map(v => {
+                let label = v
+                for (const x of all) {
+                    const t = g.of(x).find(t => t.v === v)
+                    if (t) {
+                        label = t.label
+                        break
+                    }
+                }
+                return { key: 't' + g.key + v, label: `${g.pill}: ${label}`, drop: () => setF(o => ({ ...o, tags: { ...(o.tags ?? {}), [g.key]: (o.tags?.[g.key] ?? []).filter(x => x !== v) } })) }
+            }),
+        ),
     ]
     const showHints = focused && !kind
     const addPrefix = (prefix: string) => {
@@ -689,6 +760,9 @@ function MessagesView() {
                         <ChipRow title="Server or DMs" items={places} selected={f.places} onToggle={v => (anim(), setF({ ...f, places: toggle(f.places, v), channels: [] }))} />
                         <ChipRow title="Channel" items={channels} selected={f.channels} onToggle={v => (anim(), setF({ ...f, channels: toggle(f.channels, v) }))} />
                         <ChipRow title="User" items={users} selected={f.users} onToggle={v => (anim(), setF({ ...f, users: toggle(f.users, v) }))} />
+                        {MSG_GROUPS.map(g => (
+                            <ChipRow key={g.key} title={g.title} items={tagCounts(all, MSG_GROUPS, tagSel, g.key)} selected={tagSel[g.key] ?? []} onToggle={v => (anim(), setF({ ...f, tags: { ...tagSel, [g.key]: toggle(tagSel[g.key] ?? [], v) } }))} />
+                        ))}
                         <Text variant="text-xs/bold" style={{ color: P.muted, marginTop: 10, marginBottom: 6, letterSpacing: 0.4 }}>
                             DATE
                         </Text>
