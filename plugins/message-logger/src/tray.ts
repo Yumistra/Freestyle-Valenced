@@ -1,6 +1,6 @@
 import { callNativeMethod } from '@valenced/modules/native'
 import { cmp, markChanged } from './logger'
-import { keepMs, logs, save, settings, type Entry } from './store'
+import { addEdit, keepMs, logs, save, settings, type Entry } from './store'
 
 /**
  * 알림 창에 남아 있는 디스코드 알림에서 메시지를 읽어 둔다 (앱이 꺼져 있을 때 온 것도).
@@ -171,10 +171,10 @@ export function compareNotes(payload: any) {
             if (s.logEdits && server && server !== note.text && !server.includes('<') && !note.text.endsWith('…')) {
                 const id = String(hit.m.id)
                 const e: Entry = (all[id] ??= { c: channelId, at: now })
-                const edits = (e.e ??= [])
-                if (!edits.some(h => h.t === note.text)) edits.push({ t: note.text, at: Date.parse(hit.m.edited_timestamp) || now })
-                e.at = now
-                markChanged(id)
+                if (addEdit(e, note.text, Date.parse(hit.m.edited_timestamp) || now, server)) {
+                    e.at = now
+                    markChanged(id)
+                } else if (!e.e?.length && !e.d) delete all[id]
             }
             continue
         }

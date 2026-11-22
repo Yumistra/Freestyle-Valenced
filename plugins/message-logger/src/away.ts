@@ -1,7 +1,7 @@
 import { callNativeMethod } from '@valenced/modules/native'
 import { allowed } from './filters'
 import { cmp, markChanged } from './logger'
-import { keepMs, logs, save, seen, SEEN_MAX, settings, type Entry } from './store'
+import { addEdit, keepMs, logs, save, seen, SEEN_MAX, settings, type Entry } from './store'
 
 /**
  * 자리를 비운 사이 (앱이 꺼져 있거나 연결이 끊긴 동안) 지워지거나 고쳐진 메시지 찾기.
@@ -219,8 +219,10 @@ export function compare(payload: any, me?: string) {
                 const at = Date.parse(now_.edited_timestamp) || now
                 const e: Entry = (all[id] ??= { c: channelId, at: now })
                 if (x.m.guild_id) e.g = x.m.guild_id
-                const edits = (e.e ??= [])
-                if (!edits.some(h => h.t === x.m.content)) edits.push({ t: x.m.content, at })
+                if (!addEdit(e, x.m.content, at, now_.content)) {
+                    if (!e.e?.length && !e.d) delete all[id]
+                    continue
+                }
                 e.at = now
                 markChanged(id)
                 any = true

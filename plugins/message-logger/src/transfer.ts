@@ -3,7 +3,7 @@ import { readFile } from '@valenced/modules/native/fs'
 import { NativeModules } from 'react-native'
 import { allowed } from './filters'
 import { markChanged } from './logger'
-import { events, logs, save, settings, type Entry, type Event } from './store'
+import { addEdit, events, logs, save, settings, type Entry, type Event } from './store'
 
 /**
  * 로그 내보내기, 가져오기, 그리고 알림 앱(디스코드가 꺼져 있을 때 기록하는 앱)이 보낸 기록 합치기.
@@ -124,10 +124,8 @@ export async function pullCompanion(): Promise<number> {
             e.m = e.m ?? m
             e.away = 1
         } else if (x.t === 'edit' && s.logEdits && typeof x.before === 'string') {
-            const edits = (e.e ??= [])
-            // 앱은 3일 동안 같은 기록을 다시 보낸다: 이미 있으면 건너뛴다
-            if (edits.some(h => h.at === at)) continue
-            edits.push({ t: x.before, at })
+            // 앱은 3일 동안 같은 기록을 다시 보낸다: 이미 있으면 건너뛴다 (지운 뒤, 같은 글도)
+            if (!addEdit(e, x.before, at, typeof m.content === 'string' ? m.content : undefined)) continue
         } else continue
         e.at = Math.max(e.at ?? 0, at)
         all[m.id] = e

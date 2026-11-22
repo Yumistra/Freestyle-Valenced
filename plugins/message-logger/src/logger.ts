@@ -5,7 +5,7 @@ import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
 import { notifyDeleted, pruneEvents } from './events'
 import { allowed } from './filters'
-import { keepMs, logs, save, seen, settings, type Entry } from './store'
+import { addEdit, cleanEdits, keepMs, logs, save, seen, settings, type Entry } from './store'
 
 const EPHEMERAL = 1 << 6
 const S = () => Stores as any
@@ -225,6 +225,8 @@ function withDeleted(payload: any) {
 
 /** 보관 기간이 지난 로그를 지운다. 지금 보이는 지운 메시지는 진짜로 지운다 */
 export function expire() {
+    // 예전 버전이 넣은 잘못된 수정 기록 치우기
+    if (cleanEdits()) save()
     const now = Date.now()
     const limit = keepMs()
     const all = logs()
@@ -331,10 +333,15 @@ export function intercept() {
             const prevFiles: any[] = Array.isArray(record.attachments) ? record.attachments : []
             const removed = Array.isArray(u.attachments) ? prevFiles.filter(a => a?.id && !u.attachments.some((b: any) => b?.id === a.id)) : []
             if (!textChanged && !removed.length) return p
+            const existed = !!logs()[u.id]
             const e = entryOf(record, p.guildId ?? u.guild_id)
             const files = removed.map(a => a.filename ?? 'file').join(', ')
             const label = before || (files ? `[${files}]` : '[no text]')
-            ;(e.e ??= []).push({ t: removed.length && before ? `${before} [${files}]` : label, at: Date.now() })
+            // 지운 메시지, 지금과 같은 글, 겹친 기록은 넣지 않는다 (addEdit)
+            if (!addEdit(e, removed.length && before ? `${before} [${files}]` : label, Date.now(), removed.length ? undefined : typeof u.content === 'string' ? u.content : undefined)) {
+                if (!existed) delete logs()[u.id]
+                return p
+            }
             e.at = Date.now()
             changed.add(u.id)
             save()

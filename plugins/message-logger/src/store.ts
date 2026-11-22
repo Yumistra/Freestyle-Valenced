@@ -195,3 +195,48 @@ export function save(now = false) {
 }
 
 export const keepMs = () => Math.max(1, settings().keepHours) * 3600_000
+
+// ── 수정 기록 넣기 (모든 곳이 이걸 거친다) ─────────────────────────────
+/** 멘션 표기 차이(<@!id> 와 <@id>)는 같은 글로 본다 */
+const sameText = (a: string, b: string) => a.replace(/<@!(\d+)>/g, '<@$1>').trim() === b.replace(/<@!(\d+)>/g, '<@$1>').trim()
+
+/**
+ * 예전 내용 하나를 넣는다. 넣었으면 true.
+ *  - 지운 뒤의 수정은 있을 수 없으니 넣지 않는다
+ *  - 지금 내용과 같은 글은 수정이 아니다
+ *  - 같은 글이 1분 안에 또 오면 (플러그인이 두 겹으로 걸렸을 때 등) 한 번만
+ */
+export function addEdit(e: Entry, t: string, at: number, current?: string): boolean {
+    if (typeof t !== 'string') return false
+    if (e.d && at > e.d) return false
+    if (typeof current === 'string' && sameText(t, current)) return false
+    const edits = (e.e ??= [])
+    if (edits.some(h => h.at === at || (sameText(h.t, t) && Math.abs(h.at - at) < 60_000))) return false
+    edits.push({ t, at })
+    edits.sort((a, b) => a.at - b.at)
+    return true
+}
+
+/** 이미 들어간 잘못된 수정 기록을 치운다 (지운 뒤 시각, 지운 원본과 같은 글, 겹친 것). 바꿨으면 true */
+export function cleanEdits(): boolean {
+    let any = false
+    for (const [id, e] of Object.entries(logs())) {
+        if (!e.e?.length) continue
+        const before = e.e.length
+        const kept: Array<{ t: string; at: number }> = []
+        for (const h of e.e) {
+            if (e.d && h.at > e.d) continue
+            if (e.d && typeof e.m?.content === 'string' && sameText(h.t, e.m.content)) continue
+            if (kept.some(k => k.at === h.at || (sameText(k.t, h.t) && Math.abs(k.at - h.at) < 60_000))) continue
+            kept.push(h)
+        }
+        if (kept.length === before) continue
+        any = true
+        if (kept.length) e.e = kept
+        else {
+            delete e.e
+            if (!e.d) delete logs()[id]
+        }
+    }
+    return any
+}
