@@ -34,7 +34,8 @@ function push(e: Event) {
 export function pruneEvents() {
     const all = events()
     const limit = Date.now() - keepMs()
-    const keep = all.filter(e => e.at >= limit)
+    // 예전에 남은 숨겨진 채널 기록도 치운다
+    const keep = all.filter(e => e.at >= limit && !(e.k === 'c' && hiddenName((e as any).name)))
     if (keep.length !== all.length) {
         all.splice(0, all.length, ...keep)
         save()
@@ -95,9 +96,26 @@ function lastMessages(channelId: string): any[] {
     return list.slice(-30)
 }
 
+/** 내가 볼 수 없는 (숨겨진) 채널: 이름이 가려져 있거나, 이름이 없거나, 보기 권한이 없다 */
+export function hiddenName(raw: any): boolean {
+    const name = String(raw ?? '').trim()
+    return !name || name === '___hidden___' || /^\d{15,}$/.test(name)
+}
+
+export function hiddenChannel(ch: any): boolean {
+    if (hiddenName(ch?.name)) return true
+    try {
+        const can = S().PermissionStore?.can
+        // 1 << 10 = 채널 보기
+        if (typeof can === 'function' && can.call(S().PermissionStore, BigInt(1024), ch) === false) return true
+    } catch {}
+    return false
+}
+
 function onChannelDelete(p: any) {
     const ch = p?.channel
     if (!settings().logChannels || !ch?.id || DM_TYPES.has(ch.type)) return
+    if (hiddenChannel(ch)) return
     if (!allowed({ channel_id: ch.id, guild_id: ch.guild_id ?? ch.guildId })) return
     push({ k: 'c', id: eid(), c: String(ch.id), g: ch.guild_id ?? ch.guildId ?? undefined, name: String(ch.name ?? ''), type: Number(ch.type ?? 0), parent: ch.parent_id ?? ch.parentId ?? undefined, msgs: lastMessages(String(ch.id)), at: Date.now() })
 }
@@ -121,9 +139,38 @@ function customStatus(activities: any[] | undefined): string | undefined {
 }
 
 /** 바뀐 칸만 기록. 처음 보는 사람은 지금 모습만 기억한다 */
+/** 같은 사람의 같은 항목이 이 시간 안에 또 바뀌면 한 기록으로 합친다 */
+export const MERGE_MS = 10 * 60_000
+
+/**
+ * 프로필 변경 기록. 상태를 자주 바꾸는 사람(몇십 초마다 도는 상태 등)이 목록을 덮지 않게
+ * 10분 안의 같은 항목 변경은 앞 기록의 "바뀐 뒤" 값만 고친다. 원래대로 돌아왔으면 기록을 지운다.
+ */
+export function mergeProfile(id: string, field: string, from: string, to: string, at = Date.now()) {
+    const all = events()
+    for (let i = all.length - 1, n = 0; i >= 0 && n < 300; i--, n++) {
+        const e: any = all[i]
+        if (e.k !== 'p' || e.u !== id || e.field !== field) continue
+        if (at - e.at > MERGE_MS) break
+        if (e.from === to) all.splice(i, 1)
+        else {
+            e.to = to
+            e.at = at
+            // 맨 뒤로 (가장 최근 기록)
+            all.splice(i, 1)
+            all.push(e)
+        }
+        save()
+        return
+    }
+    push({ k: 'p', id: eid(), u: id, field: field as any, from, to, at })
+}
+
 export function checkUser(u: any, activities?: any[]) {
     const id = u?.id ? String(u.id) : ''
     if (!settings().logProfiles || !watched(id)) return
+    // 블랙리스트에 넣은 사람은 프로필도 기록하지 않는다
+    if ((settings().block ?? []).includes(id)) return
     const now: Record<string, string | undefined> = {}
     if ('username' in (u ?? {}) && u.username != null) now.username = String(u.username)
     if ('global_name' in (u ?? {}) || 'globalName' in (u ?? {})) now.name = String(u.global_name ?? u.globalName ?? '')
@@ -143,7 +190,7 @@ export function checkUser(u: any, activities?: any[]) {
         if (v === undefined) continue
         const old = (before as any)[field]
         if (old !== undefined && old !== v) {
-            push({ k: 'p', id: eid(), u: id, field, from: old, to: v, at: Date.now() })
+            mergeProfile(id, field, old, v)
             any = true
         }
         ;(before as any)[field] = v

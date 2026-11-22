@@ -317,6 +317,23 @@ function keepReplaced(p: any) {
     return { ...p, message: { ...m, nonce: undefined } }
 }
 
+/** 수정된 메시지의 지금 모습 (API 모양). 디스코드 메시지 객체든 기억해 둔 API 메시지든 받는다 */
+export function snapshot(record: any, u: any, guildId?: string) {
+    const a = record?.author ?? {}
+    const ts = u?.timestamp ?? (typeof record?.timestamp === 'string' ? record.timestamp : record?.timestamp?.toISOString?.())
+    return slim({
+        ...record,
+        id: String(u?.id ?? record?.id),
+        channel_id: String(u?.channel_id ?? record?.channel_id ?? record?.channelId),
+        ...(guildId ? { guild_id: String(guildId) } : {}),
+        content: typeof u?.content === 'string' ? u.content : record?.content,
+        timestamp: ts,
+        edited_timestamp: u?.edited_timestamp ?? null,
+        attachments: Array.isArray(u?.attachments) ? u.attachments : record?.attachments,
+        author: { id: a.id, username: a.username, global_name: a.globalName ?? a.global_name ?? null, avatar: a.avatar ?? null, discriminator: a.discriminator ?? '0', bot: !!a.bot, public_flags: a.publicFlags ?? a.public_flags ?? 0 },
+    })
+}
+
 export function intercept() {
     return [
         onFluxEventDispatched('MESSAGE_DELETE', (p: any) => {
@@ -356,6 +373,12 @@ export function intercept() {
                 return p
             }
             e.at = Date.now()
+            // 수정된 뒤의 내용과 보낸 사람도 남긴다: 그 채널을 다시 안 열면 디스코드에 그 메시지가 없어서
+            // 로그 보기에서 지금 내용이 비어 보였다
+            if (!e.d) {
+                const x = snapshot(record, u, p.guildId ?? u.guild_id)
+                if (x) e.m = x
+            }
             changed.add(u.id)
             save()
             if (removed.length) {
