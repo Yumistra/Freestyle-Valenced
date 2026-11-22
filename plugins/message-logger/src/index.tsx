@@ -20,6 +20,7 @@ import { interceptEvents } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { pullCompanion } from './transfer'
 import { autoCollect } from './companion'
+import { patchReactors } from './reactors'
 import { registerGroups, SettingsPage } from './settingsUI'
 import { bind, flush, KEEP_OPTIONS, logs, notes, onChange, seen, setSettings, settings, unbind, type Settings } from './store'
 
@@ -97,6 +98,10 @@ export default plugin({
             refreshSettings()
         } catch {}
         registerGroups(cleanup)
+        // 반응 목록 창에 반응을 지운 사람을 빨갛게
+        try {
+            patchReactors(cleanup)
+        } catch {}
         patchSheet(cleanup)
         const pull = () => {
             importPushes(me()).catch(() => {})

@@ -1,4 +1,5 @@
 import { Tokens } from '@valenced/discord/common/tokens'
+import { sameEmoji } from './reactors'
 import { Stores } from '@valenced/discord/flux'
 import { processColor } from 'react-native'
 import { takeChanged } from './logger'
@@ -139,9 +140,20 @@ function history(edits: Array<{ t: string; at: number }>, edited: string, row: a
     return out
 }
 
-/** 이 메시지에서 빠진 반응 한 줄: "Removed reactions: 👍 Alice, :cat: Bob" */
+/**
+ * 이 메시지에서 빠진 반응 한 줄: "Removed reactions: 👍 Alice, :cat: Bob"
+ * 아직 메시지에 남아 있는 이모지는 반응 목록 창에서 빨갛게 보이니 (reactors.tsx) 여기선 빼고,
+ * 모두 지워서 메시지에서 사라진 이모지만 적는다.
+ */
 function reactionLine(id: string, row: any): any[] {
-    const list = removedReactions(id)
+    let list = removedReactions(id)
+    if (!list.length) return []
+    let left: any[] = []
+    try {
+        const msg = (Stores as any).MessageStore?.getMessage?.(list[0].c, id)
+        left = Array.isArray(msg?.reactions) ? msg.reactions : []
+    } catch {}
+    list = list.filter(r => !left.some((x: any) => (x?.count ?? 1) > 0 && sameEmoji(r.em, x?.emoji)))
     if (!list.length) return []
     const who = (u: string) => {
         if (!u) return 'everyone'

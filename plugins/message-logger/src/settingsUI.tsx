@@ -99,7 +99,7 @@ function WhatToLog() {
                 <TableSwitchRow label="Ignore bots" value={s.ignoreBots} onValueChange={(ignoreBots: boolean) => set({ ignoreBots })} />
             </TableRowGroup>
             <TableRowGroup title="Other changes">
-                <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" subLabel="Shown under the message and in View logs" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
+                <TableSwitchRow icon={<TableRowAssetIcon name="ReactionIcon" />} label="Removed reactions" subLabel="Shown in red in the reactions list and in View logs" value={s.logReactions} onValueChange={(logReactions: boolean) => set({ logReactions })} />
                 <TableSwitchRow icon={<TableRowAssetIcon name="TextIcon" />} label="Deleted channels and threads" subLabel="Keeps the name and the last messages" value={s.logChannels} onValueChange={(logChannels: boolean) => set({ logChannels })} />
                 <TableSwitchRow icon={<TableRowAssetIcon name="UserIcon" />} label="Profile changes" subLabel="Username, display name, avatar and status of friends and people you DM" value={s.logProfiles} onValueChange={(logProfiles: boolean) => set({ logProfiles })} />
             </TableRowGroup>
