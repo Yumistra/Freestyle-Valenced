@@ -20,6 +20,10 @@ import { when } from './time'
 
 const NAME = 'modules/user_profile/native/DiscordTag.tsx'
 const CONTENT = 'modules/reactions/native/MessageReactionsContent.tsx'
+const ROW = 'design/void/Form/native/FormRow.tsx'
+
+/** 줄 전체 (프로필 사진까지) 를 덮는 표시가 켜졌는지. 안 켜졌으면 이름 칸에만 표시 */
+let rowPatched = false
 const MARK = '__mlRemovedAt'
 
 const S = () => Stores as any
@@ -74,18 +78,27 @@ export function withRemoved(out: any, args: any[]) {
 function RemovedName({ user, nick }: { user: any; nick?: string }) {
     const { Text } = Design as any
     const name = nick || user?.globalName || user?.global_name || user?.username || 'unknown'
-    // 지워진 메시지처럼: 옅은 빨간 배경 + 왼쪽 빨간 줄, 글자도 빨간색 (설정의 지운 색 또는 테마 색)
     const red = redCss(1)
-    return (
-        <View style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center', backgroundColor: redCss(0.14), borderLeftWidth: 3, borderLeftColor: red, borderRadius: 4, paddingVertical: 4, paddingHorizontal: 8 }}>
+    const text = (
+        <>
             <Text variant="text-md/semibold" style={{ color: red }} numberOfLines={1}>
                 {name}
             </Text>
             <Text variant="text-xs/medium" style={{ color: red }} numberOfLines={1}>
                 {`removed ${when(user[MARK])}`}
             </Text>
-        </View>
+        </>
     )
+    if (rowPatched) return <View style={{ flex: 1, justifyContent: 'center' }}>{text}</View>
+    return <View style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center', backgroundColor: redCss(0.14), borderLeftWidth: 3, borderLeftColor: red, borderRadius: 4, paddingVertical: 4, paddingHorizontal: 8 }}>{text}</View>
+}
+
+/** 반응 목록 창의 한 줄 (FormRow) 이 지운 사람이면 줄 전체를 지워진 메시지처럼: 옅은 빨간 배경 + 왼쪽 빨간 줄 */
+export function isRemovedRow(props: any) {
+    return !!props?.label?.props?.user?.[MARK]
+}
+export function RemovedRowBox({ children }: { children: any }) {
+    return <View style={{ backgroundColor: redCss(0.14), borderLeftWidth: 3, borderLeftColor: redCss(1), borderRadius: 6, overflow: 'hidden' }}>{children}</View>
 }
 
 const emojiKey = (e: any) => (e?.id ? `i${e.id}` : `n${e?.name ?? ''}`)
@@ -120,7 +133,7 @@ export function withRemovedTabs(p: any) {
         try {
             const out = rawGet?.(p.channelId, mid, emoji, 100, 0)
             const all: any[] = out ? Array.from(typeof out.values === 'function' ? out.values() : Object.values(out)) : []
-            return new Set(all.map(u => String(u?.id)))
+            return new Set(all.filter(u => !u?.[MARK]).map(u => String(u?.id)))
         } catch {
             return new Set<string>()
         }
@@ -194,6 +207,33 @@ export function patchReactors(cleanup: (...f: any[]) => void) {
         getModuleWithImportedPath(CONTENT, (m: any) => {
             if (m) patchTabs(m)
             else cleanup(waitForModuleWithImportedPath(CONTENT, (x: any) => patchTabs(x)) as any)
+        }) as any,
+    )
+    // 줄 전체
+    const patchRow = (mod: any) => {
+        const orig = mod?.default
+        if (typeof orig !== 'function') return
+        cleanup(
+            instead(mod, 'default', function (this: unknown, args: any[], o: (...a: any[]) => any) {
+                const p = args?.[0]
+                if (!isRemovedRow(p)) return o.apply(this, args)
+                return <RemovedRowBox>{o.apply(this, args)}</RemovedRowBox>
+            }),
+        )
+        // FormRow.Icon, FormRow.Arrow 같은 붙은 것들은 그대로 쓸 수 있게
+        try {
+            const now = mod.default
+            if (now !== orig) for (const k of Object.keys(orig)) if (!(k in now)) now[k] = orig[k]
+        } catch {}
+        rowPatched = true
+        cleanup(() => {
+            rowPatched = false
+        })
+    }
+    cleanup(
+        getModuleWithImportedPath(ROW, (m: any) => {
+            if (m) patchRow(m)
+            else cleanup(waitForModuleWithImportedPath(ROW, (x: any) => patchRow(x)) as any)
         }) as any,
     )
     cleanup(
