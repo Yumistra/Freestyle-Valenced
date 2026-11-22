@@ -8,7 +8,7 @@ Plugins for Valenced.
 | Commands | `yumistra.commands` |
 | Intelligent Compression | `yumistra.intelligent-compression` |
 | Message Actions | `yumistra.message-actions` |
-| Message Logger | `yumistra.message-logger` |
+| Everything Logger | `yumistra.message-logger` |
 | Overlay Background | `yumistra.overlay-background` |
 | Plugin Backup | `yumistra.plugin-backup` |
 | Silent Messages | `yumistra.silent-messages` |
