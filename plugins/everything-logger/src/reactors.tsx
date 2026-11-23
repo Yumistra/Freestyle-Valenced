@@ -48,33 +48,46 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
  * 디스코드가 모르는 사람은 한 번 불러온다 (프로필을 눌렀을 때 디스코드가 하는 것과 같은 요청).
  * 불러오면 기록에 이름과 사진을 남기고 반응 목록을 다시 그린다. 사람마다 한 번만
  */
-const asked = new Set<string>()
+const asked = new Map<string, number>()
 let http: any
-export function learnUser(id: string) {
-    if (!id || asked.has(id)) return
-    asked.add(id)
+let reactionsStore: any
+export function learnUser(id: string, guildId?: string) {
+    // 안 됐으면 1분 뒤에 다시 (목록이 그려질 때마다 요청하지 않게)
+    if (!id || Date.now() - (asked.get(id) ?? -Infinity) < 60_000) return
+    asked.set(id, Date.now())
     setTimeout(async () => {
         let raw: any
+        // 1. 디스코드의 fetchProfile (프로필을 누를 때 쓰는 것). 사용자 계정은 /users/:id 를 못 받고 /users/:id/profile 만 된다
         try {
-            if (!http) {
-                const a = (lookupModule(withProps('HTTP') as any) as any)?.[0]?.HTTP
-                http = a?.get ? a : (lookupModule(withProps('getAPIBaseURL', 'get') as any) as any)?.[0]
-            }
-            const res = await http?.get?.({ url: `/users/${id}` })
-            raw = res?.body
+            const users = (lookupModule(withProps('fetchProfile', 'getUser') as any) as any)?.[0]
+            if (typeof users?.fetchProfile === 'function') await users.fetchProfile(id, { guildId, withMutualGuilds: false, withMutualFriends: false, withMutualFriendsCount: false })
         } catch {}
-        if (!raw?.id || String(raw.id) !== id) return
-        // 디스코드도 알게 한다 (프로필을 누를 때도 진짜 사람으로)
-        try {
-            ;(Dispatcher as any).dispatch({ type: 'USER_UPDATE', user: raw })
-        } catch {}
-        const snap = { id, username: String(raw.username ?? 'unknown'), global_name: raw.global_name ?? null, avatar: raw.avatar ?? null }
+        // 2. 안 됐으면 직접
+        if (!S().UserStore?.getUser?.(id))
+            try {
+                if (!http) {
+                    const a = (lookupModule(withProps('HTTP') as any) as any)?.[0]?.HTTP
+                    http = a?.get ? a : (lookupModule(withProps('getAPIBaseURL', 'get') as any) as any)?.[0]
+                }
+                const res = await http?.get?.({ url: `/users/${id}/profile`, query: { with_mutual_guilds: false, ...(guildId ? { guild_id: guildId } : {}) } })
+                raw = res?.body?.user
+                if (raw?.id && String(raw.id) === id) (Dispatcher as any).dispatch({ type: 'USER_UPDATE', user: raw })
+            } catch {}
+        const known = S().UserStore?.getUser?.(id)
+        const snap = known
+            ? { id, username: known.username, global_name: known.globalName ?? known.global_name ?? null, avatar: known.avatar ?? null }
+            : raw?.id
+              ? { id, username: String(raw.username ?? 'unknown'), global_name: raw.global_name ?? null, avatar: raw.avatar ?? null }
+              : undefined
+        if (!snap) return
+        asked.set(id, Infinity)
         let any = false
         for (const e of events()) if (e.k === 'r' && e.u === id && (!e.un?.username || e.un.username === 'unknown')) ((e.un = snap), (any = true))
         if (any) save()
-        try {
-            S().MessageReactionsStore?.emitChange?.()
-        } catch {}
+        for (const st of new Set([reactionsStore, S().MessageReactionsStore]))
+            try {
+                st?.emitChange?.()
+            } catch {}
     }, 0)
 }
 
@@ -89,7 +102,7 @@ export function markedUser(r: any): any {
     let x: any
     if (real) x = Object.assign(Object.create(Object.getPrototypeOf(real)), real)
     else {
-        learnUser(String(r.u))
+        learnUser(String(r.u), r.g ? String(r.g) : undefined)
         // 디스코드가 모르는 사람 (꺼져 있을 때 Discord Watch 가 잡은 사람 등).
         // 내 사용자 객체를 그대로 복사해 칸과 함수를 모두 갖춘 뒤 이름, 사진만 바꾼다.
         // 칸이나 함수가 빠진 객체를 넘기면 프로필 사진을 고르다가 멈춘다 (getAvatarSource, isProvisional)
@@ -338,6 +351,7 @@ export function patchReactors(cleanup: (...f: any[]) => void) {
     } catch {}
     if (typeof store?.getReactions !== 'function') store = (lookupModule(withProps('getReactions', 'getReactionsForMessage') as any) as any)?.[0] ?? (lookupModule(withProps('getReactions') as any) as any)?.[0]
     if (typeof store?.getReactions === 'function') {
+        reactionsStore = store
         const raw = store.getReactions
         rawGet = (...a: any[]) => raw.apply(store, a)
         cleanup(
