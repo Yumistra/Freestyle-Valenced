@@ -6,7 +6,8 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { createElement } from 'react'
 import { Text as RNText, View } from 'react-native'
-import { removedReactions, snapOf } from './events'
+import { removedReactions } from './events'
+import { Dispatcher } from '@valenced/discord/common/flux'
 import { redCss } from './rows'
 import { events, save, settings } from './store'
 import { shortWhen } from './time'
@@ -48,23 +49,28 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
  * 불러오면 기록에 이름과 사진을 남기고 반응 목록을 다시 그린다. 사람마다 한 번만
  */
 const asked = new Set<string>()
+let http: any
 export function learnUser(id: string) {
     if (!id || asked.has(id)) return
     asked.add(id)
     setTimeout(async () => {
+        let raw: any
         try {
-            const users = (lookupModule(withProps('getUser', 'fetchCurrentUser') as any) as any)?.[0]
-            let p: any = typeof users?.getUser === 'function' ? users.getUser(id) : undefined
-            if (!p) {
-                const profiles = (lookupModule(withProps('fetchProfile') as any) as any)?.[0]
-                p = profiles?.fetchProfile?.(id)
+            if (!http) {
+                const a = (lookupModule(withProps('HTTP') as any) as any)?.[0]?.HTTP
+                http = a?.get ? a : (lookupModule(withProps('getAPIBaseURL', 'get') as any) as any)?.[0]
             }
-            await p
+            const res = await http?.get?.({ url: `/users/${id}` })
+            raw = res?.body
         } catch {}
-        const snap = snapOf(id)
-        if (!snap) return
+        if (!raw?.id || String(raw.id) !== id) return
+        // 디스코드도 알게 한다 (프로필을 누를 때도 진짜 사람으로)
+        try {
+            ;(Dispatcher as any).dispatch({ type: 'USER_UPDATE', user: raw })
+        } catch {}
+        const snap = { id, username: String(raw.username ?? 'unknown'), global_name: raw.global_name ?? null, avatar: raw.avatar ?? null }
         let any = false
-        for (const e of events()) if (e.k === 'r' && e.u === id && !e.un?.username) ((e.un = snap), (any = true))
+        for (const e of events()) if (e.k === 'r' && e.u === id && (!e.un?.username || e.un.username === 'unknown')) ((e.un = snap), (any = true))
         if (any) save()
         try {
             S().MessageReactionsStore?.emitChange?.()
@@ -142,7 +148,8 @@ export function markedUser(r: any): any {
             isPomelo: () => true,
             toString: () => name,
         }
-        for (const k of Object.keys(safe)) if (typeof x[k] !== 'function') put(x, k, safe[k])
+        // 이미 있는 것은 건드리지 않는다 (게터를 함수로 바꾸면 "임시 계정" 처럼 잘못 보인다)
+        for (const k of Object.keys(safe)) if (!(k in x)) put(x, k, safe[k])
     }
     try {
         x[MARK] = r.at
