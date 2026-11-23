@@ -61,11 +61,13 @@ function findMod(...props: string[]): any {
 }
 let http: any
 let reactionsStore: any
+let queue: Promise<any> = Promise.resolve()
 export function learnUser(id: string, guildId?: string) {
     // 안 됐으면 1분 뒤에 다시 (목록이 그려질 때마다 요청하지 않게)
     if (!id || Date.now() - (asked.get(id) ?? -Infinity) < 60_000) return
     asked.set(id, Date.now())
-    setTimeout(async () => {
+    // 한 번에 하나씩, 사이를 두고 (프로필 요청은 제한이 빡빡하다)
+    queue = queue.then(() => new Promise(done => setTimeout(done, 1200))).then(async () => {
         let raw: any
         // 1. 디스코드의 fetchProfile (프로필을 누를 때 쓰는 것). 사용자 계정은 /users/:id 를 못 받고 /users/:id/profile 만 된다
         try {
@@ -98,7 +100,7 @@ export function learnUser(id: string, guildId?: string) {
             try {
                 st?.emitChange?.()
             } catch {}
-    }, 0)
+    }).catch(() => {})
 }
 
 /** 목록에 넣을 사용자 객체: 디스코드 사용자 객체의 복사본에 지운 시각 표시 (원본은 건드리지 않는다) */
@@ -204,6 +206,10 @@ export function withRemoved(out: any, args: any[]) {
     // 지운 사람을 먼저 넣으면 디스코드가 "이미 불러왔다" 고 보고 반응한 사람들을 안 불러온다
     if (!current.length && countOf(args[0], String(messageId), emoji) > 0) return out
     const present = new Set(current.map(u => String(u?.id)))
+    if (current.length) {
+        presentCache.set(presentKey(String(messageId), emoji), present)
+        if (presentCache.size > 500) presentCache.delete(presentCache.keys().next().value as string)
+    }
     const extra = removedFor(String(messageId), emoji, present)
     if (!extra.length) return out
     const users = extra.map(markedUser)
@@ -258,17 +264,24 @@ export function countLabel(count: number | null, removed: number, numeric: numbe
     return el
 }
 
-let rawGet: ((...a: any[]) => any) | undefined
-
-/** 지금 그 이모지에 반응해 있는 사람들 (디스코드가 불러 둔 만큼, 우리가 덧붙인 사람 빼고) */
+/**
+ * 디스코드가 이미 불러 둔, 지금 그 이모지에 반응해 있는 사람들.
+ * 디스코드의 getReactions 를 직접 부르면 안 된다: 처음 부를 때 서버에 요청을 보내고 "불러옴" 으로 표시한다.
+ * 채팅의 모든 메시지, 모든 이모지에 대해 그러면 요청 제한에 걸려 반응 목록이 영영 안 불러와진다.
+ * 그래서 디스코드가 목록을 열며 부른 결과만 기억해 둔다 (withRemoved 에서)
+ */
+const presentCache = new Map<string, Set<string>>()
+const presentKey = (messageId: string, emoji: any) => `${messageId}:${emojiKey(emoji)}`
 function presentOf(channelId: string, messageId: string, emoji: any) {
+    const out = new Set(presentCache.get(presentKey(messageId, emoji)) ?? [])
+    // 내 반응은 메시지에 표시가 있다
     try {
-        const out = rawGet?.(channelId, messageId, emoji, 100, 0)
-        const all: any[] = out ? Array.from(typeof out.values === 'function' ? out.values() : Object.values(out)) : []
-        return new Set(all.filter(u => !u?.[MARK]).map(u => String(u?.id)))
-    } catch {
-        return new Set<string>()
-    }
+        const m = S().MessageStore?.getMessage?.(channelId, messageId)
+        const r = (m?.reactions ?? []).find((x: any) => sameEmoji(x?.emoji, emoji))
+        const me = S().UserStore?.getCurrentUser?.()?.id
+        if (r?.me && me) out.add(String(me))
+    } catch {}
+    return out
 }
 
 // ── 채팅의 반응 버튼 ─────────────────────────────────────────────────────
@@ -378,7 +391,6 @@ export function patchReactors(cleanup: (...f: any[]) => void) {
     if (typeof store?.getReactions === 'function') {
         reactionsStore = store
         const raw = store.getReactions
-        rawGet = (...a: any[]) => raw.apply(store, a)
         cleanup(
             instead(store, 'getReactions', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
                 const out = orig.apply(this, args)
