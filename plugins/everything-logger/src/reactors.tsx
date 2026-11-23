@@ -49,6 +49,16 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
  * 불러오면 기록에 이름과 사진을 남기고 반응 목록을 다시 그린다. 사람마다 한 번만
  */
 const asked = new Map<string, number>()
+/** 아직 불러오지 않은 모듈도 찾는다 (디스코드는 프로필을 처음 열 때 그 모듈을 불러온다) */
+function findMod(...props: string[]): any {
+    try {
+        const a = (lookupModule(withProps(...(props as [string])) as any) as any)?.[0]
+        if (a) return a
+    } catch {}
+    try {
+        return ((lookupModule as any)(withProps(...(props as [string])) as any, { uninitialized: true, initialize: true }) as any)?.[0]
+    } catch {}
+}
 let http: any
 let reactionsStore: any
 export function learnUser(id: string, guildId?: string) {
@@ -59,15 +69,15 @@ export function learnUser(id: string, guildId?: string) {
         let raw: any
         // 1. 디스코드의 fetchProfile (프로필을 누를 때 쓰는 것). 사용자 계정은 /users/:id 를 못 받고 /users/:id/profile 만 된다
         try {
-            const users = (lookupModule(withProps('fetchProfile', 'getUser') as any) as any)?.[0]
+            const users = findMod('fetchProfile', 'getUser')
             if (typeof users?.fetchProfile === 'function') await users.fetchProfile(id, { guildId, withMutualGuilds: false, withMutualFriends: false, withMutualFriendsCount: false })
         } catch {}
         // 2. 안 됐으면 직접
         if (!S().UserStore?.getUser?.(id))
             try {
                 if (!http) {
-                    const a = (lookupModule(withProps('HTTP') as any) as any)?.[0]?.HTTP
-                    http = a?.get ? a : (lookupModule(withProps('getAPIBaseURL', 'get') as any) as any)?.[0]
+                    const a = findMod('HTTP')?.HTTP
+                    http = a?.get ? a : findMod('getAPIBaseURL', 'get')
                 }
                 const res = await http?.get?.({ url: `/users/${id}/profile`, query: { with_mutual_guilds: false, ...(guildId ? { guild_id: guildId } : {}) } })
                 raw = res?.body?.user
@@ -171,6 +181,18 @@ export function markedUser(r: any): any {
     return x
 }
 
+/** 메시지에 지금 달린 그 이모지 반응 수 (일반 반응) */
+function countOf(channelId: string, messageId: string, emoji: any): number {
+    try {
+        const m = S().MessageStore?.getMessage?.(channelId, messageId)
+        const r = (m?.reactions ?? []).find((x: any) => sameEmoji(x?.emoji, emoji))
+        const n = r?.count_details?.normal ?? r?.count ?? 0
+        return Number(n) || 0
+    } catch {
+        return 0
+    }
+}
+
 /** getReactions 결과에 지운 사람들을 덧붙인다 (결과는 Map 이거나 values() 가 있는 것) */
 export function withRemoved(out: any, args: any[]) {
     if (!settings().logReactions) return out
@@ -178,6 +200,9 @@ export function withRemoved(out: any, args: any[]) {
     // 일반 반응만 (슈퍼 반응, 투표는 그대로)
     if (!messageId || !emoji || (type != null && type !== 0)) return out
     const current: any[] = out ? Array.from(typeof out.values === 'function' ? out.values() : Object.values(out)) : []
+    // 디스코드가 아직 반응한 사람들을 안 불러왔으면 (목록이 비었는데 숫자는 있으면) 기다린다.
+    // 지운 사람을 먼저 넣으면 디스코드가 "이미 불러왔다" 고 보고 반응한 사람들을 안 불러온다
+    if (!current.length && countOf(args[0], String(messageId), emoji) > 0) return out
     const present = new Set(current.map(u => String(u?.id)))
     const extra = removedFor(String(messageId), emoji, present)
     if (!extra.length) return out
