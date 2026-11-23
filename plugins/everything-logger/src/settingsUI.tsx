@@ -169,21 +169,36 @@ function Notifications() {
  */
 export const WATCH_WARNING = 'This connects your account outside Discord (selfbot). It can get your account banned. The author of this plugin is not responsible for what happens to your account.'
 
+/** 켜려면 그대로 적어야 하는 문장 */
+export const WATCH_PHRASE = 'If I get banned, it is my own responsibility'
+/** 대소문자, 띄어쓰기, 끝의 마침표, it's 는 봐준다 */
+export const phraseOk = (t: string) => {
+    const norm = (x: string) => x.toLowerCase().replace(/it's/g, 'it is').replace(/[.!]+$/, '').replace(/\s+/g, ' ').trim()
+    return norm(t) === norm(WATCH_PHRASE)
+}
+
 function WatchGate({ onUnlock }: { onUnlock: () => void }) {
-    const { TableRowGroup, Text, Button } = Design as any
-    const [armed, setArmed] = useState(false)
-    useEffect(() => {
-        if (!armed) return
-        const t = setTimeout(() => setArmed(false), 4000)
-        return () => clearTimeout(t)
-    }, [armed])
+    const { TableRowGroup, Text, Button, TextInput } = Design as any
+    const [open, setOpen] = useState(false)
+    const [typed, setTyped] = useState('')
+    const ok = phraseOk(typed)
     return (
         <TableRowGroup title="Discord Watch">
             <View style={{ padding: 16, gap: 12 }}>
                 <Text variant="text-md/semibold" style={{ color: palette().danger }}>
                     {WATCH_WARNING}
                 </Text>
-                <Button text={armed ? 'Tap again to turn it on' : 'Turn on Discord Watch'} variant={armed ? 'destructive' : 'secondary'} size="md" onPress={() => (armed ? onUnlock() : setArmed(true))} />
+                {open ? (
+                    <>
+                        <Text variant="text-sm/medium" color="text-muted">
+                            {`Type "${WATCH_PHRASE}" to turn it on.`}
+                        </Text>
+                        <TextInput value={typed} placeholder={WATCH_PHRASE} onChange={setTyped} autoCapitalize="none" autoCorrect={false} size="md" />
+                        <Button text="I understand, turn it on" variant="destructive" size="md" disabled={!ok} onPress={() => ok && onUnlock()} />
+                    </>
+                ) : (
+                    <Button text="Turn on Discord Watch" variant="secondary" size="md" onPress={() => setOpen(true)} />
+                )}
             </View>
         </TableRowGroup>
     )

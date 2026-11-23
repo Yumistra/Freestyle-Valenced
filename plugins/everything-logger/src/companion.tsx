@@ -4,8 +4,8 @@ import { Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { useEffect, useState } from 'react'
-import { Linking, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { AppState, Linking, View } from 'react-native'
 import { companionStatus, pullCompanion } from './transfer'
 
 /**
@@ -79,7 +79,8 @@ export function myId(): string | undefined {
 }
 
 /** 상태 한 줄 (쉼표로 나눈다) */
-export function describe(s: WatchStatus | undefined, missing: boolean, me?: string): string {
+export function describe(s: WatchStatus | undefined, missing: boolean | 'outdated', me?: string): string {
+    if (missing === 'outdated') return 'Old version installed, update it'
     if (missing) return 'Not installed'
     if (!s) return 'Waiting for the app'
     if (!s.hasToken) return 'Off, no account yet'
@@ -96,15 +97,21 @@ export function describe(s: WatchStatus | undefined, missing: boolean, me?: stri
 /** 앱 상태 (설정을 보는 동안 1초마다 읽는다). ask 면 열 때 앱에 상태를 한 번 묻는다 */
 export function useWatchStatus(ask = true) {
     const [st, setSt] = useState<WatchStatus | undefined>()
-    const [missing, setMissing] = useState(false)
+    const [missing, setMissing] = useState<boolean | 'outdated'>(false)
     const [msg, setMsg] = useState('')
     const send = async (cmd: string, data?: Record<string, unknown>) => {
         const r = await sendCompanion(cmd, data)
         if (r === 'missing') setMissing(true)
+        else if (r === 'outdated') setMissing('outdated')
         else if (r !== 'ok') setMsg(`Failed: ${r}`)
-        else setMissing(false)
+        else {
+            setMissing(false)
+            noApp = false
+        }
         return r
     }
+    const missingRef = useRef<boolean | 'outdated'>(false)
+    missingRef.current = missing
     useEffect(() => {
         let alive = true
         readCompanion().then(s => alive && setSt(s))
@@ -112,9 +119,18 @@ export function useWatchStatus(ask = true) {
         const t = setInterval(() => {
             readCompanion().then(s => alive && s && setSt(s))
         }, 1000)
+        // 앱을 설치하고 돌아오면 다시 확인한다 (없다고 나온 동안 3초마다, 디스코드로 돌아올 때)
+        const again = setInterval(() => {
+            if (alive && ask && missingRef.current) send('status')
+        }, 3000)
+        const sub = AppState.addEventListener('change', (st: string) => {
+            if (alive && ask && st === 'active' && missingRef.current) send('status')
+        })
         return () => {
             alive = false
             clearInterval(t)
+            clearInterval(again)
+            sub?.remove?.()
         }
     }, [])
     return { st, missing, msg, setMsg, send }
@@ -135,7 +151,7 @@ export async function autoCollect() {
     if (now - lastAsk < 10 * 60_000) return
     lastAsk = now
     const r = await sendCompanion('deliver')
-    if (r === 'missing') noApp = true
+    if (r === 'missing' || r === 'outdated') noApp = true
     if (r !== 'ok') return
     for (const ms of [2000, 6000]) setTimeout(() => pullCompanion().catch(() => {}), ms)
 }
@@ -169,7 +185,7 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                 subLabel={`${sub}${companionStatus.last ? `, ${companionStatus.received} added` : ''}`}
             />
             {missing ? (
-                <TableRow icon={rowIcon('CloudDownloadIcon')} label="Download the app" arrow onPress={() => Linking.openURL(APK_URL)} />
+                <TableRow icon={rowIcon('CloudDownloadIcon')} label={missing === 'outdated' ? 'Update the app' : 'Download the app'} arrow onPress={() => Linking.openURL(APK_URL)} />
             ) : (
                 <>
                     {st?.hasToken ? (

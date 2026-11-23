@@ -44,11 +44,19 @@ internal object Companion {
             else ctx.startActivity(i)
             "ok"
         } catch (_: ActivityNotFoundException) {
-            "missing"
+            if (installed(ctx)) "outdated" else "missing"
         } catch (t: Throwable) {
             "error: $t"
         }
     }
+}
+
+/** 앱이 깔려 있는지 (디스코드가 볼 수 없으면 false 가 나올 수 있다) */
+private fun installed(ctx: android.content.Context): Boolean = try {
+    ctx.packageManager.getPackageInfo(Extras.COMPANION_PACKAGE, 0)
+    true
+} catch (_: Throwable) {
+    false
 }
 
 internal object CompanionSend : Function1<List<Any?>, Any?> {
