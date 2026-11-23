@@ -52,7 +52,17 @@ export function markedUser(r: any): any {
         const any = real ?? S().UserStore?.getCurrentUser?.()
         if (any) proto = Object.getPrototypeOf(any)
     } catch {}
-    const base = real ?? { id: r.u, username: r.un?.username ?? 'unknown', globalName: r.un?.global_name ?? null, avatar: r.un?.avatar ?? null, discriminator: '0', bot: false }
+    let base = real
+    if (!base) {
+        // 디스코드가 모르는 사람 (꺼져 있을 때 Discord Watch 가 잡은 사람 등): 디스코드의 사용자 객체로 만든다.
+        // 빈 칸이 있는 그냥 객체를 넘기면 프로필 사진을 고르다가 "Cannot convert undefined value to object" 로 멈춘다
+        const raw = { id: r.u, username: r.un?.username ?? 'unknown', global_name: r.un?.global_name ?? null, globalName: r.un?.global_name ?? null, avatar: r.un?.avatar ?? null, discriminator: '0', bot: false }
+        try {
+            const Ctor = proto?.constructor
+            if (typeof Ctor === 'function' && Ctor !== Object) base = new Ctor(raw)
+        } catch {}
+        base ??= { ...raw, avatarDecorationData: null, collectibles: null, primaryGuild: null, displayNameStyles: null, flags: 0, publicFlags: 0 }
+    }
     const x = Object.assign(Object.create(proto), base)
     x[MARK] = r.at
     return x
