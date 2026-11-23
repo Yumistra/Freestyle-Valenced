@@ -6,9 +6,9 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { createElement } from 'react'
 import { Text as RNText, View } from 'react-native'
-import { removedReactions } from './events'
+import { removedReactions, snapOf } from './events'
 import { redCss } from './rows'
-import { settings } from './store'
+import { events, save, settings } from './store'
 import { shortWhen } from './time'
 
 /**
@@ -43,6 +43,35 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
     return [...last.values()].filter(r => !r.back && !present.has(r.u))
 }
 
+/**
+ * 디스코드가 모르는 사람은 한 번 불러온다 (프로필을 눌렀을 때 디스코드가 하는 것과 같은 요청).
+ * 불러오면 기록에 이름과 사진을 남기고 반응 목록을 다시 그린다. 사람마다 한 번만
+ */
+const asked = new Set<string>()
+export function learnUser(id: string) {
+    if (!id || asked.has(id)) return
+    asked.add(id)
+    setTimeout(async () => {
+        try {
+            const users = (lookupModule(withProps('getUser', 'fetchCurrentUser') as any) as any)?.[0]
+            let p: any = typeof users?.getUser === 'function' ? users.getUser(id) : undefined
+            if (!p) {
+                const profiles = (lookupModule(withProps('fetchProfile') as any) as any)?.[0]
+                p = profiles?.fetchProfile?.(id)
+            }
+            await p
+        } catch {}
+        const snap = snapOf(id)
+        if (!snap) return
+        let any = false
+        for (const e of events()) if (e.k === 'r' && e.u === id && !e.un?.username) ((e.un = snap), (any = true))
+        if (any) save()
+        try {
+            S().MessageReactionsStore?.emitChange?.()
+        } catch {}
+    }, 0)
+}
+
 /** 목록에 넣을 사용자 객체: 디스코드 사용자 객체의 복사본에 지운 시각 표시 (원본은 건드리지 않는다) */
 export function markedUser(r: any): any {
     let real: any
@@ -54,6 +83,7 @@ export function markedUser(r: any): any {
     let x: any
     if (real) x = Object.assign(Object.create(Object.getPrototypeOf(real)), real)
     else {
+        learnUser(String(r.u))
         // 디스코드가 모르는 사람 (꺼져 있을 때 Discord Watch 가 잡은 사람 등).
         // 내 사용자 객체를 그대로 복사해 칸과 함수를 모두 갖춘 뒤 이름, 사진만 바꾼다.
         // 칸이나 함수가 빠진 객체를 넘기면 프로필 사진을 고르다가 멈춘다 (getAvatarSource, isProvisional)
