@@ -46,24 +46,59 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
 /** 목록에 넣을 사용자 객체: 디스코드 사용자 객체의 복사본에 지운 시각 표시 (원본은 건드리지 않는다) */
 export function markedUser(r: any): any {
     let real: any
-    let proto: any = Object.prototype
+    let cur: any
     try {
         real = S().UserStore?.getUser?.(r.u)
-        const any = real ?? S().UserStore?.getCurrentUser?.()
-        if (any) proto = Object.getPrototypeOf(any)
+        cur = S().UserStore?.getCurrentUser?.()
     } catch {}
-    let base = real
-    if (!base) {
-        // 디스코드가 모르는 사람 (꺼져 있을 때 Discord Watch 가 잡은 사람 등): 디스코드의 사용자 객체로 만든다.
-        // 빈 칸이 있는 그냥 객체를 넘기면 프로필 사진을 고르다가 "Cannot convert undefined value to object" 로 멈춘다
-        const raw = { id: r.u, username: r.un?.username ?? 'unknown', global_name: r.un?.global_name ?? null, globalName: r.un?.global_name ?? null, avatar: r.un?.avatar ?? null, discriminator: '0', bot: false }
-        try {
-            const Ctor = proto?.constructor
-            if (typeof Ctor === 'function' && Ctor !== Object) base = new Ctor(raw)
-        } catch {}
-        base ??= { ...raw, avatarDecorationData: null, collectibles: null, primaryGuild: null, displayNameStyles: null, flags: 0, publicFlags: 0 }
+    let x: any
+    if (real) x = Object.assign(Object.create(Object.getPrototypeOf(real)), real)
+    else {
+        // 디스코드가 모르는 사람 (꺼져 있을 때 Discord Watch 가 잡은 사람 등).
+        // 내 사용자 객체를 그대로 복사해 칸과 함수를 모두 갖춘 뒤 이름, 사진만 바꾼다.
+        // 칸이나 함수가 빠진 객체를 넘기면 프로필 사진을 고르다가 멈춘다 (getAvatarSource, isProvisional)
+        const name = r.un?.username ?? 'unknown'
+        const own = {
+            id: r.u,
+            username: name,
+            globalName: r.un?.global_name ?? null,
+            global_name: r.un?.global_name ?? null,
+            avatar: r.un?.avatar ?? null,
+            discriminator: '0',
+            bot: false,
+            system: false,
+            banner: null,
+            bannerColor: null,
+            avatarDecorationData: null,
+            collectibles: null,
+            primaryGuild: null,
+            displayNameStyles: null,
+            premiumType: null,
+            flags: 0,
+            publicFlags: 0,
+        }
+        if (cur) {
+            x = Object.assign(Object.create(Object.getPrototypeOf(cur)), cur)
+            for (const k of Object.keys(own)) if (k in x || k === 'id' || k === 'username') x[k] = (own as any)[k]
+            for (const k of ['email', 'phone', 'verified', 'mfaEnabled', 'nsfwAllowed', 'purchasedFlags', 'premiumUsageFlags', 'ageVerificationStatus'])
+                if (k in x) x[k] = null
+        } else x = { ...own }
+        // 그래도 없는 함수는 무난한 값으로
+        const safe: Record<string, (...a: any[]) => any> = {
+            isProvisional: () => false,
+            isNonUserBot: () => false,
+            isSystemUser: () => false,
+            isClyde: () => false,
+            isStaff: () => false,
+            isStaffPersonal: () => false,
+            hasFlag: () => false,
+            hasAnyFlag: () => false,
+            hasAvatarForGuild: () => false,
+            isPomelo: () => true,
+            toString: () => name,
+        }
+        for (const k of Object.keys(safe)) if (typeof x[k] !== 'function') x[k] = safe[k]
     }
-    const x = Object.assign(Object.create(proto), base)
     x[MARK] = r.at
     return x
 }
