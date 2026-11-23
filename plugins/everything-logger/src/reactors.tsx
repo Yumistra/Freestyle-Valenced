@@ -9,7 +9,7 @@ import { Text as RNText, View } from 'react-native'
 import { removedReactions } from './events'
 import { redCss } from './rows'
 import { settings } from './store'
-import { when } from './time'
+import { shortWhen } from './time'
 
 /**
  * 반응 목록 창 (메시지의 반응을 꾹 눌렀을 때 나오는 창, modules/reactions/native/MessageReactionsContent.tsx)에
@@ -82,18 +82,17 @@ function RemovedName({ user, nick }: { user: any; nick?: string }) {
     const { Text } = Design as any
     const name = nick || user?.globalName || user?.global_name || user?.username || 'unknown'
     const red = redCss(1)
+    // 한 줄로: 반응 목록은 줄 높이가 정해져 있어서 두 줄이면 다음 줄과 겹친다
     const text = (
-        <>
-            <Text variant="text-md/semibold" style={{ color: red }} numberOfLines={1}>
-                {name}
+        <Text variant="text-md/semibold" style={{ color: red }} numberOfLines={1}>
+            {name}
+            <Text variant="text-xs/medium" style={{ color: red, opacity: 0.8 }}>
+                {`  removed ${shortWhen(user[MARK])}`}
             </Text>
-            <Text variant="text-xs/medium" style={{ color: red }} numberOfLines={1}>
-                {`removed ${when(user[MARK])}`}
-            </Text>
-        </>
+        </Text>
     )
     if (rowPatched) return <View style={{ flex: 1, justifyContent: 'center' }}>{text}</View>
-    return <View style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center', backgroundColor: redCss(0.14), borderLeftWidth: 3, borderLeftColor: red, borderRadius: 4, paddingVertical: 4, paddingHorizontal: 8 }}>{text}</View>
+    return <View style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center', backgroundColor: redCss(0.14), borderLeftWidth: 3, borderLeftColor: red, borderRadius: 4, paddingHorizontal: 8 }}>{text}</View>
 }
 
 /** 반응 목록 창의 한 줄 (FormRow) 이 지운 사람이면 줄 전체를 지워진 메시지처럼: 옅은 빨간 배경 + 왼쪽 빨간 줄 */

@@ -23,3 +23,20 @@ export function when(ms: number): string {
     if (!ms) return ''
     return formatClock(ms, true) ?? new Date(ms).toLocaleString()
 }
+
+/** 짧게: 오늘이면 시각만, 아니면 날짜와 시각 (한 줄에 들어가게) */
+export function shortWhen(ms: number): string {
+    if (!ms) return ''
+    const d = new Date(ms)
+    if (!Number.isFinite(d.getTime())) return ''
+    const today = new Date().toDateString() === d.toDateString()
+    const s = settings()
+    let h = d.getHours()
+    let ampm = ''
+    if (s.clock12 || !s.seconds) {
+        ampm = h < 12 ? ' AM' : ' PM'
+        h = h % 12 || 12
+    }
+    const time = `${h}:${pad(d.getMinutes())}${s.seconds ? `:${pad(d.getSeconds())}` : ''}${ampm}`
+    return today ? time : `${d.getMonth() + 1}/${d.getDate()} ${time}`
+}
