@@ -77,12 +77,27 @@ export function markedUser(r: any): any {
             flags: 0,
             publicFlags: 0,
         }
-        if (cur) {
-            x = Object.assign(Object.create(Object.getPrototypeOf(cur)), cur)
-            for (const k of Object.keys(own)) if (k in x || k === 'id' || k === 'username') x[k] = (own as any)[k]
-            for (const k of ['email', 'phone', 'verified', 'mfaEnabled', 'nsfwAllowed', 'purchasedFlags', 'premiumUsageFlags', 'ageVerificationStatus'])
-                if (k in x) x[k] = null
-        } else x = { ...own }
+        // 칸을 바꿀 때는 defineProperty 로 (디스코드 사용자 객체는 읽기 전용 칸이 있어서 x[k] = v 는 오류가 난다)
+        const put = (o: any, k: string, v: any) => {
+            try {
+                Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true })
+            } catch {}
+        }
+        if (cur)
+            try {
+                x = Object.create(Object.getPrototypeOf(cur))
+                for (const k of Object.getOwnPropertyNames(cur)) {
+                    const d = Object.getOwnPropertyDescriptor(cur, k)
+                    if (d) put(x, k, 'value' in d ? d.value : cur[k])
+                }
+                for (const k of Object.keys(own)) if (k in x || k === 'id' || k === 'username') put(x, k, (own as any)[k])
+                for (const k of ['email', 'phone', 'verified', 'mfaEnabled', 'nsfwAllowed', 'purchasedFlags', 'premiumUsageFlags', 'ageVerificationStatus'])
+                    if (k in x) put(x, k, null)
+                if (x.id !== r.u) x = undefined
+            } catch {
+                x = undefined
+            }
+        x ??= { ...own }
         // 그래도 없는 함수는 무난한 값으로
         const safe: Record<string, (...a: any[]) => any> = {
             isProvisional: () => false,
@@ -97,9 +112,12 @@ export function markedUser(r: any): any {
             isPomelo: () => true,
             toString: () => name,
         }
-        for (const k of Object.keys(safe)) if (typeof x[k] !== 'function') x[k] = safe[k]
+        for (const k of Object.keys(safe)) if (typeof x[k] !== 'function') put(x, k, safe[k])
     }
-    x[MARK] = r.at
+    try {
+        x[MARK] = r.at
+    } catch {}
+    if (x[MARK] !== r.at) Object.defineProperty(x, MARK, { value: r.at, enumerable: false, configurable: true })
     return x
 }
 
