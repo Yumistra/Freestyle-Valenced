@@ -156,6 +156,15 @@ export async function autoCollect() {
     for (const ms of [2000, 6000]) setTimeout(() => pullCompanion().catch(() => {}), ms)
 }
 
+/** 버전 a 가 b 이상인지 (1.1.4 같은 숫자) */
+export function newer(a: string | undefined, b: string) {
+    if (!a) return false
+    const x = a.split('.').map(n => parseInt(n, 10) || 0)
+    const y = b.split('.').map(n => parseInt(n, 10) || 0)
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0)
+    return true
+}
+
 export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
     const { TableRowGroup, TableRow, TableSwitchRow, TextInput, Button } = Design as any
     const { st, missing, msg, setMsg, send } = useWatchStatus()
@@ -232,6 +241,20 @@ export function CompanionGroup({ onTurnedOn }: { onTurnedOn?: () => void }) {
                     {st?.hasToken ? <TableRow icon={rowIcon('UserMinusIcon')} label="Remove the account from the app" onPress={() => send('clearToken')} /> : null}
                 </>
             )}
+            {missing !== true ? (
+                <TableRow
+                    icon={rowIcon('TrashIcon')}
+                    label="Uninstall the app"
+                    variant="danger"
+                    onPress={() => {
+                        // 1.1.4 부터는 앱이 스스로 지우기 창을 연다 (계정도 먼저 지운다). 예전 앱은 앱 정보 화면을 연다
+                        const own = !missing && newer(st?.version, '1.1.4')
+                        send(own ? 'uninstall' : 'appInfo').then(r => {
+                            if (r === 'ok') noApp = false
+                        })
+                    }}
+                />
+            ) : null}
             {msg ? <TableRow label={msg} /> : null}
         </TableRowGroup>
     )

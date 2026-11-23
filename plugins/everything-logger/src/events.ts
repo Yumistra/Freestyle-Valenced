@@ -1,7 +1,7 @@
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
 import { allowed, guildOf, isFriend } from './filters'
-import { events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event, type UserSnap } from './store'
+import { buried, bury, events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event, type UserSnap } from './store'
 
 /**
  * 메시지 말고 다른 기록:
@@ -42,10 +42,15 @@ export function pruneEvents() {
     }
 }
 
+/** 지운 반응 기록을 가리키는 이름 (사용자가 지운 기록을 Discord Watch 가 다시 보내도 넣지 않으려고) */
+export const reactionKey = (e: { m: string; u: string; em: { id?: string; name: string } }) => `r:${e.m}:${e.u}:${e.em.id || e.em.name}`
+
 export function removeEvent(id: string) {
     const all = events()
     const i = all.findIndex(e => e.id === id)
     if (i >= 0) {
+        const e = all[i]
+        if (e.k === 'r') bury(reactionKey(e))
         all.splice(i, 1)
         save(true)
     }
@@ -101,6 +106,48 @@ export function onReactionAdd(p: any) {
         changed = true
     }
     if (changed) save()
+}
+
+const sameEmoji = (a: { id?: string; name: string }, b: { id?: string; name?: string }) =>
+    a.id || b.id ? String(a.id ?? '') === String(b.id ?? '') : a.name === String(b.name ?? '')
+
+/**
+ * Discord Watch 가 디스코드가 꺼진 동안 본 반응 빼기/다시 달기.
+ *  {"t":"react-","at":ms,"c":채널,"g":서버,"m":메시지,"u":사용자,"em":{id,name,animated},"un":{사용자 모습}}
+ *  {"t":"react+", ...같은 칸} (뺐던 반응을 다시 단 것)
+ * 바뀐 기록이 있으면 true. 디스코드가 켜져 있을 때 직접 잡은 것과 겹치면 (2분 안, 같은 사람, 같은 이모지) 넣지 않는다.
+ */
+export function companionReaction(x: any): boolean {
+    const s = settings()
+    if (!s.logReactions || !x?.m || !x.c || !x.u || !x.em) return false
+    const u = String(x.u)
+    const m = String(x.m)
+    const at = Number(x.at) || Date.now()
+    const em = { ...(x.em.id ? { id: String(x.em.id) } : {}), name: String(x.em.name ?? '?'), animated: !!x.em.animated }
+    const all = events()
+    if (x.t === 'react+') {
+        let any = false
+        for (const e of all) {
+            if (e.k !== 'r' || e.m !== m || e.u !== u || e.back || e.at > at + 120_000 || !sameEmoji(e.em, em)) continue
+            e.back = at
+            any = true
+        }
+        return any
+    }
+    if (x.t !== 'react-' || u === myId()) return false
+    if (buried(reactionKey({ m, u, em }), at)) return false
+    const un: UserSnap | undefined = snapOf(u) ?? (x.un?.username ? { id: u, username: String(x.un.username), global_name: x.un.global_name ?? null, avatar: x.un.avatar ?? null } : undefined)
+    if (s.ignoreBots && (S().UserStore?.getUser?.(u)?.bot || x.un?.bot)) return false
+    const g = x.g ? String(x.g) : guildOf({ channel_id: x.c })
+    if (!allowed({ channel_id: String(x.c), guild_id: g, author: { id: u } })) return false
+    if (all.some(e => e.k === 'r' && e.m === m && e.u === u && Math.abs(e.at - at) < 120_000 && sameEmoji(e.em, em))) return false
+    const e: Event = { k: 'r', id: eid(), c: String(x.c), ...(g ? { g } : {}), m, u, em, at, ...(un ? { un } : {}) }
+    // 시간 순서대로 (앱이 늦게 보내도)
+    let i = all.length
+    while (i > 0 && all[i - 1].at > at) i--
+    all.splice(i, 0, e)
+    if (all.length > EVENTS_MAX) all.splice(0, all.length - EVENTS_MAX)
+    return true
 }
 
 /** 지금 디스코드가 아는 사용자 모습 (나중에 몰라도 이름이 보이게 같이 남긴다) */

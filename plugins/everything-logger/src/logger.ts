@@ -3,7 +3,7 @@ import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { compare, forget, importPushes, remember, slim, updateSeen } from './away'
 import { compareNotes } from './tray'
 import { removeFiles, saveAll } from './attachments'
-import { notifyDeleted, pruneEvents } from './events'
+import { notifyDeleted, pruneEvents, reactionKey } from './events'
 import { allowed } from './filters'
 import { addEdit, bury, cleanEdits, events, keepMs, logs, pruneGone, save, seen, settings, type Entry } from './store'
 
@@ -188,8 +188,9 @@ function keepDeleted(channelId: string, id: string, guildId?: string): 'store' |
 /** 줄만 다시 만들게 하는 가짜 수정 (네이티브는 changed 표시가 있어야 다시 그린다) */
 const rerender = (channelId: string, id: string, guildId?: string) => ({ type: 'MESSAGE_UPDATE', guildId, message: { id, channel_id: channelId } })
 
-function rerenderLater(channelId: string, id: string, guildId?: string) {
+export function rerenderLater(channelId: string, id: string, guildId?: string) {
     changed.add(id)
+    if (!getMessage(channelId, id)) return
     Promise.resolve().then(() => {
         try {
             Dispatcher.dispatch(rerender(channelId, id, guildId) as any)
@@ -254,6 +255,8 @@ export function showLateDeleted(channelIds: Iterable<string>) {
             const next = cm.mergeDelta(extra, [], [])
             const CM = cm.constructor
             if (next && typeof CM?.commit === 'function') CM.commit(next)
+            // 방금 넣은 목록은 다시 볼 필요 없다 (넣지 못한 게 있어도 같은 목록에서 계속 다시 하지 않게)
+            if (c === watched.channel) watched.cm = store?.getMessages?.(c)
             n += extra.length
             for (const m of extra) changed.add(String(m.id))
         } catch {}
@@ -264,6 +267,44 @@ export function showLateDeleted(channelIds: Iterable<string>) {
         } catch {}
     }
     return n
+}
+
+/**
+ * 보고 있는 채널의 메시지 목록이 바뀔 때마다 (디스코드가 저장해 둔 것으로 채우거나, 서버에서 새로 받거나, 다시 켜졌을 때)
+ * 남겨 둔 지운 메시지가 빠져 있으면 다시 넣는다. 목록 객체가 바뀔 때만, 0.25초에 한 번만 본다.
+ */
+const watched: { channel?: string; cm?: any; timer?: any } = {}
+function checkSelected() {
+    watched.timer = undefined
+    try {
+        const c = S().SelectedChannelStore?.getChannelId?.()
+        if (!c) return
+        const cm = S().MessageStore?.getMessages?.(c)
+        if (!cm || (c === watched.channel && cm === watched.cm)) return
+        watched.channel = String(c)
+        watched.cm = cm
+        showLateDeleted([String(c)])
+    } catch {}
+}
+const checkSoon = () => {
+    if (!watched.timer) watched.timer = setTimeout(checkSelected, 250)
+}
+/** 지금 보고 있는 채널을 바로 다시 본다 (돌아왔을 때, 저장소를 다 읽었을 때) */
+export function refreshVisible() {
+    watched.cm = undefined
+    checkSelected()
+}
+export function watchSelected() {
+    const stores = [S().MessageStore, S().SelectedChannelStore].filter(x => typeof x?.addChangeListener === 'function')
+    for (const x of stores) x.addChangeListener(checkSoon)
+    return () => {
+        for (const x of stores)
+            try {
+                x.removeChangeListener?.(checkSoon)
+            } catch {}
+        clearTimeout(watched.timer)
+        watched.timer = undefined
+    }
 }
 
 /** 백그라운드 동기화로 지워진 메시지 (MESSAGE_DELETE 없이 deleted_message_ids 로 온다) 도 남긴다 */
@@ -372,6 +413,8 @@ export function clearKind(kind: 'r' | 'c' | 'p') {
     const all = events()
     const gone = all.filter(e => e.k === kind)
     if (!gone.length) return
+    // Discord Watch 가 같은 기록을 다시 보내도 돌아오지 않게
+    for (const e of gone) if (e.k === 'r') bury(reactionKey(e))
     all.splice(0, all.length, ...all.filter(e => e.k !== kind))
     save(true)
     if (kind !== 'r') return

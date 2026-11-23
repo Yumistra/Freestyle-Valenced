@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.yumistra.discordwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.1.3"
+        versionCode = 6
+        versionName = "1.1.4"
     }
 
     // 업데이트가 덮어써지게 늘 같은 키로 서명한다

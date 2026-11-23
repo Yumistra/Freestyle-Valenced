@@ -6,7 +6,7 @@ import { instead } from '@valenced/patcher'
 import { AppState } from 'react-native'
 import { trim } from './away'
 import { bindNotes, nativeStatus, readTray, trimNotes } from './tray'
-import { expire, importPushes, intercept } from './logger'
+import { expire, importPushes, intercept, refreshVisible, watchSelected } from './logger'
 import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
 import { registerPicker } from './picker'
 import { patchSheet } from './sheet'
@@ -114,10 +114,26 @@ export default plugin({
             patchReactors(cleanup)
         } catch {}
         patchSheet(cleanup)
+        // 켜지거나 돌아온 뒤 잠깐 동안은 Discord Watch 가 보낸 기록을 자주 합친다 (평소엔 10초에 한 번).
+        // 앱은 디스코드가 다시 연결된 걸 보고 1~2초 뒤에 보낸다
+        let burst: any[] = []
+        const pullBurst = () => {
+            for (const t of burst) clearTimeout(t)
+            burst = [0, 1000, 2500, 4500, 7000, 11_000, 16_000].map(ms =>
+                setTimeout(() => {
+                    pullCompanion().catch(() => {})
+                    // 지운 메시지가 채팅에서 빠져 있으면 바로 넣는다
+                    if (ms <= 4500)
+                        try {
+                            refreshVisible()
+                        } catch {}
+                }, ms),
+            )
+        }
         const pull = () => {
             importPushes(me()).catch(() => {})
             readTray().catch(() => {})
-            pullCompanion().catch(() => {})
+            pullBurst()
             // 디스코드가 꺼진 동안 Discord Watch 가 모은 기록을 보내 달라고 한다
             autoCollect().catch(() => {})
         }
@@ -126,6 +142,8 @@ export default plugin({
                 expire()
                 trim()
                 trimNotes()
+                // 저장소를 읽기 전에 디스코드가 채팅을 채웠으면 지운 메시지가 빠져 있다
+                refreshVisible()
                 return pull()
             })
             .catch(() => {})
@@ -145,6 +163,8 @@ export default plugin({
             pullCompanion().catch(() => {})
         }, 10_000)
         cleanup(
+            () => burst.forEach(t => clearTimeout(t)),
+            watchSelected(),
             () => clearInterval(timer),
             () => clearInterval(companionTimer),
             // 마지막에: 기다리던 저장을 마치고 더는 쓰지 않는다 (업데이트로 예전 것과 새것이 겹칠 때 지워지지 않게)

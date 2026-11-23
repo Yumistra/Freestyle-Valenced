@@ -175,9 +175,17 @@ class WatchService : Service() {
         when (type) {
             "READY" -> ready(d ?: return)
             "CHANNEL_CREATE" -> d?.let { c -> if (c.optInt("type") == 1 || c.optInt("type") == 3) dms.add(c.optString("id")) }
-            "MESSAGE_CREATE" -> d?.let { Store.remember(this, slim(it)) }
+            "MESSAGE_CREATE" -> d?.let {
+                it.optJSONObject("author")?.let { u -> people(u) }
+                Store.remember(this, slim(it))
+            }
             "MESSAGE_UPDATE" -> d?.let { updated(it) }
             "MESSAGE_DELETE" -> d?.let { deleted(it.optString("id"), it.optString("channel_id"), it.optString("guild_id")) }
+            "MESSAGE_REACTION_REMOVE" -> d?.let { reaction(it, removed = true) }
+            "MESSAGE_REACTION_ADD" -> d?.let { r ->
+                r.optJSONObject("member")?.optJSONObject("user")?.let { u -> people(u) }
+                reaction(r, removed = false)
+            }
             "MESSAGE_DELETE_BULK" -> d?.let { b ->
                 val ids = b.optJSONArray("ids") ?: return@let
                 for (i in 0 until ids.length()) deleted(ids.optString(i), b.optString("channel_id"), b.optString("guild_id"))
@@ -215,7 +223,7 @@ class WatchService : Service() {
         val was = Status.discordOpen
         Status.discordOpen = open
         // 디스코드가 켜지면 그동안 쌓인 기록을 보낸다
-        if (open && !was) main.postDelayed({ deliver(this); Control.report(this) }, 5000)
+        if (open && !was) main.postDelayed({ deliver(this); Control.report(this) }, 1500)
     }
 
     private fun slim(m: JSONObject): JSONObject {
@@ -271,6 +279,52 @@ class WatchService : Service() {
         sendNow(line)
         if (!Status.discordOpen) maybeNotify(m, channel, g)
         main.post { Control.reportSoon(this) }
+    }
+
+    // ── 반응 ────────────────────────────────────────────────────────────
+    /** 최근에 본 사람 (반응을 뺀 사람 이름을 같이 보내려고). 반응 빼기 이벤트에는 사람 정보가 없다 */
+    private val users = object : LinkedHashMap<String, JSONObject>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject>?) = size > 3000
+    }
+
+    /** 뺀 반응 (메시지:사람:이모지 → 시각). 다시 단 것은 뺀 적이 있을 때만 보낸다 (모든 반응을 보내지 않게) */
+    private val removedAt = object : LinkedHashMap<String, Long>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?) = size > 5000
+    }
+
+    private fun people(u: JSONObject) {
+        val id = u.optString("id").takeIf { it.isNotBlank() } ?: return
+        users[id] = JSONObject()
+            .put("username", u.optString("username"))
+            .put("global_name", u.opt("global_name") ?: JSONObject.NULL)
+            .put("avatar", u.opt("avatar") ?: JSONObject.NULL)
+            .put("bot", u.optBoolean("bot"))
+    }
+
+    private fun reaction(r: JSONObject, removed: Boolean) {
+        val user = r.optString("user_id").takeIf { it.isNotBlank() } ?: return
+        if (user == me) return
+        val msg = r.optString("message_id").takeIf { it.isNotBlank() } ?: return
+        val e = r.optJSONObject("emoji") ?: return
+        val emId = e.optString("id").takeIf { it.isNotBlank() && it != "null" }
+        val emName = e.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: "?"
+        val key = "$msg:$user:${emId ?: emName}"
+        val now = System.currentTimeMillis()
+        if (removed) removedAt[key] = now
+        else if (removedAt.remove(key) == null) return
+        val em = JSONObject().put("name", emName).put("animated", e.optBoolean("animated"))
+        if (emId != null) em.put("id", emId)
+        val line = JSONObject()
+            .put("t", if (removed) "react-" else "react+")
+            .put("at", now)
+            .put("c", r.optString("channel_id"))
+            .put("m", msg)
+            .put("u", user)
+            .put("em", em)
+        r.optString("guild_id").takeIf { it.isNotBlank() && it != "null" }?.let { line.put("g", it) }
+        if (removed) users[user]?.let { line.put("un", it) }
+        Store.enqueue(this, line)
+        sendNow(line)
     }
 
     private fun sendNow(line: JSONObject) {

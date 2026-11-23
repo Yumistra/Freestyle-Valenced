@@ -16,7 +16,7 @@ import org.json.JSONObject
 
 /**
  * 화면 없는 앱. Message Logger 플러그인(디스코드 안)이 이 투명한 Activity 를 열어서 명령을 보낸다.
- *  cmd = status | setup | deliver | clearToken | battery
+ *  cmd = status | setup | deliver | clearToken | battery | uninstall
  *  setup 은 token, notify, enabled 중 보낸 것만 바꾼다.
  * 연 앱이 디스코드인지 확인하고, 그 앱을 기록을 보낼 곳으로 정한다 (패키지 이름을 따로 적지 않는다).
  * 할 일을 하고 상태를 디스코드로 보낸 뒤 바로 닫힌다.
@@ -83,6 +83,25 @@ class ControlActivity : Activity() {
                 Status.userId = ""
             }
             "deliver" -> WatchService.deliver(this)
+            "uninstall" -> {
+                // 계정과 기록부터 지우고 안드로이드의 앱 지우기 창을 연다
+                Store.setEnabled(this, false)
+                WatchService.stop(this)
+                Store.clearToken(this)
+                Status.state = "Off"
+                Status.user = ""
+                Status.userId = ""
+                Control.report(this)
+                try {
+                    startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")))
+                } catch (_: Throwable) {
+                    try {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                    } catch (_: Throwable) {
+                    }
+                }
+                return
+            }
             "battery" -> askBattery()
             else -> {
                 // 켜 두었는데 꺼져 있으면 (휴대폰이 껐다든가) 다시 켠다

@@ -3,7 +3,8 @@ import { readFile } from '@valenced/modules/native/fs'
 import { NativeModules } from 'react-native'
 import { slim } from './away'
 import { allowed } from './filters'
-import { markChanged, showLateDeleted } from './logger'
+import { companionReaction } from './events'
+import { markChanged, rerenderLater, showLateDeleted } from './logger'
 import { addEdit, buried, events, logs, save, settings, type Entry, type Event } from './store'
 
 /**
@@ -108,11 +109,22 @@ export async function pullCompanion(): Promise<number> {
     const all = logs()
     let n = 0
     const lateDeleted = new Set<string>()
+    /** 반응이 바뀐 메시지 → [채널, 서버] (반응 버튼을 다시 그린다) */
+    const reactions = new Map<string, [string, string | undefined]>()
     for (const line of text.split('\n')) {
         let x: any
         try {
             x = JSON.parse(line)
         } catch {
+            continue
+        }
+        if (x?.t === 'react-' || x?.t === 'react+') {
+            try {
+                if (companionReaction(x)) {
+                    reactions.set(String(x.m), [String(x.c), x.g ? String(x.g) : undefined])
+                    n++
+                }
+            } catch {}
             continue
         }
         // 앱이 보낸 메시지는 사용자 정보가 일부 빠져 있다 (discriminator 등).
@@ -146,6 +158,10 @@ export async function pullCompanion(): Promise<number> {
     companionStatus.received += n
     companionStatus.last = Date.now()
     if (n) save(true)
+    for (const [m, [c, g]] of reactions)
+        try {
+            rerenderLater(c, m, g)
+        } catch {}
     if (lateDeleted.size) {
         try {
             showLateDeleted(lateDeleted)

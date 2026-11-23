@@ -9,7 +9,7 @@ import org.json.JSONObject
 /**
  * 알림 앱(Discord Watch) 다루기. 앱은 화면이 없어서, 투명한 Activity 를 열어 명령을 보낸다
  * (디스코드가 앱을 볼 수 없어도 Activity 는 열 수 있다). 앱은 상태를 방송으로 돌려준다 (CompanionReceiver).
- *  companion(cmd, json): cmd = status | setup | deliver | clearToken | battery, json = {"token","enabled","notify"} 중 보낼 것만
+ *  companion(cmd, json): cmd = status | setup | deliver | clearToken | battery | uninstall | appInfo(앱 정보 화면, 여기서 연다), json = {"token","enabled","notify"} 중 보낼 것만
  *  돌려주는 값: "ok" | "missing"(앱 없음) | "error: ..."
  *  companionStatus(): 앱이 마지막으로 보낸 상태 JSON (없으면 "")
  */
@@ -23,6 +23,18 @@ internal object Companion {
     fun send(args: List<Any?>): Any? {
         val ctx = Tray.context ?: return "error: no context"
         val cmd = args.getOrNull(0)?.toString() ?: "status"
+        // 앱 정보 화면 (예전 앱을 지울 때: 디스코드가 직접 지우기 창을 열 권한은 없다)
+        if (cmd == "appInfo") {
+            return try {
+                ctx.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${Extras.COMPANION_PACKAGE}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                "ok"
+            } catch (t: Throwable) {
+                "error: $t"
+            }
+        }
         val i = Intent()
             .setClassName(Extras.COMPANION_PACKAGE, ACTIVITY)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
