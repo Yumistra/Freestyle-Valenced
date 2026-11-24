@@ -166,6 +166,14 @@ object Store {
         return keep
     }
 
+    /** 3일 안의 기록을 꺼내고 큐를 비운다 (디스코드가 받을 준비가 됐을 때) */
+    @Synchronized
+    fun takeQueue(ctx: Context): List<String> {
+        val keep = queue(ctx)
+        queueFile(ctx).writeText("")
+        return keep
+    }
+
     /** 읽기만 (화면 표시용) */
     @Synchronized
     fun queueSize(ctx: Context): Int {

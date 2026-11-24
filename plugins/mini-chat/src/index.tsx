@@ -1082,6 +1082,8 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
     const check = () => {
         try {
             const ref = (RootNavigationRef as any).getRootNavigationRef?.()
+            // 준비 전에 상태를 물으면 디스코드가 오류를 남긴다 ("navigation object hasn't been initialized")
+            if (ref?.isReady && !ref.isReady()) return
             const st = ref?.getRootState?.() ?? ref?.getState?.()
             const routes: any[] = st?.routes ?? []
             const names = routes.map(r => r?.name).join(' > ')
@@ -1102,7 +1104,7 @@ function patchOverlays(cleanup: (...f: any[]) => void) {
     const attach = () => {
         try {
             const ref = (RootNavigationRef as any).getRootNavigationRef?.()
-            if (!ref?.addListener) return false
+            if (!ref?.addListener || (ref.isReady && !ref.isReady())) return false
             sub = ref.addListener('state', check)
             check()
             return true

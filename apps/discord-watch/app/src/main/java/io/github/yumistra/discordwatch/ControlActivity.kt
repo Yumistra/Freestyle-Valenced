@@ -246,7 +246,7 @@ class BootReceiver : BroadcastReceiver() {
 class DeliverReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         try {
-            WatchService.deliver(context)
+            WatchService.deliver(context, drain = true)
             Control.report(context)
         } catch (_: Throwable) {
         }

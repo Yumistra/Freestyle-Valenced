@@ -55,22 +55,36 @@ class WatchService : Service() {
             ctx.stopService(Intent(ctx, WatchService::class.java))
         }
 
-        /** 지금 쌓인 기록을 디스코드로 보낸다 (조각으로 나눠서) */
-        fun deliver(ctx: Context) {
-            val lines = Store.queue(ctx)
+        private val sender = Handler(Looper.getMainLooper())
+
+        /**
+         * 쌓인 기록을 디스코드로 보낸다. 작은 조각으로, 0.3초 간격으로.
+         * 한 번에 큰 방송 (수백 KB) 을 여러 개 보내면 받는 쪽 안드로이드 통로가 넘쳐서
+         * "Can't deliver broadcast" 로 디스코드가 꺼진다.
+         * drain: 보낸 줄은 큐에서 뺀다 (디스코드가 화면에 있고 받을 준비가 됐다고 알려 왔을 때만)
+         */
+        fun deliver(ctx: Context, drain: Boolean = false) {
+            val lines = if (drain) Store.takeQueue(ctx) else Store.queue(ctx)
             if (lines.isEmpty()) return
             val target = Store.target(ctx)
+            val chunks = ArrayList<String>()
             val chunk = StringBuilder()
             for (line in lines) {
-                if (chunk.length + line.length > 200_000 && chunk.isNotEmpty()) {
-                    send(ctx, target, chunk.toString())
+                if (line.length > CHUNK) continue
+                if (chunk.length + line.length > CHUNK && chunk.isNotEmpty()) {
+                    chunks.add(chunk.toString())
                     chunk.setLength(0)
                 }
                 chunk.append(line).append('\n')
             }
-            if (chunk.isNotEmpty()) send(ctx, target, chunk.toString())
+            if (chunk.isNotEmpty()) chunks.add(chunk.toString())
+            val app = ctx.applicationContext ?: ctx
+            chunks.forEachIndexed { i, c -> sender.postDelayed({ send(app, target, c) }, i * 300L) }
             Status.lastSent = System.currentTimeMillis()
         }
+
+        /** 방송 하나의 크기 (글자 수). 안드로이드 통로는 앱 전체가 1MB 를 나눠 쓴다 */
+        const val CHUNK = 24_000
 
         private fun send(ctx: Context, target: String, lines: String) {
             val i = Intent(ACTION).setPackage(target).putExtra("lines", lines)
@@ -130,7 +144,6 @@ class WatchService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             Store.flushCache(this@WatchService)
-            if (Status.discordOpen) deliver(this@WatchService)
             main.postDelayed(this, 5 * 60_000L)
         }
     }
@@ -222,8 +235,9 @@ class WatchService : Service() {
         }
         val was = Status.discordOpen
         Status.discordOpen = open
-        // 디스코드가 켜지면 그동안 쌓인 기록을 보낸다
-        if (open && !was) main.postDelayed({ deliver(this); Control.report(this) }, 1500)
+        // 쌓인 기록은 디스코드(플러그인)가 화면에 돌아와 받을 준비가 됐다고 알려 올 때 보낸다 (DeliverReceiver).
+        // 여기서 보내면 디스코드가 화면 뒤에 있을 수 있다
+        if (open && !was) main.postDelayed({ Control.reportSoon(this) }, 1500)
     }
 
     private fun slim(m: JSONObject): JSONObject {
