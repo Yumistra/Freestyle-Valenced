@@ -22,6 +22,7 @@ import { shortWhen } from './time'
 
 const NAME = 'modules/user_profile/native/DiscordTag.tsx'
 const CONTENT = 'modules/reactions/native/MessageReactionsContent.tsx'
+const SHEET = 'modules/reactions/native/MessageReactions.tsx'
 const ROW = 'design/void/Form/native/FormRow.tsx'
 const TAP = 'modules/messages/native/MessagesUtils.tsx'
 const EMOJI = 'utils/EmojiUtils.tsx'
@@ -342,6 +343,8 @@ export function decoratePills(message: any, color: number): boolean {
 export function withRemovedTabs(p: any) {
     const reactions: any[] = Array.isArray(p?.reactions) ? p.reactions : []
     if (!settings().logReactions || !p?.messageId) return reactions
+    // 바깥 창(MessageReactions)에서 이미 넣었으면 그대로
+    if ((reactions as any).__mlTabs) return reactions
     const mid = String(p.messageId)
     const list = removedReactions(mid).filter((r: any) => r.u)
     if (!list.length) return reactions
@@ -351,11 +354,13 @@ export function withRemovedTabs(p: any) {
         const key = emojiKey(x?.emoji)
         if (!groups.has(key)) return x
         groups.delete(key)
+        // 이미 바꾼 것 (바깥 창에서 바꾼 뒤 안쪽에 복사되어 온 것)
+        if (x?.__mlRemoved || x?.__mlCount) return x
         if ((x?.burst_count ?? 0) > 0) return x
         const n = removedFor(mid, x.emoji, presentOf(String(p.channelId), mid, x.emoji)).length
         if (!n) return x
         const c = typeof x.count === 'number' ? x.count : Number(x.count) || 0
-        return { ...x, count: countLabel(c, n, c + n) }
+        return { ...x, count: countLabel(c, n, c + n), __mlCount: true }
     })
     for (const em of groups.values()) {
         const n = removedFor(mid, em, new Set()).length
@@ -363,7 +368,27 @@ export function withRemovedTabs(p: any) {
         const emoji = { id: em.id ?? null, name: em.name, animated: !!em.animated }
         out.push({ emoji, count: countLabel(null, n, n), burst_count: 0, me: false, me_burst: false, burst_colors: [], count_details: { normal: 0, burst: 0 }, __mlRemoved: true })
     }
+    Object.defineProperty(out, '__mlTabs', { value: true })
     return out
+}
+
+/**
+ * 반응 창 바깥 (MessageReactions). 메시지에 진짜 반응이 하나도 없고 지운 반응만 있으면
+ * 디스코드는 안쪽을 그리지 않고 "반응 없음" 을 보여 준다 → 여기서 먼저 지운 이모지 탭을 넣는다
+ */
+export function withRemovedSheet(p: any) {
+    if (!p?.messageId) return p
+    let reactions = Array.isArray(p.reactions) && p.reactions.length ? p.reactions : undefined
+    if (!reactions)
+        try {
+            reactions = S().MessageStore?.getMessage?.(String(p.channelId), String(p.messageId))?.reactions ?? []
+        } catch {
+            reactions = []
+        }
+    const out = withRemovedTabs({ ...p, reactions })
+    if (out === reactions && reactions === p.reactions) return p
+    if (!out.length) return p
+    return { ...p, reactions: out }
 }
 
 export function patchReactors(cleanup: (...f: any[]) => void) {
@@ -412,6 +437,26 @@ export function patchReactors(cleanup: (...f: any[]) => void) {
             }),
         )
     }
+    // 바깥 창
+    const patchSheet = (mod: any) => {
+        for (const k of ['MessageReactions', 'default'])
+            if (typeof mod?.[k] === 'function')
+                cleanup(
+                    instead(mod, k, function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+                        try {
+                            const p = withRemovedSheet(args?.[0])
+                            if (p !== args?.[0]) return orig.apply(this, [p, ...args.slice(1)])
+                        } catch {}
+                        return orig.apply(this, args)
+                    }),
+                )
+    }
+    cleanup(
+        getModuleWithImportedPath(SHEET, (m: any) => {
+            if (m) patchSheet(m)
+            else cleanup(waitForModuleWithImportedPath(SHEET, (x: any) => patchSheet(x)) as any)
+        }) as any,
+    )
     cleanup(
         getModuleWithImportedPath(CONTENT, (m: any) => {
             if (m) patchTabs(m)
