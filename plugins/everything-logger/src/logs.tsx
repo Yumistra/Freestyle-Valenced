@@ -7,14 +7,14 @@ import { callNativeMethod } from '@valenced/modules/native'
 import { withProps } from '@valenced/modules/finders/filters'
 import { iconComponent } from './icons'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Image, LayoutAnimation, Pressable, ScrollView, TextInput as RNTextInput, View } from 'react-native'
 import { diff } from './diff'
 import { clearMessages, removeOne } from './logger'
 import { DeleteButton, MoreTab, type Tab, TABS } from './logsMore'
-import { applyTags, relationTags, selectedCount, tagCounts, whenTags, type Group, type Selected, type Tag } from './tags'
+import { applyTags, relationTags, selectedCount, tagCounts, tagsOf, whenTags, type Group, type Selected, type Tag } from './tags'
 import { when } from './time'
-import { logs, seen, setSettings, settings, type Entry, type SavedSearch } from './store'
+import { logs, seen, setSettings, settings, version, type Entry, type SavedSearch } from './store'
 
 /**
  * 로그 보기: 채팅 메시지와 같은 모양(아바타, 이름, 시간, 내용)으로 보여 주고,
@@ -435,8 +435,14 @@ export function ChipRow({ title, items, selected, onToggle }: { title: string; i
     )
 }
 
-/** 로그 하나의 분류 (서버/DM, 채널, 보낸 사람) */
+/** 로그 하나의 분류 (서버/DM, 채널, 보낸 사람). 로그 객체마다 한 번만 계산한다 */
+const facetCache = new WeakMap<object, ReturnType<typeof facetsNow>>()
 function facets(id: string, e: Entry) {
+    let f = facetCache.get(e)
+    if (!f) facetCache.set(e, (f = facetsNow(id, e)))
+    return f
+}
+function facetsNow(id: string, e: Entry) {
     const S: any = Stores
     const ch = (() => {
         try {
@@ -491,6 +497,35 @@ export function LogsScreen({ navigation }: { navigation?: any }) {
     return <LogsView />
 }
 
+/**
+ * 탭 안에서 오류가 나도 디스코드가 튕기지 않게 막고, 오류 내용을 보여 준다 (알려 주면 고칠 수 있게)
+ */
+export class Safe extends Component<{ children?: any }, { err?: any }> {
+    state: { err?: any } = {}
+    static getDerivedStateFromError(err: any) {
+        return { err }
+    }
+    componentDidCatch() {}
+    render() {
+        const err = this.state.err
+        if (!err) return (this as any).props.children ?? null
+        const { Text, Button } = Design as any
+        const P = palette()
+        const msg = String(err?.stack ?? err?.message ?? err).split('\n').slice(0, 6).join('\n')
+        return (
+            <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+                <Text variant="text-md/semibold" style={{ color: P.danger }}>
+                    This tab hit an error
+                </Text>
+                <Text variant="text-xs/medium" selectable style={{ color: P.muted }}>
+                    {msg}
+                </Text>
+                <Button text="Try again" variant="secondary" size="md" onPress={() => (this as any).setState({ err: undefined })} />
+            </ScrollView>
+        )
+    }
+}
+
 /** 로그 보기: 위에 종류 탭 (메시지, 반응, 채널, 프로필, 통계) */
 export function LogsView() {
     const { Text } = Design as any
@@ -507,7 +542,7 @@ export function LogsView() {
                     </Pressable>
                 ))}
             </ScrollView>
-            {tab === 'messages' ? <MessagesView /> : <MoreTab tab={tab} />}
+            <Safe key={tab}>{tab === 'messages' ? <MessagesView /> : <MoreTab tab={tab} />}</Safe>
         </View>
     )
 }
@@ -529,10 +564,26 @@ function MessagesView() {
     const [q, setQ] = useState('')
     const [focused, setFocused] = useState(false)
     const anim = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    const all = Object.entries(logs())
-        .filter(([, e]) => e.d || e.e?.length)
-        .sort((a, b) => (b[1].d ?? b[1].at) - (a[1].d ?? a[1].at))
-        .map(([id, e]) => ({ id, e, k: facets(id, e) }))
+    // 로그가 바뀌었을 때만 다시 만든다 (글자를 칠 때마다 수천 개를 다시 정렬하지 않게)
+    const ver = version()
+    const all = useMemo(
+        () =>
+            Object.entries(logs())
+                .filter(([, e]) => e.d || e.e?.length)
+                .sort((a, b) => (b[1].d ?? b[1].at) - (a[1].d ?? a[1].at))
+                .map(([id, e]) => ({ id, e, k: facets(id, e) })),
+        [ver],
+    )
+    // 채널, 사람 → 첫 로그 (목록에서 이름, 사진을 찾을 때 매번 전체를 뒤지지 않게)
+    const firstBy = useMemo(() => {
+        const ch = new Map<string, (typeof all)[number]>()
+        const us = new Map<string, (typeof all)[number]>()
+        for (const x of all) {
+            if (!ch.has(x.k.channel)) ch.set(x.k.channel, x)
+            if (x.k.user && !us.has(x.k.user)) us.set(x.k.user, x)
+        }
+        return { ch, us }
+    }, [all])
     const guildName = (v: string) => {
         try {
             return v === DM ? 'DMs' : String((Stores as any).GuildStore?.getGuild?.(v)?.name ?? '')
@@ -554,16 +605,17 @@ function MessagesView() {
         const g = v === DM ? undefined : S.GuildStore?.getGuild?.(v)
         return { v, n, label: v === DM ? 'DMs' : g?.name ?? 'Server', img: g?.icon ? `https://cdn.discordapp.com/icons/${v}/${g.icon}.png?size=64` : undefined }
     })
-    const channels = count(x => (f.places.length && !f.places.includes(x.k.place) ? '' : x.k.channel)).map(([v, n]): Item => ({ v, n, label: all.find(x => x.k.channel === v)?.k.channelName ?? v }))
+    const channels = count(x => (f.places.length && !f.places.includes(x.k.place) ? '' : x.k.channel)).map(([v, n]): Item => ({ v, n, label: firstBy.ch.get(v)?.k.channelName ?? v }))
     const users = count(x => ((f.places.length && !f.places.includes(x.k.place)) || (f.channels.length && !f.channels.includes(x.k.channel)) ? '' : x.k.user))
         .slice(0, 40)
         .map(([v, n]): Item => {
-            const k = all.find(x => x.k.user === v)?.k
+            const k = firstBy.us.get(v)?.k
             return { v, n, label: k?.userName || 'Unknown', img: k?.author ? avatarUrl(k.author) : undefined }
         })
+    const deletedCount = useMemo(() => all.filter(x => x.e.d).length, [all])
     const kinds: Item[] = [
-        { v: 'deleted', label: 'Deleted', n: all.filter(x => x.e.d).length },
-        { v: 'edited', label: 'Edited', n: all.filter(x => !x.e.d).length },
+        { v: 'deleted', label: 'Deleted', n: deletedCount },
+        { v: 'edited', label: 'Edited', n: all.length - deletedCount },
     ]
     const pq = parseQuery(q)
     const textOf = (x: (typeof all)[number]) => {
@@ -598,8 +650,8 @@ function MessagesView() {
         for (const u of users.filter(u => u.label.toLowerCase().includes(sv)).slice(0, 8))
             suggestions.push({ key: 'u' + u.v, label: u.label, sub: `${u.n} log(s)`, img: u.img, pick: () => (setF({ ...f, users: f.users.includes(u.v) ? f.users : [...f.users, u.v] }), (anim(), dropLast(), input.current?.focus?.())) })
     if (kind === 'in')
-        for (const c of channels.filter(c => `${c.label} ${guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')}`.toLowerCase().includes(sv)).slice(0, 8)) {
-            const g = guildName(all.find(x => x.k.channel === c.v)?.k.place ?? '')
+        for (const c of channels.filter(c => `${c.label} ${guildName(firstBy.ch.get(c.v)?.k.place ?? '')}`.toLowerCase().includes(sv)).slice(0, 8)) {
+            const g = guildName(firstBy.ch.get(c.v)?.k.place ?? '')
             suggestions.push({ key: 'c' + c.v, label: c.label, sub: [g, `${c.n} log(s)`].filter(Boolean).join(', '), pick: () => (setF({ ...f, channels: f.channels.includes(c.v) ? f.channels : [...f.channels, c.v] }), (anim(), dropLast(), input.current?.focus?.())) })
         }
     if (kind === 'is')
@@ -612,7 +664,7 @@ function MessagesView() {
         ].filter(([v]) => v.includes(sv)))
             suggestions.push({ key: 'h' + v, label: l, pick: () => setQ(q.slice(0, q.length - lastTok.length) + `has:${v} `) })
     const tagSel = f.tags ?? {}
-    const entries = applyTags(all, MSG_GROUPS, tagSel)
+    const entries = useMemo(() => applyTags(all, MSG_GROUPS, tagSel)
         .filter(searched)
         .filter(x => !f.kinds.length || f.kinds.includes(x.e.d ? 'deleted' : 'edited'))
         .filter(x => !f.places.length || f.places.includes(x.k.place))
@@ -624,7 +676,7 @@ function MessagesView() {
             const b = dayMs(f.to, true)
             return (a === undefined || t >= a) && (b === undefined || t < b)
         })
-        .map(x => [x.id, x.e] as [string, Entry])
+        .map(x => [x.id, x.e] as [string, Entry]), [all, q, f])
     const dateOn = (dayMs(f.from) !== undefined ? 1 : 0) + (dayMs(f.to, true) !== undefined ? 1 : 0)
     const active = f.kinds.length + f.places.length + f.channels.length + f.users.length + dateOn + selectedCount(tagSel)
     // 저장한 검색
@@ -646,16 +698,16 @@ function MessagesView() {
     const pills: Array<{ key: string; label: string; img?: string; drop(): void }> = [
         ...f.kinds.map(v => ({ key: 'k' + v, label: `is: ${kinds.find(k => k.v === v)?.label ?? v}`, drop: () => setF(o => ({ ...o, kinds: o.kinds.filter(x => x !== v) })) })),
         ...f.places.map(v => ({ key: 'p' + v, label: v === DM ? 'in: DMs' : `server: ${guildName(v) || 'Server'}`, img: places.find(x => x.v === v)?.img, drop: () => setF(o => ({ ...o, places: o.places.filter(x => x !== v), channels: [] })) })),
-        ...f.channels.map(v => ({ key: 'c' + v, label: `in: ${all.find(x => x.k.channel === v)?.k.channelName ?? v}`, drop: () => setF(o => ({ ...o, channels: o.channels.filter(x => x !== v) })) })),
+        ...f.channels.map(v => ({ key: 'c' + v, label: `in: ${firstBy.ch.get(v)?.k.channelName ?? v}`, drop: () => setF(o => ({ ...o, channels: o.channels.filter(x => x !== v) })) })),
         ...f.users.map(v => {
-            const k = all.find(x => x.k.user === v)?.k
+            const k = firstBy.us.get(v)?.k
             return { key: 'u' + v, label: `from: ${k?.userName || 'Unknown'}`, img: k?.author ? avatarUrl(k.author) : undefined, drop: () => setF(o => ({ ...o, users: o.users.filter(x => x !== v) })) }
         }),
         ...MSG_GROUPS.flatMap(g =>
             (tagSel[g.key] ?? []).map(v => {
                 let label = v
                 for (const x of all) {
-                    const t = g.of(x).find(t => t.v === v)
+                    const t = tagsOf(g, x).find(t => t.v === v)
                     if (t) {
                         label = t.label
                         break

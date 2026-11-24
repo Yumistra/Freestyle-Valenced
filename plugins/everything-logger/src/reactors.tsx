@@ -6,6 +6,7 @@ import { withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
 import { createElement } from 'react'
 import { Text as RNText, View } from 'react-native'
+import { api, findMod, later } from './api'
 import { removedReactions } from './events'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { redCss } from './rows'
@@ -49,25 +50,13 @@ export function removedFor(messageId: string, emoji: any, present: Set<string>) 
  * 불러오면 기록에 이름과 사진을 남기고 반응 목록을 다시 그린다. 사람마다 한 번만
  */
 const asked = new Map<string, number>()
-/** 아직 불러오지 않은 모듈도 찾는다 (디스코드는 프로필을 처음 열 때 그 모듈을 불러온다) */
-function findMod(...props: string[]): any {
-    try {
-        const a = (lookupModule(withProps(...(props as [string])) as any) as any)?.[0]
-        if (a) return a
-    } catch {}
-    try {
-        return ((lookupModule as any)(withProps(...(props as [string])) as any, { uninitialized: true, initialize: true }) as any)?.[0]
-    } catch {}
-}
-let http: any
 let reactionsStore: any
-let queue: Promise<any> = Promise.resolve()
 export function learnUser(id: string, guildId?: string) {
     // 안 됐으면 1분 뒤에 다시 (목록이 그려질 때마다 요청하지 않게)
     if (!id || Date.now() - (asked.get(id) ?? -Infinity) < 60_000) return
     asked.set(id, Date.now())
     // 한 번에 하나씩, 사이를 두고 (프로필 요청은 제한이 빡빡하다)
-    queue = queue.then(() => new Promise(done => setTimeout(done, 1200))).then(async () => {
+    later(1200, async () => {
         let raw: any
         // 1. 디스코드의 fetchProfile (프로필을 누를 때 쓰는 것). 사용자 계정은 /users/:id 를 못 받고 /users/:id/profile 만 된다
         try {
@@ -77,11 +66,7 @@ export function learnUser(id: string, guildId?: string) {
         // 2. 안 됐으면 직접
         if (!S().UserStore?.getUser?.(id))
             try {
-                if (!http) {
-                    const a = findMod('HTTP')?.HTTP
-                    http = a?.get ? a : findMod('getAPIBaseURL', 'get')
-                }
-                const res = await http?.get?.({ url: `/users/${id}/profile`, query: { with_mutual_guilds: false, ...(guildId ? { guild_id: guildId } : {}) } })
+                const res = await api()?.get?.({ url: `/users/${id}/profile`, query: { with_mutual_guilds: false, ...(guildId ? { guild_id: guildId } : {}) } })
                 raw = res?.body?.user
                 if (raw?.id && String(raw.id) === id) (Dispatcher as any).dispatch({ type: 'USER_UPDATE', user: raw })
             } catch {}
@@ -100,7 +85,7 @@ export function learnUser(id: string, guildId?: string) {
             try {
                 st?.emitChange?.()
             } catch {}
-    }).catch(() => {})
+    })
 }
 
 /** 목록에 넣을 사용자 객체: 디스코드 사용자 객체의 복사본에 지운 시각 표시 (원본은 건드리지 않는다) */

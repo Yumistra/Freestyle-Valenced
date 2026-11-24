@@ -1,5 +1,6 @@
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { callNativeMethod } from '@valenced/modules/native'
+import { api, later } from './api'
 import { allowed, guildOf, isFriend } from './filters'
 import { buried, bury, events, EVENTS_MAX, keepMs, profiles, save, seen, settings, type Event, type UserSnap } from './store'
 
@@ -199,7 +200,55 @@ function onChannelDelete(p: any) {
     if (!settings().logChannels || !ch?.id || DM_TYPES.has(ch.type)) return
     if (hiddenChannel(ch)) return
     if (!allowed({ channel_id: ch.id, guild_id: ch.guild_id ?? ch.guildId })) return
-    push({ k: 'c', id: eid(), c: String(ch.id), g: ch.guild_id ?? ch.guildId ?? undefined, name: String(ch.name ?? ''), type: Number(ch.type ?? 0), parent: ch.parent_id ?? ch.parentId ?? undefined, msgs: lastMessages(String(ch.id)), at: Date.now() })
+    const e: Event = { k: 'c', id: eid(), c: String(ch.id), g: ch.guild_id ?? ch.guildId ?? undefined, name: String(ch.name ?? ''), type: Number(ch.type ?? 0), parent: ch.parent_id ?? ch.parentId ?? undefined, msgs: lastMessages(String(ch.id)), at: Date.now() }
+    push(e)
+    checkChannel(e)
+}
+
+/**
+ * 디스코드는 채널이 지워졌을 때만이 아니라 내가 그 채널을 볼 수 없게 됐을 때도 (역할, 권한이 바뀜, 서버에서 나감)
+ * "채널 지워짐" 을 보낸다. 서버에 한 번 물어봐서 가린다:
+ *  있음 → 지워지지 않았다, 기록을 지운다. 볼 권한 없음(403) → "볼 수 없게 됨". 없음(404) → 정말 지워짐
+ */
+export function channelStatus(res: any, err: any): 'exists' | 'lost' | 'deleted' | 'unknown' {
+    const status = Number(res?.status ?? err?.status ?? err?.body?.status ?? 0) || (res && !err ? 200 : 0)
+    const code = Number(err?.body?.code ?? 0)
+    if (status >= 200 && status < 300) return 'exists'
+    if (status === 404 || code === 10003) return 'deleted'
+    if (status === 403 || code === 50001 || code === 50013) return 'lost'
+    return 'unknown'
+}
+function checkChannel(e: Event & { k: 'c' }) {
+    later(1500, async () => {
+        let res: any, err: any
+        try {
+            const get = api()?.get
+            if (typeof get !== 'function') return
+            res = await get.call(api(), { url: `/channels/${e.c}` })
+        } catch (x) {
+            err = x
+        }
+        const st = channelStatus(res, err)
+        if (st === 'exists') {
+            const all = events()
+            const i = all.indexOf(e)
+            if (i >= 0) all.splice(i, 1)
+            save()
+        } else if (st === 'lost' || st === 'deleted') {
+            e.lost = st === 'lost'
+            e.checked = true
+            save()
+        }
+    })
+}
+
+/** 예전 기록 (확인하기 전에 남은 것) 도 최근 것부터 30개까지 확인한다 */
+export function recheckChannels() {
+    const todo = events()
+        .filter((e): e is Event & { k: 'c' } => e.k === 'c' && !e.checked)
+        .slice(-30)
+        .reverse()
+    for (const e of todo) checkChannel(e)
 }
 
 // ── 프로필 ──────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ import { bindNavigation, LOGS_ROUTE, LogsScreen } from './logs'
 import { registerPicker } from './picker'
 import { patchSheet } from './sheet'
 import { setNative, setPills, styleRow } from './rows'
-import { interceptEvents } from './events'
+import { interceptEvents, recheckChannels } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { migrateOld, pullCompanion } from './transfer'
 import { autoCollect } from './companion'
@@ -144,6 +144,12 @@ export default plugin({
                 trimNotes()
                 // 저장소를 읽기 전에 디스코드가 채팅을 채웠으면 지운 메시지가 빠져 있다
                 refreshVisible()
+                // 채널 지워짐 기록 중 확인 안 된 것 (볼 수 없게 된 것을 지워졌다고 남긴 것일 수 있다)
+                setTimeout(() => {
+                    try {
+                        recheckChannels()
+                    } catch {}
+                }, 8000)
                 return pull()
             })
             .catch(() => {})

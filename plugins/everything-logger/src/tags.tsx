@@ -5,6 +5,26 @@ import { iconComponent } from './icons'
 import { useState } from 'react'
 import { Image, LayoutAnimation, Pressable, TextInput as RNTextInput, View } from 'react-native'
 import { ChipRow, dayMs, DM, palette, toggle, type Item } from './logs'
+import { version } from './store'
+
+/**
+ * 태그 계산은 항목마다, 묶음마다 한 번만 (필터 판은 그릴 때마다 모든 항목의 모든 묶음을 본다).
+ * 로그가 바뀌면 (version) 다시 계산한다
+ */
+let tagCache = new WeakMap<object, Map<string, Tag[]>>()
+let tagVer = -1
+export function tagsOf<T>(g: Group<T>, x: T): Tag[] {
+    if (tagVer !== version()) {
+        tagVer = version()
+        tagCache = new WeakMap()
+    }
+    if (typeof x !== 'object' || x === null) return g.of(x)
+    let m = tagCache.get(x as any)
+    if (!m) tagCache.set(x as any, (m = new Map()))
+    let t = m.get(g.key)
+    if (!t) m.set(g.key, (t = g.of(x)))
+    return t
+}
 
 /**
  * 로그 보기의 태그 필터 (메시지 탭의 필터처럼).
@@ -98,7 +118,7 @@ export function relationTags(id: string | undefined, u: any): Tag[] {
 // ── 거르기 ──────────────────────────────────────────────────────────────
 function has<T>(x: T, g: Group<T>, picked: string[]) {
     if (!picked?.length) return true
-    const tags = g.of(x)
+    const tags = tagsOf(g, x)
     return tags.some(t => picked.includes(t.v))
 }
 
@@ -122,7 +142,7 @@ export function tagCounts<T>(items: T[], groups: Group<T>[], sel: Selected, key:
     const pool = applyTags(items, groups, sel, key)
     const m = new Map<string, Item>()
     for (const x of pool)
-        for (const t of g.of(x)) {
+        for (const t of tagsOf(g, x)) {
             const it = m.get(t.v)
             if (it) it.n++
             else m.set(t.v, { v: t.v, label: t.label, img: t.img, n: 1 })
@@ -133,7 +153,7 @@ export function tagCounts<T>(items: T[], groups: Group<T>[], sel: Selected, key:
 
 function labelOf<T>(items: T[], g: Group<T>, v: string) {
     for (const x of items) {
-        const t = g.of(x).find(t => t.v === v)
+        const t = tagsOf(g, x).find(t => t.v === v)
         if (t) return t.label
     }
     return v
@@ -155,7 +175,7 @@ export function TagSearchBox<T>({ value, onChange, placeholder, items, groups, s
         for (const v of sel[g.key] ?? []) {
             let tag: Tag | undefined
             for (const x of items) {
-                tag = g.of(x).find(t => t.v === v)
+                tag = tagsOf(g, x).find(t => t.v === v)
                 if (tag) break
             }
             pills.push({ key: g.key + v, label: `${g.pill}: ${tag?.label ?? v}`, img: tag?.img, drop: () => setSel({ ...sel, [g.key]: (sel[g.key] ?? []).filter(x => x !== v) }) })

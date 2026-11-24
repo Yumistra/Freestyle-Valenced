@@ -7,7 +7,7 @@ import { removeEvent } from './events'
 import { clearKind } from './logger'
 import { avatarUrl, goToMessage, palette, where } from './logs'
 import { applyTags, channelTag, dateOk, placeTag, relationTags, TagPanel, TagSearchBox, userTag, whenTags, type Group, type Selected } from './tags'
-import { events, logs, onChange, save, seen, type Event } from './store'
+import { events, logs, onChange, save, seen, version, type Event } from './store'
 import { lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { when } from './time'
@@ -258,6 +258,7 @@ export const CHANNEL_GROUPS: Group<Event>[] = [
         },
     },
     { key: 'place', title: 'Server', pill: 'server', of: e => placeTag((e as C).c, (e as C).g) },
+    { key: 'status', title: 'Status', pill: 'status', of: e => [(e as C).lost ? { v: 'lost', label: 'Hidden from you' } : { v: 'gone', label: 'Deleted' }] },
     {
         key: 'parent',
         title: 'Category or parent',
@@ -332,12 +333,24 @@ export const PROFILE_GROUPS: Group<Event>[] = [
         title: 'Changes by the same person',
         pill: 'changes',
         of: e => {
-            const n = events().filter(x => x.k === 'p' && x.u === (e as Pr).u).length
+            const n = profileCounts().get((e as Pr).u) ?? 0
             return [n >= 5 ? { v: '5', label: '5 or more' } : n >= 2 ? { v: '2', label: '2 to 4' } : { v: '1', label: 'Only once' }]
         },
     },
     WHEN,
 ]
+
+/** 사람마다 프로필 변경 수 (로그가 바뀔 때만 다시 센다) */
+let pcVer = -1
+let pc = new Map<string, number>()
+function profileCounts() {
+    if (pcVer !== version()) {
+        pcVer = version()
+        pc = new Map()
+        for (const x of events()) if (x.k === 'p') pc.set(x.u, (pc.get(x.u) ?? 0) + 1)
+    }
+    return pc
+}
 
 function del(id: string) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
@@ -393,7 +406,7 @@ function ChannelCard({ e }: { e: Extract<Event, { k: 'c' }>; key?: string }) {
     return (
         <Card label={`channel ${e.id}`} onPress={() => (LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut), setOpen(v => !v))}>
             <Text variant="text-md/semibold" style={{ color: P.header }}>
-                {`${THREAD_TYPES.has(e.type) ? 'Thread' : 'Channel'} #${e.name || e.c} deleted`}
+                {`${THREAD_TYPES.has(e.type) ? 'Thread' : 'Channel'} #${e.name || e.c} ${e.lost ? 'hidden from you' : 'deleted'}`}
             </Text>
             <Text variant="text-xs/medium" style={{ color: P.muted }}>
                 {[guild, when(e.at), `${e.msgs.length} message(s) kept`].filter(Boolean).join(', ')}

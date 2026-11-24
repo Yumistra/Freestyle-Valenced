@@ -107,7 +107,7 @@ export interface SavedSearch {
 /** 메시지 말고 다른 기록 (반응, 채널, 프로필) */
 export type Event =
     | { k: 'r'; id: string; c: string; g?: string; m: string; u: string; em: { id?: string; name: string; animated?: boolean }; at: number; un?: UserSnap; back?: number }
-    | { k: 'c'; id: string; c: string; g?: string; name: string; type: number; parent?: string; msgs: any[]; at: number }
+    | { k: 'c'; id: string; c: string; g?: string; name: string; type: number; parent?: string; msgs: any[]; at: number; /** 지워진 게 아니라 내가 볼 수 없게 된 것 */ lost?: boolean; /** 서버에 물어봐서 확인함 */ checked?: boolean }
     | { k: 'p'; id: string; u: string; field: 'username' | 'name' | 'avatar' | 'status'; from: string; to: string; at: number }
 
 export const DEFAULTS: Settings = { rememberPushes: true, detectAway: true, logDeletes: true, logEdits: true, ignoreSelf: false, ignoreBots: true, keepHours: 72, saveAttachments: true, allow: [], block: [], allowOnly: false, friendsOnly: false, logDms: true, onlyServersOn: false, onlyServers: [], showHistoryInChat: true, showDeleteTime: true, showEditTime: true, seconds: false, clock12: false, deletedColor: '', editedColor: '', colorDeletedNames: false, logReactions: true, logChannels: true, logProfiles: true, notifyDeletes: true, searches: [] }
@@ -258,12 +258,25 @@ let due = 0
  * (예전처럼 부를 때마다 기다림을 다시 시작하면 바쁜 채널에서는 한참 안 써진다).
  * 기억해 둔 메시지(seen)만 바뀐 건 조금 더 모아서 (delay 5초) 쓴다: 저장할 때 전체를 다시 쓰기 때문.
  */
+/** 바뀔 때마다 1씩 (화면이 다시 계산할지 정하는 데 쓴다) */
+let ver = 0
+export const version = () => ver
+let notifyTimer: any
 export function save(now = false, delay = 1000) {
-    for (const fn of [...listeners]) {
-        try {
-            fn()
-        } catch {}
+    ver++
+    // 보고 있는 화면에 알리는 건 0.4초에 한 번만 (반응, 프로필 기록이 몰려 올 때 화면이 계속 다시 그려져 멈추지 않게)
+    const notify = () => {
+        clearTimeout(notifyTimer)
+        notifyTimer = undefined
+        for (const fn of [...listeners]) {
+            try {
+                fn()
+            } catch {}
+        }
     }
+    // 사용자가 직접 바꾼 것 (설정, 지우기: now) 은 바로
+    if (now) notify()
+    else if (!notifyTimer && listeners.size) notifyTimer = setTimeout(notify, 400)
     if (!storage) return
     if (now) {
         clearTimeout(timer)
