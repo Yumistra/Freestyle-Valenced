@@ -254,6 +254,26 @@ X.styleRow(r120b, { message: { content: 'the slow brown fox' } }, gen)
 check('previous versions can be hidden in chat', !JSON.stringify(r120b.message.content).includes('quick'))
 set({ showHistoryInChat: true })
 
+// 꾸밈(네이티브)이 있으면 가로줄(\uE008)로 수정 기록끼리, 지금 내용, 지워짐 표시를 나눈다
+X.setNative(true)
+const D = '\uE008'
+const r120n = row('120', 'the slow brown fox')
+X.styleRow(r120n, { message: { content: 'the slow brown fox' } }, gen)
+const n120 = r120n.message.content.map(n => n.content)
+const iOld = n120.findIndex(c => typeof c === 'string' && c.includes('the quick brown fox'))
+const iNow = n120.lastIndexOf('the slow brown fox')
+const iDiv = n120.indexOf(D)
+check('edit history and current text are split by a divider line', iOld >= 0 && iDiv > iOld && iNow > iDiv && n120[iDiv - 1] === '\n' && n120[iDiv + 1] === '\n', JSON.stringify(n120))
+const again = { type: 1, message: { id: '120', content: r120n.message.content.slice(), timestampColor: 1, editedColor: 2 } }
+X.styleRow(again, { message: { content: 'the slow brown fox' } }, gen)
+check('styling twice does not double the history (divider lines are stripped too)', JSON.stringify(again.message.content).split('the quick brown fox').length === 2 && again.message.content.filter(n => n.content === D).length === n120.filter(c => c === D).length, JSON.stringify(again.message.content.map(n => n.content)))
+const r112n = row('112', 'chosen server')
+X.styleRow(r112n, { message: { content: 'chosen server' } }, gen)
+const n112 = r112n.message.content.map(n => n.content)
+const iDel = n112.findIndex(c => typeof c === 'string' && c.includes('deleted '))
+check('deleted label sits under a divider line', iDel > 0 && n112[iDel - 2] === D && n112[iDel - 1] === '\n', JSON.stringify(n112))
+X.setNative(false)
+
 // ── 채널, 스레드 삭제 ───────────────────────────────────────────────────
 put(rec('140', 'th', '2', 'last words'))
 fire('THREAD_DELETE', { channel: channelsById.th })

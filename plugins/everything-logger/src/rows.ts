@@ -99,8 +99,13 @@ export function stripHistory(nodes: any[]): any[] {
         const c = nodes[i]?.content
         if (nodes[i]?.type === 'text' && c === '\n') {
             cut = i
+            // 기록 뒤의 가로줄 줄도 기록의 일부
+            if (nodes[i + 1]?.content === DIVIDER && nodes[i + 2]?.content === '\n') {
+                cut = i + 2
+                i += 2
+            }
             // 다음 줄도 기록이면 계속, 아니면 여기까지
-            if (nodes[i + 1]?.content !== FADE_START) break
+            if (nodes[cut + 1]?.content !== FADE_START) break
         }
     }
     return cut >= 0 ? nodes.slice(cut + 1) : nodes
@@ -115,6 +120,8 @@ const LABEL_END = '\uE004'
 const BG_START = '\uE005'
 const BG_SEPARATOR = '\uE006'
 const BG_END = '\uE007'
+/** 이 글자 하나만 있는 줄 → 가로줄 (embed 의 구분선처럼). 수정 기록끼리, 지금 내용, 지워짐 표시를 나눈다 */
+const DIVIDER = '\uE008'
 
 /** 디스코드 "(수정됨)"처럼 작은 글자 (색은 네이티브가 입힌다) */
 const label = (color: number | null | undefined, content: string) => text(`${LABEL_START}${typeof color === 'number' ? color : ''}${LABEL_SEPARATOR}${content}${LABEL_END}`)
@@ -147,7 +154,7 @@ function history(edits: Array<{ t: string; at: number }>, edited: string, row: a
         }
         out.push(text(FADE_START), ...(contentOf(t, args, generate) ?? [text(t)]), text(FADE_END), text(' '), label(row.message.editedColor, edited))
         if (withTime) out.push(text(' '), label(row.message.timestampColor, timeOf(at, args, full)))
-        out.push(text('\n'))
+        out.push(text('\n'), text(DIVIDER), text('\n'))
     }
     return out
 }
@@ -228,7 +235,9 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
     }
     if (tail.length || reactions.length) {
         const body = Array.isArray(row.message.content) ? row.message.content : []
-        row.message.content = [...body, ...(tail.length ? [text(body.length ? ' ' : ''), ...tail] : []), ...reactions]
+        // 지워짐 표시는 가로줄 아래 따로 (꾸밈을 못 쓰면 한 칸 띄우고 이어서)
+        const sep = !body.length ? [] : native ? [text('\n'), text(DIVIDER), text('\n')] : [text(' ')]
+        row.message.content = [...body, ...(tail.length ? [...sep, ...tail] : []), ...reactions]
     }
     if (!e.d) return
     // 지워진 메시지는 줄 전체 빨간 배경 + 글자도 빨간색 (본문·시간)

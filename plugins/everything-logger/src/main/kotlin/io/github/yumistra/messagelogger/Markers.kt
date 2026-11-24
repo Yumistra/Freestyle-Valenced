@@ -20,6 +20,8 @@ private const val LABEL_END = ''
 private const val BG_START = '\uE005'
 private const val BG_SEPARATOR = '\uE006'
 private const val BG_END = '\uE007'
+/** 이 글자 하나 → 가로줄 (embed 구분선처럼) */
+private const val DIVIDER = '\uE008'
 
 /** 디스코드 "(수정됨)" 글자 크기 */
 private const val LABEL_SIZE = 0.75f
@@ -35,6 +37,7 @@ private const val FADE_ALPHA = 0.6f
 internal fun styleMarkers(text: SpannableStringBuilder, view: View? = null) {
     // 표시 글자(\uE000~\uE007)가 하나도 없으면 (거의 모든 메시지) 바로 끝낸다
     if (!hasMarker(text)) return
+    styleDividers(text)
     styleBackground(text, view)
     if (indexOf(text, FADE_START) < 0 && indexOf(text, LABEL_START) < 0) return
     var guard = 0
@@ -99,6 +102,45 @@ private fun styleBackground(text: SpannableStringBuilder, view: View?) {
     }
 }
 
+/** 가로줄 글자에 DividerSpan 을 씌운다 (글자는 그대로 두고 그 자리에 선을 그린다) */
+private fun styleDividers(text: SpannableStringBuilder) {
+    for (i in 0 until text.length) {
+        if (text[i] == DIVIDER && text.getSpans(i, i + 1, DividerSpan::class.java).isEmpty())
+            text.setSpan(DividerSpan(), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+}
+
+/**
+ * embed 의 구분선처럼 얇은 가로줄. 줄 높이는 글자보다 낮게, 색은 그 줄 글자색을 흐리게 (지워진 메시지면 빨갛게)
+ */
+internal class DividerSpan : android.text.style.ReplacementSpan() {
+    override fun getSize(paint: android.graphics.Paint, text: CharSequence?, start: Int, end: Int, fm: android.graphics.Paint.FontMetricsInt?): Int {
+        if (fm != null) {
+            val h = Math.round(paint.textSize * 0.9f)
+            fm.ascent = -h / 2
+            fm.top = fm.ascent
+            fm.descent = h - h / 2
+            fm.bottom = fm.descent
+            fm.leading = 0
+        }
+        return 1
+    }
+
+    override fun draw(canvas: android.graphics.Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: android.graphics.Paint) {
+        val right = canvas.clipBounds.right.toFloat()
+        if (right <= x) return
+        val stroke = Math.max(1f, paint.textSize / 16f)
+        val cy = (top + bottom) / 2f
+        val oldColor = paint.color
+        val oldStyle = paint.style
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = (oldColor and 0x00ffffff) or (((oldColor ushr 24) * 0.25f).toInt() shl 24)
+        canvas.drawRect(x, cy - stroke / 2f, right, cy + stroke / 2f, paint)
+        paint.color = oldColor
+        paint.style = oldStyle
+    }
+}
+
 private fun parse(v: String): Int? = try {
     Integer.parseInt(v)
 } catch (_: NumberFormatException) {
@@ -113,7 +155,7 @@ private fun hasMarker(text: CharSequence): Boolean {
     var i = 0
     while (i < n) {
         val c = text[i++]
-        if (c >= FADE_START && c <= BG_END) return true
+        if (c >= FADE_START && c <= DIVIDER) return true
     }
     return false
 }
