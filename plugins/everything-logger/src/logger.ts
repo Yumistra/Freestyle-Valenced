@@ -1,0 +1,570 @@
+import { Dispatcher } from '@valenced/discord/common/flux'
+import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
+import { compare, forget, importPushes, remember, slim, updateSeen } from './away'
+import { compareNotes } from './tray'
+import { removeFiles, saveAll } from './attachments'
+import { notifyDeleted, pruneEvents, reactionKey } from './events'
+import { allowed } from './filters'
+import { addEdit, bury, cleanEdits, events, keepMs, logs, pruneGone, save, seen, settings, type Entry } from './store'
+
+const EPHEMERAL = 1 << 6
+const S = () => Stores as any
+
+/** 로그가 바뀌어서 네이티브가 다시 그려야 하는 메시지 */
+const changed = new Set<string>()
+/** 우리가 진짜로 지우거나 되돌리려고 보내는 액션 (다시 잡지 않는다) */
+const bypassed = new Set<string>()
+/** 조용한 삭제(SilentDelete)가 원래 메시지 자리에 넣은 대체 메시지들. 이것들이 지워질 땐 로그로 남기지 않는다 */
+const placeholders = new Set<string>()
+
+/**
+ * 조용한 삭제, 조용한 수정 막기.
+ * SilentDelete, SilentEdit 류는 새 메시지를 보내면서 nonce 를 원래 메시지 ID 로 넣는다.
+ * 디스코드는 nonce 가 같은 메시지를 "내가 보내던 메시지가 도착했다"로 보고 그 자리를 새 메시지로 바꿔 버려서,
+ * 원래 메시지가 지워졌다는 알림 없이 화면과 저장소에서 사라진다.
+ * 내가 보내는 중인 메시지는 상태가 SENDING 이다. 이미 보내진(SENT) 진짜 메시지와 nonce 가 같으면 이 수법이니,
+ * nonce 를 떼서 새 메시지로 따로 들어오게 하고 원래 메시지는 남긴다.
+ */
+function unsilence(p: any) {
+    const m = p?.message
+    const nonce = m?.nonce
+    if (!m || !nonce || String(nonce) === String(m.id) || p.optimistic) return p
+    const old = getMessage(m.channel_id, String(nonce))
+    if (!old || (old.state && old.state !== 'SENT')) return p
+    placeholders.add(String(m.id))
+    if (placeholders.size > 500) placeholders.delete(placeholders.values().next().value as string)
+    const { nonce: _, ...rest } = m
+    return { ...p, message: rest }
+}
+
+/** 알림으로만 받은 메시지: 알림 글이 그대로 비교 가능할 때만 (멘션·이모지 표기가 없을 때) */
+function pushedComparable(u: any) {
+    if (!settings().rememberPushes) return
+    const x = seen()[u?.id]
+    if (!x?.p || typeof u.content !== 'string' || u.content.includes('<')) return
+    const t = x.m.content
+    if (!t || t.endsWith('…') || t.endsWith('...')) return
+    return x.m
+}
+
+export const takeChanged = (id: string) => changed.delete(id)
+export const markChanged = (id: string) => changed.add(id)
+
+export { importPushes }
+
+const myId = () => {
+    try {
+        return S().AuthenticationStore?.getId?.()
+    } catch {}
+}
+
+function shouldLog(record: any) {
+    const s = settings()
+    if (s.ignoreBots && record?.author?.bot) return false
+    if (s.ignoreSelf && record?.author?.id && record.author.id === myId()) return false
+    return allowed(record)
+}
+
+/** 지운 메시지의 첨부파일을 기기에 받아 두고, 채팅에 보이는 것도 기기 파일로 바꾼다 */
+function keepFiles(id: string) {
+    const e = logs()[id]
+    if (!settings().saveAttachments || !e?.m?.attachments?.length) return
+    saveAll(id, e.m.attachments)
+        .then(r => {
+            const now = logs()[id]
+            if (!r || !now?.m) return removeFiles(r?.paths)
+            now.m = { ...now.m, attachments: r.list }
+            now.f = [...new Set([...(now.f ?? []), ...r.paths])]
+            save()
+            // 채팅에 떠 있으면 첨부파일만 바꿔서 다시 그린다 (우리가 보낸 수정은 기록하지 않는다)
+            if (!getMessage(now.c, id)) return
+            bypassed.add(id)
+            changed.add(id)
+            try {
+                Dispatcher.dispatch({ type: 'MESSAGE_UPDATE', guildId: now.g, message: { id, channel_id: now.c, attachments: r.list } } as any)
+            } catch {
+            } finally {
+                bypassed.delete(id)
+            }
+        })
+        .catch(() => {})
+}
+
+const getMessage = (channelId: string, id: string) => {
+    try {
+        return S().MessageStore?.getMessage?.(channelId, id)
+    } catch {}
+}
+
+const iso = (t: any) => {
+    if (!t) return undefined
+    if (typeof t === 'string') return t
+    try {
+        return t.toISOString?.() ?? new Date(t.valueOf()).toISOString()
+    } catch {
+        return undefined
+    }
+}
+
+/** MessageRecord → API 형태 메시지 (다시 켰을 때 LOAD_MESSAGES_SUCCESS 에 끼워 넣을 것) */
+function rawOf(r: any, guildId?: string) {
+    const a = r.author ?? {}
+    const ref = r.messageReference
+    return {
+        id: r.id,
+        channel_id: r.channel_id,
+        ...(guildId ? { guild_id: guildId } : {}),
+        type: r.type ?? 0,
+        flags: (r.flags ?? 0) & ~EPHEMERAL,
+        content: r.content ?? '',
+        timestamp: iso(r.timestamp) ?? new Date().toISOString(),
+        edited_timestamp: iso(r.editedTimestamp) ?? null,
+        author: {
+            id: a.id,
+            username: a.username,
+            global_name: a.globalName ?? a.global_name ?? null,
+            avatar: a.avatar ?? null,
+            discriminator: a.discriminator ?? '0',
+            bot: !!a.bot,
+            public_flags: a.publicFlags ?? a.public_flags ?? 0,
+        },
+        attachments: Array.isArray(r.attachments) ? r.attachments : [],
+        embeds: [],
+        mentions: [],
+        mention_roles: [],
+        mention_everyone: false,
+        pinned: false,
+        tts: false,
+        ...(ref ? { message_reference: { message_id: ref.message_id, channel_id: ref.channel_id, guild_id: ref.guild_id } } : {}),
+        ...(Array.isArray(r.stickerItems) && r.stickerItems.length ? { sticker_items: r.stickerItems } : {}),
+    }
+}
+
+function entryOf(record: any, guildId?: string): Entry {
+    const all = logs()
+    let e = all[record.id]
+    if (!e) {
+        e = { c: record.channel_id, at: Date.now() }
+        if (guildId) e.g = guildId
+        all[record.id] = e
+    }
+    return e
+}
+
+/**
+ * 지운 메시지를 남긴다. 화면에 있는 메시지면 'store', 화면엔 없지만 기억해 둔 메시지면 'seen' (예: 다른 채널을 보고 있을 때), 아니면 false
+ */
+function keepDeleted(channelId: string, id: string, guildId?: string): 'store' | 'seen' | false {
+    if (bypassed.has(id)) return false
+    if (placeholders.has(id)) {
+        placeholders.delete(id)
+        return false
+    }
+    const record = getMessage(channelId, id)
+    const sx = record ? undefined : seen()[id]
+    // 알림으로만 알던 메시지는 "알림 기억하기"를 켰을 때만
+    const remembered = sx && (!sx.p || settings().rememberPushes) ? sx.m : undefined
+    if (!record && !remembered) return false
+    // 내가 지운 건 게이트웨이가 확인하면서 한 번 더 온다
+    if (logs()[id]?.d) return logs()[id].h ? false : record ? 'store' : 'seen'
+    const r = record ?? remembered
+    // 안 보내진 메시지·나만 보이는 메시지는 지워진 게 아니라 치워진 것
+    if ((record?.state && record.state !== 'SENT') || (r.flags ?? 0) & EPHEMERAL) return false
+    if (!shouldLog(r)) return false
+    const e = entryOf({ id, channel_id: channelId }, guildId ?? remembered?.guild_id)
+    e.d = Date.now()
+    e.at = e.d
+    e.m = record ? rawOf(record, guildId) : remembered
+    // 알림용으로는 멘션 목록이 필요하다 (rawOf 는 비운다)
+    notifyDeleted({ ...e.m, mentions: record?.mentions ?? remembered?.mentions ?? [] }, e.g)
+    changed.add(id)
+    forget(id)
+    save()
+    // 디스패치가 끝난 뒤에 (받는 건 시간이 걸린다)
+    Promise.resolve().then(() => keepFiles(id))
+    return record ? 'store' : 'seen'
+}
+
+/** 줄만 다시 만들게 하는 가짜 수정 (네이티브는 changed 표시가 있어야 다시 그린다) */
+const rerender = (channelId: string, id: string, guildId?: string) => ({ type: 'MESSAGE_UPDATE', guildId, message: { id, channel_id: channelId } })
+
+export function rerenderLater(channelId: string, id: string, guildId?: string) {
+    changed.add(id)
+    if (!getMessage(channelId, id)) return
+    Promise.resolve().then(() => {
+        try {
+            Dispatcher.dispatch(rerender(channelId, id, guildId) as any)
+        } catch {}
+    })
+}
+
+// ── 스노플레이크 비교 (문자열 길이 → 사전 순) ───────────────────────
+export const cmp = (a: string, b: string) => (a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0)
+
+/** 채널 메시지를 불러올 때 남겨 둔 지운 메시지를 제자리에 다시 넣는다 (다시 켰을 때) */
+function withDeleted(payload: any) {
+    const channelId = payload?.channelId
+    const messages: any[] = payload?.messages
+    if (!channelId || !Array.isArray(messages)) return payload
+    const have = new Set(messages.map(m => m?.id))
+    const ids = messages.map(m => String(m.id)).sort(cmp)
+    const min = ids[0]
+    const max = ids[ids.length - 1]
+    const newest = !payload.isBefore && !payload.isAfter && !payload.jump && payload.hasMoreAfter === false
+    const oldest = !payload.isAfter && !payload.jump && payload.hasMoreBefore === false && messages.length < (payload.limit ?? 50)
+    const extra: any[] = []
+    for (const [id, e] of Object.entries(logs())) {
+        if (!e.d || !e.m || e.h || e.c !== channelId || have.has(id)) continue
+        const inRange = !ids.length || ((cmp(id, min) >= 0 || oldest) && (cmp(id, max) <= 0 || newest))
+        if (inRange) extra.push(e.m)
+    }
+    if (!extra.length) return payload
+    // 새것부터
+    const all = [...messages, ...extra].sort((a, b) => cmp(String(b.id), String(a.id)))
+    return { ...payload, messages: all }
+}
+
+/**
+ * 이미 불러 둔 채팅에 남겨 둔 지운 메시지를 제자리에 넣는다.
+ * 디스코드는 다시 켜질 때 메시지를 LOAD_MESSAGES_SUCCESS 가 아니라 백그라운드 동기화(BACKGROUND_SYNC_CHANNEL_MESSAGES)나
+ * 저장해 둔 것으로 채우기도 하고, 알림 앱은 몇 초 늦게 넘겨준다 → 끼워 넣을 기회를 놓친 것을 여기서 넣는다.
+ * 디스코드 채널 메시지 목록(ChannelMessages)의 mergeDelta 는 새 메시지를 시간 순서대로 정렬해 넣는다.
+ */
+export function showLateDeleted(channelIds: Iterable<string>) {
+    if (!settings().logDeletes) return 0
+    const store = (Stores as any).MessageStore
+    let n = 0
+    for (const c of new Set(channelIds)) {
+        try {
+            const cm = store?.getMessages?.(c)
+            if (!cm || typeof cm.mergeDelta !== 'function') continue
+            const arr: any[] = typeof cm.toArray === 'function' ? cm.toArray() : cm._array ?? []
+            if (!arr.length && cm.ready !== true) continue
+            const ids = arr.map(m => String(m.id)).sort(cmp)
+            const min = ids[0]
+            const max = ids[ids.length - 1]
+            const extra: any[] = []
+            for (const [id, e] of Object.entries(logs())) {
+                if (!e.d || !e.m || e.h || e.c !== c) continue
+                if (typeof cm.has === 'function' ? cm.has(id) : ids.includes(id)) continue
+                const afterOldest = !min || cmp(id, min) >= 0 || cm.hasMoreBefore === false
+                const beforeNewest = !max || cmp(id, max) <= 0 || cm.hasMoreAfter !== true
+                if (afterOldest && beforeNewest) extra.push(e.m)
+            }
+            if (!extra.length) continue
+            const next = cm.mergeDelta(extra, [], [])
+            const CM = cm.constructor
+            if (next && typeof CM?.commit === 'function') CM.commit(next)
+            // 방금 넣은 목록은 다시 볼 필요 없다 (넣지 못한 게 있어도 같은 목록에서 계속 다시 하지 않게)
+            if (c === watched.channel) watched.cm = store?.getMessages?.(c)
+            n += extra.length
+            for (const m of extra) changed.add(String(m.id))
+        } catch {}
+    }
+    if (n) {
+        try {
+            store?.emitChange?.()
+        } catch {}
+    }
+    return n
+}
+
+/**
+ * 보고 있는 채널의 메시지 목록이 바뀔 때마다 (디스코드가 저장해 둔 것으로 채우거나, 서버에서 새로 받거나, 다시 켜졌을 때)
+ * 남겨 둔 지운 메시지가 빠져 있으면 다시 넣는다. 목록 객체가 바뀔 때만, 0.25초에 한 번만 본다.
+ */
+const watched: { channel?: string; cm?: any; timer?: any } = {}
+function checkSelected() {
+    watched.timer = undefined
+    try {
+        const c = S().SelectedChannelStore?.getChannelId?.()
+        if (!c) return
+        const cm = S().MessageStore?.getMessages?.(c)
+        if (!cm || (c === watched.channel && cm === watched.cm)) return
+        watched.channel = String(c)
+        watched.cm = cm
+        showLateDeleted([String(c)])
+    } catch {}
+}
+const checkSoon = () => {
+    if (!watched.timer) watched.timer = setTimeout(checkSelected, 250)
+}
+/** 지금 보고 있는 채널을 바로 다시 본다 (돌아왔을 때, 저장소를 다 읽었을 때) */
+export function refreshVisible() {
+    watched.cm = undefined
+    checkSelected()
+}
+export function watchSelected() {
+    const stores = [S().MessageStore, S().SelectedChannelStore].filter(x => typeof x?.addChangeListener === 'function')
+    for (const x of stores) x.addChangeListener(checkSoon)
+    return () => {
+        for (const x of stores)
+            try {
+                x.removeChangeListener?.(checkSoon)
+            } catch {}
+        clearTimeout(watched.timer)
+        watched.timer = undefined
+    }
+}
+
+/** 백그라운드 동기화로 지워진 메시지 (MESSAGE_DELETE 없이 deleted_message_ids 로 온다) 도 남긴다 */
+function keepSynced(p: any) {
+    const all = p?.changesByChannelId
+    if (!all || typeof all !== 'object' || !settings().logDeletes) return p
+    for (const [c, ch] of Object.entries<any>(all)) {
+        const ids: any[] = Array.isArray(ch?.deleted_message_ids) ? ch.deleted_message_ids : []
+        if (!ids.length) continue
+        const keep = new Set<string>()
+        for (const id of ids) {
+            try {
+                if (keepDeleted(c, String(id), ch.guild_id ?? p.guildId) === 'store') keep.add(String(id))
+            } catch {}
+        }
+        if (keep.size) {
+            ch.deleted_message_ids = ids.filter(id => !keep.has(String(id)))
+            for (const id of keep) rerenderLater(c, id)
+        }
+    }
+    return p
+}
+
+/** 보관 기간이 지난 로그를 지운다. 지금 보이는 지운 메시지는 진짜로 지운다 */
+export function expire() {
+    // 예전 버전이 넣은 잘못된 수정 기록 치우기
+    let fixed = cleanEdits()
+    // 예전 버전이 알림 앱에서 받아 그대로 둔 메시지: 빠진 사용자 정보를 채운다 (디스코드 사용자 검색이 튕기지 않게)
+    for (const e of Object.values(logs())) {
+        const a = e.m?.author
+        const badMentions = Array.isArray(e.m?.mentions) && e.m.mentions.some((x: any) => typeof x !== 'object')
+        if (a && (a.discriminator === undefined || a.public_flags === undefined || badMentions)) {
+            const x = slim(e.m)
+            if (x) {
+                e.m = x
+                fixed = true
+            }
+        }
+    }
+    if (fixed) save()
+    const now = Date.now()
+    const limit = keepMs()
+    const all = logs()
+    let any = false
+    for (const [id, e] of Object.entries(all)) {
+        if (now - (e.at ?? 0) <= limit) continue
+        delete all[id]
+        any = true
+        removeFiles(e.f)
+        reallyRemove(id, e)
+    }
+    if (pruneGone()) any = true
+    if (any) save()
+    pruneEvents()
+}
+
+/** 로그를 없애고 화면도 원래대로 (지운 메시지면 진짜로 지움) */
+function reallyRemove(id: string, e: Entry) {
+    changed.add(id)
+    if (!getMessage(e.c, id)) return
+    bypassed.add(id)
+    try {
+        if (e.d) Dispatcher.dispatch({ type: 'MESSAGE_DELETE', id, channelId: e.c, guildId: e.g } as any)
+        else Dispatcher.dispatch(rerender(e.c, id, e.g) as any)
+    } catch {
+    } finally {
+        bypassed.delete(id)
+    }
+}
+
+/** 채팅에서만 지운다 (로그 보기에는 남는다): 지운 메시지는 채팅에서 빠지고, 수정 기록은 기록 줄이 사라진다 */
+export function hideInChat(id: string) {
+    const e = logs()[id]
+    if (!e || e.h) return
+    e.h = 1
+    reallyRemove(id, e)
+    save(true)
+}
+
+/** 로그 하나만 지운다 (지운 메시지면 채팅에서도 사라지고, 수정 기록이면 기록 줄만 없어진다) */
+export function removeOne(id: string) {
+    const all = logs()
+    const e = all[id]
+    if (!e) return
+    delete all[id]
+    bury(id)
+    removeFiles(e.f)
+    reallyRemove(id, e)
+    save(true)
+}
+
+/** 메시지 로그만 전부 지운다 (반응, 채널, 프로필 기록은 그대로) */
+export function clearMessages() {
+    const all = logs()
+    for (const [id, e] of Object.entries(all)) {
+        delete all[id]
+        bury(id)
+        removeFiles(e.f)
+        reallyRemove(id, e)
+    }
+    save(true)
+}
+
+/** 한 종류의 기록만 전부 지운다. 빠진 반응을 지우면 그 메시지들의 반응 버튼도 다시 그린다 */
+export function clearKind(kind: 'r' | 'c' | 'p') {
+    const all = events()
+    const gone = all.filter(e => e.k === kind)
+    if (!gone.length) return
+    // Discord Watch 가 같은 기록을 다시 보내도 돌아오지 않게
+    for (const e of gone) if (e.k === 'r') bury(reactionKey(e))
+    all.splice(0, all.length, ...all.filter(e => e.k !== kind))
+    save(true)
+    if (kind !== 'r') return
+    const done = new Set<string>()
+    for (const e of gone) {
+        if (e.k !== 'r' || done.has(e.m)) continue
+        done.add(e.m)
+        if (!getMessage(e.c, e.m)) continue
+        rerenderLater(e.c, e.m, e.g)
+    }
+}
+
+/** 모든 로그: 메시지, 빠진 반응, 지워진 채널, 프로필 변경 */
+export function clearAll() {
+    clearMessages()
+    for (const k of ['r', 'c', 'p'] as const) clearKind(k)
+}
+
+/**
+ * "조용히 지우기"(SilentDelete 등) 막기: 새 메시지의 nonce 를 지울 메시지의 ID 로 보내면,
+ * 디스코드는 그 새 메시지를 "내가 보낸 메시지가 확인됐다"로 착각해 원래 메시지를 새 메시지로 갈아 끼운다.
+ * 그러면 원래 메시지가 화면, 저장소에서 사라져서, 나중에 원래 메시지가 지워져도 로거가 내용을 모른다.
+ * 이미 보내진(SENT) 다른 사람 메시지 ID 를 nonce 로 단 메시지가 오면 nonce 를 떼어 따로 넣는다.
+ * (내가 보내는 중인 메시지는 상태가 SENDING 이라 건드리지 않는다)
+ */
+function keepReplaced(p: any) {
+    const m = p?.message
+    const n = m?.nonce
+    if (!settings().logDeletes || !m?.id || typeof n !== 'string' || n === m.id || p.optimistic) return p
+    const old = getMessage(m.channel_id, n)
+    if (!old || old.id !== n || (old.state && old.state !== 'SENT')) return p
+    if (!shouldLog(old)) return p
+    // 원래 메시지는 그대로 두고 새 메시지는 따로 들어간다. 나중에 원래 메시지가 지워지면 평소처럼 기록된다
+    return { ...p, message: { ...m, nonce: undefined } }
+}
+
+/** 수정된 메시지의 지금 모습 (API 모양). 디스코드 메시지 객체든 기억해 둔 API 메시지든 받는다 */
+export function snapshot(record: any, u: any, guildId?: string) {
+    const a = record?.author ?? {}
+    const ts = u?.timestamp ?? (typeof record?.timestamp === 'string' ? record.timestamp : record?.timestamp?.toISOString?.())
+    return slim({
+        ...record,
+        id: String(u?.id ?? record?.id),
+        channel_id: String(u?.channel_id ?? record?.channel_id ?? record?.channelId),
+        ...(guildId ? { guild_id: String(guildId) } : {}),
+        content: typeof u?.content === 'string' ? u.content : record?.content,
+        timestamp: ts,
+        edited_timestamp: u?.edited_timestamp ?? null,
+        attachments: Array.isArray(u?.attachments) ? u.attachments : record?.attachments,
+        author: { id: a.id, username: a.username, global_name: a.globalName ?? a.global_name ?? null, avatar: a.avatar ?? null, discriminator: a.discriminator ?? '0', bot: !!a.bot, public_flags: a.publicFlags ?? a.public_flags ?? 0 },
+    })
+}
+
+export function intercept() {
+    return [
+        onFluxEventDispatched('MESSAGE_DELETE', (p: any) => {
+            const kept = settings().logDeletes ? keepDeleted(p.channelId, p.id, p.guildId) : false
+            // 화면에 있으면 지우지 않고 다시 그리게, 화면에 없으면 그대로 (채널을 열 때 제자리에 넣는다)
+            return kept === 'store' ? (rerender(p.channelId, p.id, p.guildId) as any) : p
+        }),
+        onFluxEventDispatched('MESSAGE_DELETE_BULK', (p: any) => {
+            if (!settings().logDeletes || !Array.isArray(p.ids)) return p
+            const kept = new Set<string>(p.ids.filter((id: string) => keepDeleted(p.channelId, id, p.guildId) === 'store'))
+            if (!kept.size) return p
+            // 디스패치 도중엔 또 디스패치할 수 없다
+            for (const id of kept) rerenderLater(p.channelId, id, p.guildId)
+            const rest = p.ids.filter((id: string) => !kept.has(id))
+            return rest.length ? { ...p, ids: rest } : undefined
+        }),
+        onFluxEventDispatched('MESSAGE_UPDATE', (p: any) => {
+            const u = p?.message
+            if (u?.id && !bypassed.has(u.id)) Promise.resolve().then(() => updateSeen(u))
+            if (!u?.id || bypassed.has(u.id) || !settings().logEdits) return p
+            // 화면에 없는 채널의 메시지는 기억해 둔 것과 비교한다
+            const record = getMessage(u.channel_id, u.id) ?? (seen()[u.id] && !seen()[u.id].p ? seen()[u.id].m : undefined) ?? pushedComparable(u)
+            if (!record || !shouldLog(record)) return p
+            const before = typeof record.content === 'string' ? record.content : ''
+            const textChanged = typeof u.content === 'string' && u.content !== before
+            // 첨부파일을 뺀 수정 (그림만 보낸 뒤 글로 바꿔 놓고 지우는 식으로 기록을 피한다): 뺀 파일은 남겨 둔다
+            const prevFiles: any[] = Array.isArray(record.attachments) ? record.attachments : []
+            const removed = Array.isArray(u.attachments) ? prevFiles.filter(a => a?.id && !u.attachments.some((b: any) => b?.id === a.id)) : []
+            if (!textChanged && !removed.length) return p
+            const existed = !!logs()[u.id]
+            const e = entryOf(record, p.guildId ?? u.guild_id)
+            const files = removed.map(a => a.filename ?? 'file').join(', ')
+            const label = before || (files ? `[${files}]` : '[no text]')
+            // 지운 메시지, 지금과 같은 글, 겹친 기록은 넣지 않는다 (addEdit)
+            if (!addEdit(e, removed.length && before ? `${before} [${files}]` : label, Date.now(), removed.length ? undefined : typeof u.content === 'string' ? u.content : undefined)) {
+                if (!existed) delete logs()[u.id]
+                return p
+            }
+            e.at = Date.now()
+            // 수정된 뒤의 내용과 보낸 사람도 남긴다: 그 채널을 다시 안 열면 디스코드에 그 메시지가 없어서
+            // 로그 보기에서 지금 내용이 비어 보였다
+            if (!e.d) {
+                const x = snapshot(record, u, p.guildId ?? u.guild_id)
+                if (x) e.m = x
+            }
+            changed.add(u.id)
+            save()
+            if (removed.length) {
+                const plain = (a: any) => (typeof a?.toJS === 'function' ? a.toJS() : { ...a })
+                return { ...p, message: { ...u, attachments: [...u.attachments, ...removed.map(plain)] } }
+            }
+            return p
+        }),
+        onFluxEventDispatched('MESSAGE_CREATE', (p: any) => {
+            try {
+                if (settings().logDeletes || settings().logEdits) p = unsilence(p)
+            } catch {}
+            try {
+                p = keepReplaced(p)
+            } catch {}
+            try {
+                if (!p?.optimistic && p?.message && !p.isPushNotification) remember([{ ...p.message, guild_id: p.message.guild_id ?? p.guildId }], myId())
+            } catch {}
+            return p
+        }),
+        onFluxEventDispatched('BACKGROUND_SYNC_CHANNEL_MESSAGES' as any, (p: any) => {
+            try {
+                keepSynced(p)
+                const ids = Object.keys(p?.changesByChannelId ?? {})
+                if (ids.length) setTimeout(() => showLateDeleted(ids), 300)
+            } catch {}
+            return p
+        }),
+        onFluxEventDispatched('CHANNEL_SELECT' as any, (p: any) => {
+            try {
+                if (p?.channelId) setTimeout(() => showLateDeleted([String(p.channelId)]), 300)
+            } catch {}
+            return p
+        }),
+        ...['LOCAL_MESSAGES_LOADED', 'LOAD_MESSAGES_SUCCESS_CACHED'].map(type =>
+            onFluxEventDispatched(type as any, (p: any) => {
+                try {
+                    return settings().logDeletes ? withDeleted(p) : p
+                } catch {
+                    return p
+                }
+            }),
+        ),
+        onFluxEventDispatched('LOAD_MESSAGES_SUCCESS', (p: any) => {
+            try {
+                // 자리 비운 사이 바뀐 것부터 찾고, 지워진 걸 제자리에 넣는다
+                compare(p, myId())
+                compareNotes(p)
+                return settings().logDeletes ? withDeleted(p) : p
+            } catch {
+                return p
+            }
+        }),
+    ]
+}

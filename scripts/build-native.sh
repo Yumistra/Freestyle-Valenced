@@ -29,13 +29,34 @@ fetch() { # <repo> <ref> <dir>
     git -C "$3" checkout -q FETCH_HEAD
 }
 
+# Gradle 배포판 내려받기가 가끔 실패한다 (github.com 504, services.gradle.org 시간 초과).
+# 한쪽이 안 되면 다른 쪽 주소로 바꿔 받는다. 받은 배포판은 ~/.gradle 에 남아 다음 번에 다시 쓴다
+warm_gradle() { # <dir>
+    local props="$1/gradle/wrapper/gradle-wrapper.properties"
+    [ -f "$props" ] || return 0
+    local v
+    v=$(sed -n 's/.*gradle-\([0-9.]*\)-\(bin\|all\)\.zip.*/\1-\2/p' "$props")
+    local urls=("https\\://services.gradle.org/distributions/gradle-$v.zip" "https\\://github.com/gradle/gradle-distributions/releases/download/v${v%-*}/gradle-$v.zip")
+    for i in 1 2 3; do
+        for u in "${urls[@]}"; do
+            sed -i "s#^distributionUrl=.*#distributionUrl=$u#" "$props"
+            (cd "$1" && timeout 300 ./gradlew --no-daemon -q --version >/dev/null 2>&1) && return 0
+            echo "gradle download failed from $u, trying another"
+        done
+        sleep 10
+    done
+    return 1
+}
+
 # 1. Valenced API → ~/.m2 (core 와 android api 는 같은 버전으로 같이 올려야 한다)
 fetch Valenced/valenced "$VALENCED_REF" "$WORK/valenced"
+warm_gradle "$WORK/valenced"
 (cd "$WORK/valenced" && ./gradlew --no-daemon -q :core:publishToMavenLocal :android:api:publishToMavenLocal)
 
 # 2. 템플릿에 플러그인 넣기 (예제는 빼고, GitHub Packages 대신 로컬 Maven 사용)
 fetch "$TEMPLATE_REPO" "$TEMPLATE_REF" "$WORK/tpl"
 rm -rf "$WORK/tpl/plugins"/* "$WORK/tpl/themes"/*
+warm_gradle "$WORK/tpl"
 python3 - "$WORK/tpl/settings.gradle.kts" <<'EOF'
 import re, sys
 p = sys.argv[1]

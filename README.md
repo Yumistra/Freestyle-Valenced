@@ -7,7 +7,7 @@ Plugins for Valenced.
 | Better Animations | `yumistra.better-animations` |
 | Intelligent Compression | `yumistra.intelligent-compression` |
 | Message Actions | `yumistra.message-actions` |
-| Message Logger | `yumistra.message-logger` |
+| Everything Logger | `yumistra.everything-logger` |
 | Overlay Background | `yumistra.overlay-background` |
 | Silent Messages | `yumistra.silent-messages` |
 | Silent Leave | `yumistra.silent-leave` |
@@ -25,6 +25,10 @@ Plugins for Valenced.
 | Show Hidden Channels | `yumistra.show-hidden-channels` |
 | Voice Tools | `yumistra.voice-tools` |
 | Shizuku Permissions | `yumistra.shizuku-permissions` |
+
+## Discord Watch
+
+A small Android app (`apps/discord-watch`) that catches deleted and edited messages while Discord is closed and hands them to Everything Logger. It connects your account outside Discord (a selfbot) and can get your account banned. The APK is built to the `watch-apk` branch.
 
 ## Install
 
