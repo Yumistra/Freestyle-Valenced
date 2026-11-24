@@ -235,9 +235,8 @@ export function styleRow(row: any, args: any, generate: (a: any) => any, full: (
     }
     if (tail.length || reactions.length) {
         const body = Array.isArray(row.message.content) ? row.message.content : []
-        // 지워짐 표시는 가로줄 아래 따로 (꾸밈을 못 쓰면 한 칸 띄우고 이어서)
-        const sep = !body.length ? [] : native ? [text('\n'), text(DIVIDER), text('\n')] : [text(' ')]
-        row.message.content = [...body, ...(tail.length ? [...sep, ...tail] : []), ...reactions]
+        // 지워짐 표시는 내용 바로 옆에 (가로줄 없이)
+        row.message.content = [...body, ...(tail.length ? [text(body.length ? ' ' : ''), ...tail] : []), ...reactions]
     }
     if (!e.d) return
     // 지워진 메시지는 줄 전체 빨간 배경 + 글자도 빨간색 (본문·시간)

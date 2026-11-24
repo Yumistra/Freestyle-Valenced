@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.voice-changer",
+	"name": "Voice Changer",
+	"description": "Change how your mic sounds in voice channels.",
+	"author": "Yumistra",
+	"icon": "MicrophoneIcon",
+	"version": "0.1.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.voicechanger.VoiceChangerPlugin"
+		}
+	}
+}

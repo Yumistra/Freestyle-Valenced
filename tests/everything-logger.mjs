@@ -271,7 +271,7 @@ const r112n = row('112', 'chosen server')
 X.styleRow(r112n, { message: { content: 'chosen server' } }, gen)
 const n112 = r112n.message.content.map(n => n.content)
 const iDel = n112.findIndex(c => typeof c === 'string' && c.includes('deleted '))
-check('deleted label sits under a divider line', iDel > 0 && n112[iDel - 2] === D && n112[iDel - 1] === '\n', JSON.stringify(n112))
+check('deleted label stays next to the text (no divider)', iDel > 0 && !n112.includes(D) && n112[iDel - 1] === ' ', JSON.stringify(n112))
 X.setNative(false)
 
 // ── 채널, 스레드 삭제 ───────────────────────────────────────────────────
