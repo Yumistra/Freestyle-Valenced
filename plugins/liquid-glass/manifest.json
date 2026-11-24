@@ -1,0 +1,20 @@
+{
+	"format": 1,
+	"id": "yumistra.liquid-glass",
+	"name": "Liquid Glass",
+	"description": "Liquid glass look for Discord, based on OpenGlass UI.",
+	"author": "Yumistra",
+	"icon": "SparklesIcon",
+	"version": "0.1.0",
+	"dependencies": {
+		"valenced.api": {},
+		"discord": {}
+	},
+	"dist": {
+		"script": "index.js",
+		"android": {
+			"path": "plugin.jar",
+			"class": "io.github.yumistra.liquidglass.LiquidGlassPlugin"
+		}
+	}
+}
