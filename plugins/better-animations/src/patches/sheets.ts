@@ -1,7 +1,7 @@
 import { BottomSheet } from '@valenced/externals/gorhom'
 import { beforeJSX } from '@valenced/react/jsx-runtime'
 import { springFor } from '../effects'
-import { active, report, status, version } from '../settings'
+import { active, report, settings, status, version } from '../settings'
 import { ensureReanimated, reaEasing } from './worklets'
 
 /**
@@ -12,6 +12,8 @@ import { ensureReanimated, reaEasing } from './worklets'
  */
 
 let cache: { key: string; config: any } | undefined
+/** 시간 0 (gorhom 은 duration 이 있으면 withTiming 으로 움직인다) */
+const NONE = { duration: 0 }
 
 function config() {
     const m = active('sheet')
@@ -39,6 +41,11 @@ export function patchSheets() {
     const unpatches = [...targets].map(type =>
         beforeJSX(type, (args: any[]) => {
             try {
+                // 애니메이션 없음: 열고 닫을 때 바로 (미끄러지지 않게). 처음 열 때도 움직이지 않고 그 자리에
+                if (settings().noAnimations && args[1]) {
+                    status.sheets++
+                    return [args[0], { ...args[1], animationConfigs: NONE, animateOnMount: false }, ...args.slice(2)] as any
+                }
                 const cfg = config()
                 if (!cfg || !args[1]) return args as any
                 status.sheets++

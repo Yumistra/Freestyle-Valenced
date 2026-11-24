@@ -2,7 +2,7 @@ import { ReactNavigationStack } from '@valenced/externals/react-navigation'
 import { beforeJSX } from '@valenced/react/jsx-runtime'
 import { effectOf, exitEffectOf } from '../effects'
 import { makeCardInterpolator, noAnimation, transitionSpecFor } from '../interpolate'
-import { active, report, status, version } from '../settings'
+import { active, report, settings, status, version } from '../settings'
 
 /**
  * 디스코드 설정·서버 설정 같은 안쪽 화면은 JS 스택(@react-navigation/stack)으로 넘어간다.
@@ -12,7 +12,12 @@ import { active, report, status, version } from '../settings'
 
 let cache: { key: string; options: any } | undefined
 
+const NONE_SPEC = { animation: 'timing', config: { duration: 0 } }
+/** 애니메이션 없음: 화면 전환 시간 0 (투명 모달도) */
+const NONE = { cardStyleInterpolator: noAnimation, transitionSpec: { open: NONE_SPEC, close: NONE_SPEC }, animationEnabled: false }
+
 function overrides() {
+    if (settings().noAnimations) return NONE
     const m = active('stack')
     if (!m) return
     const key = `${version}:${m.effect}:${m.duration}:${m.easing}:${m.exit}:${m.direction}:${m.position}`
@@ -56,7 +61,7 @@ export function patchJsStack() {
             const descriptors: Record<string, any> = {}
             for (const k in props.descriptors) {
                 const d = props.descriptors[k]
-                descriptors[k] = shouldSkip(d?.options) ? d : { ...d, options: { ...d.options, ...extra } }
+                descriptors[k] = extra !== NONE && shouldSkip(d?.options) ? d : { ...d, options: { ...d.options, ...extra } }
             }
             status.stack++
             return [args[0], { ...props, descriptors }, ...args.slice(2)] as any

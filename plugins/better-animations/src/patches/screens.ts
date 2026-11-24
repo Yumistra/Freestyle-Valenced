@@ -6,7 +6,7 @@ import { Animated, BackHandler, DeviceEventEmitter, Dimensions, Easing } from 'r
 import { easingFrom, effectOf, exitEffectOf, springFor } from '../effects'
 import { makeCardInterpolator } from '../interpolate'
 import { nativeScreens } from '../native'
-import { active, report, status } from '../settings'
+import { active, report, settings, status } from '../settings'
 
 /**
  * 디스코드 설정·프로필·검색 같은 화면은 안드로이드 네이티브 스택(react-native-screens)이다.
@@ -266,6 +266,8 @@ export function patchNativeScreens(cleanup: (...fns: Array<() => unknown>) => vo
         beforeJSX('RNSScreen' as any, (args: any[]) => {
             try {
                 const props = args[1]
+                // 애니메이션 없음: 모든 화면 전환을 뚝 끊기게 (안쪽 스택도)
+                if (props && settings().noAnimations) return props.stackAnimation === 'none' ? (args as any) : ([args[0], { ...props, stackAnimation: 'none' }, ...args.slice(2)] as any)
                 if (!props || props.stackAnimation === 'none' || nested()) return args as any
                 const next = nativeAnimationFor(props)
                 if (!next || next === props.stackAnimation) return args as any
@@ -298,6 +300,7 @@ export function patchNativeScreens(cleanup: (...fns: Array<() => unknown>) => vo
                 beforeJSX(Item, (args: any[]) => {
                     try {
                         const props = args[1]
+                        if (props && settings().noAnimations) return props.stackAnimation === 'none' ? (args as any) : ([args[0], { ...props, stackAnimation: 'none' }, ...args.slice(2)] as any)
                         if (!props || props.children === undefined || nested()) return args as any
                         const next: any = { ...props, children: createElement(Enter, { presentation: props.stackPresentation, screenId: props.screenId }, props.children) }
                         // 네이티브 전환도 여기서 바꾼다 (RNSScreen 요소까지 안 내려오는 경우가 있어서)
