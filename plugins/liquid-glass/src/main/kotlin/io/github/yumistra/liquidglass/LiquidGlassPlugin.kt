@@ -54,9 +54,8 @@ private val MATERIALS = mapOf(
 @Volatile private var lastError: String? = null
 @Volatile private var frames = 0L
 
-/** 녹화 중에는 유리도, 유리가 깔린 창도 그리지 않는다 */
+/** 녹화 중에는 유리를 그리지 않는다 (유리가 자기 녹화본을 그리지 않게) */
 @Volatile private var capturing = false
-private val skip: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
 private val glassViews: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
 private val controllers = WeakHashMap<View, Controller>()
 private var nativeIdKey = 0
@@ -79,6 +78,49 @@ private fun paneOf(v: View): View {
     }
     // 크기가 같은 조상이 없으면 바로 위 부모 (배경 칸과 내용이 형제로 들어 있는 곳)
     return if (best === v) (v.parent as? View ?: v) else best
+}
+
+/**
+ * root 부터 pane 까지 내려가며 pane 보다 먼저(뒤에) 그려지는 것만 그린다.
+ * 각 단계에서 pane 을 품은 자식 앞의 형제들은 통째로 그리고, 그 자식 안으로 들어간다. pane 과 그 뒤(위)는 그리지 않는다.
+ * (디스코드의 그림 목록(display list)을 건드리지 않고 새로 그리기만 해서, 실제 화면에는 영향이 없다)
+ */
+private fun drawBehind(c: Canvas, root: View, pane: View) {
+    val chain = ArrayList<View>()
+    var v: View? = pane
+    while (v != null) {
+        chain.add(0, v)
+        if (v === root) break
+        v = v.parent as? View
+    }
+    if (chain.firstOrNull() !== root) return
+    root.background?.draw(c)
+    var i = 0
+    while (i < chain.size - 1) {
+        val g = chain[i] as? ViewGroup ?: return
+        val next = chain[i + 1]
+        for (k in 0 until g.childCount) {
+            val ch = g.getChildAt(k)
+            if (ch === next) break
+            if (ch.visibility != View.VISIBLE || ch.alpha <= 0f) continue
+            val sc = c.save()
+            place(c, g, ch)
+            if (ch.alpha < 1f) c.saveLayerAlpha(0f, 0f, ch.width.toFloat(), ch.height.toFloat(), (ch.alpha * 255).toInt())
+            ch.draw(c)
+            c.restoreToCount(sc)
+        }
+        if (next === pane) return
+        place(c, g, next)
+        next.background?.draw(c)
+        i++
+    }
+}
+
+/** 부모 좌표에서 자식 좌표로 */
+private fun place(c: Canvas, parent: ViewGroup, ch: View) {
+    c.translate((ch.left - parent.scrollX).toFloat(), (ch.top - parent.scrollY).toFloat())
+    val m = ch.matrix
+    if (!m.isIdentity) c.concat(m)
 }
 
 /** 창(루트 뷰) 하나에 하나: 그리기 직전에 뒤 화면을 녹화한다 */
@@ -104,15 +146,13 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 w = sw
                 h = sh
             }
-            synchronized(skip) {
-                skip.clear()
-                for (v in live) skip.add(paneOf(v))
-            }
+            // 맨 위(가장 나중에 그려지는) 유리 창 하나 아래까지만 그린다
+            val pane = paneOf(live.last())
             val c = n.beginRecording(sw, sh)
             capturing = true
             try {
                 c.scale(1f / scale, 1f / scale)
-                r.draw(c)
+                drawBehind(c, r, pane)
             } finally {
                 capturing = false
                 n.endRecording()
@@ -241,14 +281,6 @@ val liquidGlassPlugin = plugin {
                     } catch (t: Throwable) {
                         lastError = "attach: $t"
                     }
-                }
-            })
-            // 녹화 중에는 유리가 깔린 창을 건너뛴다 (부모가 자식을 그리는 draw(Canvas, ViewGroup, long))
-            unhooks += XposedHelpers.findAndHookMethod(View::class.java, "draw", Canvas::class.java, ViewGroup::class.java, Long::class.javaPrimitiveType, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!capturing) return
-                    val v = param.thisObject as View
-                    if (synchronized(skip) { v in skip }) param.result = false
                 }
             })
         } catch (t: Throwable) {
