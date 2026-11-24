@@ -49,7 +49,7 @@ private val MATERIALS = mapOf(
     "frosted" to Optics(30f, 1.7f, 0.56f, 0.55f),
 )
 
-@Volatile private var enabled = true
+@Volatile private var glassOn = true
 @Volatile private var optics = MATERIALS.getValue("regular")
 @Volatile private var lastError: String? = null
 @Volatile private var frames = 0L
@@ -93,7 +93,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     override fun onPreDraw(): Boolean {
         val r = root.get() ?: return true
         val n = node ?: return true
-        if (!enabled) return true
+        if (!glassOn) return true
         val live = synchronized(glassViews) { glassViews.filter { it.isAttachedToWindow && it.rootView === r && it.isShown && it.width > 0 } }
         if (live.isEmpty()) return true
         try {
@@ -147,7 +147,7 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
     private val rootLoc = IntArray(2)
 
     override fun draw(canvas: Canvas) {
-        if (capturing || !enabled) return
+        if (capturing || !glassOn) return
         val v = view.get() ?: return
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
@@ -258,7 +258,7 @@ val liquidGlassPlugin = plugin {
         registerNativeMethod("${manifest.id}.config") { args ->
             try {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
-                enabled = o.optBoolean("enabled", true)
+                glassOn = o.optBoolean("enabled", true)
                 optics = MATERIALS[o.optString("material")] ?: MATERIALS.getValue("regular")
                 synchronized(glassViews) { for (v in glassViews) v.post { v.invalidate() } }
                 true
