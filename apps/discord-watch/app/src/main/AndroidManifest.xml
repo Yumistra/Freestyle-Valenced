@@ -52,5 +52,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <receiver android:name="io.github.yumistra.discordwatch.DeliverReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.yumistra.discordwatch.DELIVER" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

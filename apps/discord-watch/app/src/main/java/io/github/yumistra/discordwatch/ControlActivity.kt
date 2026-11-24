@@ -238,3 +238,17 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 }
+
+/**
+ * 디스코드가 화면에 돌아왔을 때 보내는 "쌓인 기록 보내 줘" (화면 없이).
+ * 디스코드는 화면 뒤에 있는 동안 기록을 받지 않는다 (얼어 있는 앱에 보내면 안드로이드가 그 앱을 끈다)
+ */
+class DeliverReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        try {
+            WatchService.deliver(context)
+            Control.report(context)
+        } catch (_: Throwable) {
+        }
+    }
+}

@@ -14,7 +14,7 @@ import { setNative, setPills, styleRow } from './rows'
 import { interceptEvents, recheckChannels } from './events'
 import { SERVERS_ROUTE, ServersScreen } from './servers'
 import { migrateOld, pullCompanion } from './transfer'
-import { autoCollect } from './companion'
+import { autoCollect, sendCompanion } from './companion'
 import { patchReactors } from './reactors'
 import { registerGroups, SettingsPage } from './settingsUI'
 import { bind, flush, notes, unbind } from './store'
@@ -154,10 +154,17 @@ export default plugin({
             })
             .catch(() => {})
         // 앱으로 돌아올 때마다 그동안 온 알림을 가져온다
+        if ((AppState as any)?.currentState === 'active') sendCompanion('listen').then(r => r.includes('no context') && setTimeout(() => sendCompanion('listen').catch(() => {}), 2000)).catch(() => {})
         const sub: any = (AppState as any)?.addEventListener?.('change', (state: string) => {
             // 뒤로 가면 바로 저장한다 (그대로 꺼져도 방금 잡은 게 남게)
             if (state !== 'active') flush()
-            if (state === 'active') pull()
+            // 화면 뒤에서는 Discord Watch 의 방송을 받지 않는다 (얼어 있을 때 받으면 안드로이드가 디스코드를 끈다).
+            // 돌아오면 다시 받고, 그동안 쌓인 기록을 보내 달라고 한다
+            if (state === 'background') sendCompanion('mute').catch(() => {})
+            if (state === 'active') {
+                sendCompanion('listen').catch(() => {})
+                pull()
+            }
         })
         const timer = setInterval(() => {
             try {

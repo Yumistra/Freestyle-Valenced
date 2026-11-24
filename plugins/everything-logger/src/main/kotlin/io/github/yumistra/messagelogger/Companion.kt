@@ -16,6 +16,7 @@ import org.json.JSONObject
 internal object Companion {
     const val ACTIVITY = "io.github.yumistra.discordwatch.ControlActivity"
     const val ACTION_STATUS = "io.github.yumistra.discordwatch.STATUS"
+    const val DELIVER = "io.github.yumistra.discordwatch.DELIVER"
 
     @Volatile
     var status: String = ""
@@ -23,6 +24,22 @@ internal object Companion {
     fun send(args: List<Any?>): Any? {
         val ctx = Tray.context ?: return "error: no context"
         val cmd = args.getOrNull(0)?.toString() ?: "status"
+        // 디스코드가 화면 뒤로 가면 받기를 멈춘다.
+        // 안드로이드는 화면 뒤에서 얼어 있는(frozen) 앱에 방송을 못 보내면 그 앱을 강제로 끈다
+        // ("Can't deliver broadcast"). 앱이 몇 초마다 보내는 기록, 상태 때문에 디스코드가 꺼졌다
+        if (cmd == "mute") {
+            Extras.unregister(ctx)
+            return "ok"
+        }
+        if (cmd == "listen") {
+            Extras.register(ctx)
+            // 그동안 쌓인 기록을 보내 달라고 한다 (1.1.5 부터. 화면을 띄우지 않는 방송)
+            try {
+                ctx.sendBroadcast(Intent(DELIVER).setPackage(Extras.COMPANION_PACKAGE))
+            } catch (_: Throwable) {
+            }
+            return "ok"
+        }
         // 앱 정보 화면 (예전 앱을 지울 때: 디스코드가 직접 지우기 창을 열 권한은 없다)
         if (cmd == "appInfo") {
             return try {

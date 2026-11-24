@@ -148,8 +148,8 @@ private object Status : Function1<List<Any?>, Any?> {
 private object KeepContext : Function1<android.content.Context, Unit> {
     override fun invoke(ctx: android.content.Context) {
         Tray.context = ctx.applicationContext ?: ctx
-        // 알림 앱이 보내는 기록 받기
-        Extras.register(Tray.context ?: ctx)
+        // 알림 앱이 보내는 기록 받기는 디스코드가 화면에 있을 때만 (JS 가 listen / mute 로 켜고 끈다).
+        // 디스코드는 알림 때문에 화면 없이 켜지기도 하는데, 그때 받기를 켜 두면 얼어 있는 동안 방송이 와서 꺼진다
     }
 }
 
