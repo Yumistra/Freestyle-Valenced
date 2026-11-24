@@ -384,7 +384,7 @@ function Reactions() {
                 const img = emojiUrl(e.em)
                 return (
                     <Card key={e.id} label={`reaction ${e.id}`} onPress={() => open(e.c, e.m, e.g)}>
-                        <Head u={u} title={`${e.u ? nameOf(u) : 'Everyone'} removed ${emojiText(e.em)}`} sub={[where(e), when(e.at)].filter(Boolean).join(', ')} />
+                        <Head u={u} title={`${e.u ? nameOf(u) : 'Everyone'} removed ${emojiText(e.em)}`} sub={[where(e), when(e.at), e.back ? `reacted again ${when(e.back)}` : ''].filter(Boolean).join(', ')} />
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                             {img ? <Image source={{ uri: img }} style={{ width: 28, height: 28 }} /> : <Text variant="text-lg/normal">{e.em.name}</Text>}
                             <DeleteButton onDelete={() => del(e.id)} />
