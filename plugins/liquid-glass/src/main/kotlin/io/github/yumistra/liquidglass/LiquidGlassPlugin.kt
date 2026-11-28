@@ -528,6 +528,7 @@ private class GlassDrawable(view: View, private var radii: FloatArray, @Volatile
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
         if (off) return
+        val tint = this.tint
         rect.set(b)
         val t = target
         var rr = radii
