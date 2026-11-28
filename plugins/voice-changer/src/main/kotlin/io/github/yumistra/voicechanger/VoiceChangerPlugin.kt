@@ -161,21 +161,25 @@ private class Chain(val kind: String, sr: Int) {
     }
     private var hold = 0f
     private var holdLeft = 0
+    private var env = 0f
 
     fun run(x0: Float): Float {
         var x = pitch?.run(x0) ?: x0
         for (f in filters) x = f.run(x)
         if (kind == "bad") {
-            // 크게 키우고 찢어지게 (부드러운 클리핑 + 강한 클리핑)
-            x = Math.tanh((x * 14f).toDouble()).toFloat()
-            x = Math.max(-0.7f, Math.min(0.7f, x * 1.3f))
-            // 샘플을 잠깐씩 붙잡아 거친 디지털 소리 (8 kHz 쯤으로 떨어뜨린 느낌)
+            // 말할 때만 찢어지게: 조용할 때 키우면 잡음만 지지직 커진다 (노이즈 게이트)
+            val ax = Math.abs(x)
+            env = if (ax > env) env + (ax - env) * 0.02f else env * 0.9995f
+            val gate = Math.min(1f, Math.max(0f, (env - 0.008f) / 0.02f))
+            // 크게 키우고 찢어지게 (부드러운 클리핑)
+            x = Math.tanh((x * 7f).toDouble()).toFloat() * 0.8f
+            // 샘플을 잠깐씩 붙잡아 거친 디지털 소리 (16 kHz 쯤으로 떨어뜨린 느낌)
             if (holdLeft <= 0) {
-                hold = Math.round(x * 24f) / 24f
-                holdLeft = 5
+                hold = Math.round(x * 48f) / 48f
+                holdLeft = 3
             }
             holdLeft--
-            x = hold * 1.35f
+            x = hold * gate
         }
         return x
     }
@@ -262,7 +266,24 @@ private fun runByteArray16(st: State, a: ByteArray, off: Int, n: Int) {
 
 /** AudioRecord.read 의 모든 모양 뒤 */
 private object AfterRead : XC_MethodHook() {
+    /**
+     * read(buf, size) 는 안에서 read(buf, size, READ_BLOCKING) 을 다시 부른다. 둘 다 걸려 있어서
+     * 그냥 두면 같은 소리를 두 번 처리한다 (음높이 처리가 시간을 두 배로 먹어 지지직 소리만 남는다).
+     * 그래서 가장 바깥 read 가 끝났을 때 한 번만 처리한다
+     */
+    private val depth = ThreadLocal<IntArray>()
+
+    override fun beforeHookedMethod(param: MethodHookParam) {
+        val d = depth.get() ?: IntArray(1).also { depth.set(it) }
+        d[0]++
+    }
+
     override fun afterHookedMethod(param: MethodHookParam) {
+        val d = depth.get()
+        if (d != null) {
+            d[0]--
+            if (d[0] > 0) return
+        }
         try {
             val n = (param.result as? Int) ?: return
             if (n <= 0) return
