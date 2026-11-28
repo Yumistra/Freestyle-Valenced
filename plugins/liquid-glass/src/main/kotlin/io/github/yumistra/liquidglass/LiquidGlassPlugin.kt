@@ -40,15 +40,96 @@ import java.util.WeakHashMap
  * 값은 OpenGlass UI 의 liquid 재질 (packages/renderers/src/css.ts) 그대로다.
  */
 
-private class Optics(val blur: Float, val saturation: Float, val brightness: Float, val alpha: Float)
-
-/** OpenGlass liquid 재질, 어두운 테마 값 */
-private val MATERIALS = mapOf(
-    // 밝기를 1 아래로 두면 어두운 디스코드 화면이 거의 검게 돼서 유리가 비치지 않는다 (OpenGlass 값은 밝은 화면 기준)
-    "clear" to Optics(3f, 1.6f, 1.1f, 0.08f),
-    "regular" to Optics(14f, 1.6f, 1.12f, 0.18f),
-    "frosted" to Optics(30f, 1.5f, 1.12f, 0.3f),
+/**
+ * 재질. 굴절 값(두께, 굴절률, 분산, 테두리 빛, 서리)은 OpenGlass UI 의 재질 프리셋(packages/core/src/materials.ts) 그대로,
+ * 흐림과 색 막은 디스코드 어두운 화면에서 뒤가 잘 비치게 맞춘 값
+ */
+private class Optics(
+    val blur: Float, val saturation: Float, val brightness: Float, val alpha: Float,
+    val thickness: Float, val ior: Float, val dispersion: Float, val edgeStrength: Float, val frost: Float,
 )
+
+private val MATERIALS = mapOf(
+    "clear" to Optics(1.5f, 1.5f, 1.08f, 0.03f, 0.78f, 1.5f, 0.018f, 0.54f, 0.04f),
+    "regular" to Optics(6f, 1.5f, 1.08f, 0.08f, 0.62f, 1.46f, 0.012f, 0.46f, 0.24f),
+    "frosted" to Optics(16f, 1.4f, 1.08f, 0.16f, 0.44f, 1.4f, 0.006f, 0.36f, 0.66f),
+)
+
+/**
+ * OpenGlass 의 WebGL 굴절 셰이더(packages/renderers/src/webgl.ts)를 안드로이드 AGSL 로 옮긴 것.
+ * 둥근 사각형의 거리장(SDF)으로 가장자리일수록 뒤 화면을 바깥쪽에서 끌어와 물방울처럼 휘게 하고,
+ * 빨강, 초록, 파랑을 조금씩 다르게 휘어 가장자리에 무지개 번짐(분산), 가장자리 빛띠와 프레넬 반사를 더한다.
+ * 여기에 왼쪽 위에서 비치는 반사광과 누른 자리의 빛을 더했다
+ */
+private const val GLASS_SHADER = """
+uniform shader bg;
+uniform float2 size;
+uniform float radius;
+uniform float2 origin;
+uniform float inv;
+uniform float dens;
+uniform float4 optics;
+uniform float2 surface;
+uniform float4 tint;
+uniform float3 touch;
+
+float sdRR(float2 p, float2 h, float r) {
+    float2 q = abs(p) - h + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 samp(float2 screen, float frost) {
+    float2 uv = screen * inv;
+    half4 c = bg.eval(uv);
+    if (frost < 0.01) return c;
+    float t = mix(0.0, 2.4, frost);
+    half4 taps = bg.eval(uv + float2(t, 0.0)) + bg.eval(uv - float2(t, 0.0)) + bg.eval(uv + float2(0.0, t)) + bg.eval(uv - float2(0.0, t));
+    return mix(c, (c * 2.0 + taps) / 6.0, half(frost));
+}
+
+half4 main(float2 xy) {
+    float2 h = max(size * 0.5, float2(1.0));
+    float2 p = xy - h;
+    float mh = max(min(h.x, h.y), 1.0);
+    float r = clamp(radius, 0.0, mh);
+    float d = sdRR(p, h, r);
+    if (d > 1.5) return half4(0.0);
+    float mask = 1.0 - smoothstep(-1.0, 1.0, d);
+    float depth = clamp(-d / mh, 0.0, 1.0);
+    float edge = pow(1.0 - depth, 1.35);
+    float s = 0.75;
+    float2 g = float2(sdRR(p + float2(s, 0.0), h, r) - sdRR(p - float2(s, 0.0), h, r),
+                      sdRR(p + float2(0.0, s), h, r) - sdRR(p - float2(0.0, s), h, r));
+    g = g / max(length(g), 0.0001);
+    float power = ((optics.y - 1.0) / optics.y) * optics.x;
+    float2 disp = g * edge * power * mh * 0.48;
+    float spread = optics.z * 7.5;
+    float2 at = origin + xy;
+    float red = samp(at + disp * (1.0 + spread), surface.y).r;
+    float green = samp(at + disp, surface.y).g;
+    float blue = samp(at + disp * (1.0 - spread), surface.y).b;
+    float3 col = float3(red, green, blue);
+    float band = exp(-abs(d) / (2.8 * dens));
+    float fresnel = pow(clamp(edge, 0.0, 1.0), 4.0);
+    float hi = clamp((band * 0.34 + fresnel * 0.16) * surface.x, 0.0, 0.48);
+    // 반사: 왼쪽 위에서 오는 빛이 그쪽 가장자리에 맺히고, 반대쪽에는 약하게 되비친다
+    float2 L = normalize(float2(-0.55, -0.85));
+    float facing = dot(g, L);
+    hi += (pow(max(facing, 0.0), 3.0) * 0.55 + pow(max(-facing, 0.0), 3.0) * 0.18) * band * surface.x * 1.6;
+    col += hi;
+    col = mix(col, float3(dot(col, float3(0.2126, 0.7152, 0.0722))), surface.y * 0.08);
+    // 색 막 (버튼은 버튼 색)
+    col = mix(col, tint.rgb, tint.a);
+    // 누른 자리에 모이는 빛
+    if (touch.z > 0.001) {
+        float rr = max(mh * 1.6, 40.0 * dens);
+        float k = exp(-dot(xy - touch.xy, xy - touch.xy) / (rr * rr));
+        col += k * 0.28 * touch.z;
+        col += band * 0.25 * touch.z;
+    }
+    return half4(half3(col) * half(mask), half(mask));
+}
+"""
 
 @Volatile private var glassOn = true
 @Volatile private var optics = MATERIALS.getValue("regular")
@@ -222,7 +303,12 @@ private fun seeThrough(pane: View, glass: View) {
     walk(pane, 0)
 }
 
-/** 창(루트 뷰) 하나에 하나: 그리기 직전에 뒤 화면을 녹화한다 */
+/**
+ * 창(루트 뷰) 하나에 하나: 그리기 직전에 유리 뒤 화면을 작게(1/4) 찍어 그림(Bitmap)으로 만든다.
+ * 시트가 열려 있으면 시트 아래만, 아니면 화면 전체.
+ * 녹화본(RenderNode)을 유리가 바로 그리면, 녹화본 안에 그 유리가 다시 들어가 RenderThread 가 끝없이 돌다 죽는다.
+ * 그래서 따로 된 렌더러(HardwareRenderer)로 그림 한 장에 그려 두고, 유리는 그 그림만 읽는다 (고리가 생기지 않는다)
+ */
 private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     val root = WeakReference(root)
     val scale = 4f
@@ -231,33 +317,90 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     var h = 0
     var effectKey: Optics? = null
     var lastCapture = 0L
+    private var renderer: android.graphics.HardwareRenderer? = null
+    private var reader: android.media.ImageReader? = null
+    private var held: android.media.Image? = null
+    /** 가장 최근에 찍힌 뒤 화면 (1/4 크기) */
+    @Volatile var shot: android.graphics.Bitmap? = null
+    @Volatile var shotShader: android.graphics.BitmapShader? = null
+    /** 시트를 찍은 그림인지 (시트 아래만 찍었는지) */
+    @Volatile var shotSheet = false
+    /** 새 그림이 와서 유리를 다시 그리게 한 프레임은 다시 찍지 않는다 (끝없이 찍지 않게) */
+    private var selfFrame = false
+
+    private fun setup(sw: Int, sh: Int) {
+        release()
+        val rd = android.media.ImageReader.newInstance(sw, sh, PixelFormat.RGBA_8888, 3,
+            android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
+        rd.setOnImageAvailableListener({ r ->
+            try {
+                val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val hb = img.hardwareBuffer
+                val bmp = if (hb != null) android.graphics.Bitmap.wrapHardwareBuffer(hb, android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)) else null
+                hb?.close()
+                if (bmp == null) {
+                    img.close()
+                    return@setOnImageAvailableListener
+                }
+                held?.close()
+                held = img
+                shot = bmp
+                shotShader = android.graphics.BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                shots++
+                selfFrame = true
+                val rt = this.root.get()
+                synchronized(glassViews) { for (v in glassViews) if (v.rootView === rt) v.foreground?.invalidateSelf() }
+            } catch (t: Throwable) {
+                lastError = "shot: $t"
+            }
+        }, android.os.Handler(android.os.Looper.getMainLooper()))
+        val hr = android.graphics.HardwareRenderer()
+        hr.setSurface(rd.surface)
+        hr.setContentRoot(node)
+        hr.isOpaque = false
+        reader = rd
+        renderer = hr
+    }
+
+    fun release() {
+        try { renderer?.destroy() } catch (_: Throwable) {}
+        try { reader?.close() } catch (_: Throwable) {}
+        try { held?.close() } catch (_: Throwable) {}
+        renderer = null
+        reader = null
+        held = null
+    }
 
     override fun onPreDraw(): Boolean {
         val r = root.get() ?: return true
         val n = node ?: return true
         if (!glassOn) return true
+        if (selfFrame) {
+            selfFrame = false
+            return true
+        }
         val live = synchronized(glassViews) { glassViews.filter { it.isAttachedToWindow && it.rootView === r && it.isShown && it.width > 0 } }
         if (live.isEmpty()) return true
         try {
+            val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
+            for (v in live) if (v !== sheet) seeThrough(paneOf(v), v)
+            val now = System.currentTimeMillis()
+            // 시트가 없으면 화면이 바뀌는 동안에도 초당 20번까지만 (배터리)
+            if (sheet == null && now - lastCapture < 50) return true
+            lastCapture = now
             val sw = Math.max(1, (r.width / scale).toInt())
             val sh = Math.max(1, (r.height / scale).toInt())
-            if (sw != w || sh != h) {
+            if (sw != w || sh != h || renderer == null) {
                 n.setPosition(0, 0, sw, sh)
                 w = sw
                 h = sh
+                setup(sw, sh)
             }
-            // 시트가 열려 있으면 시트 아래를, 아니면 버튼 하나 아래를 녹화한다 (한 창에 한 장만 찍는다)
-            // 녹화는 시트 아래만 한다 (버튼은 녹화본을 쓰지 않는다)
-            val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
-            for (v in live) if (v !== sheet) seeThrough(paneOf(v), v)
-            if (sheet == null) return true
-            val pane = paneOf(sheet)
-            for (v in live) panes[paneOf(v)] = v
             val c = n.beginRecording(sw, sh)
             capturing = true
             try {
                 c.scale(1f / scale, 1f / scale)
-                drawBehind(c, r, pane)
+                if (sheet != null) drawBehind(c, r, paneOf(sheet)) else r.draw(c)
             } finally {
                 capturing = false
                 n.endRecording()
@@ -271,11 +414,10 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 cm.postConcat(ColorMatrix(floatArrayOf(b, 0f, 0f, 0f, 0f, 0f, b, 0f, 0f, 0f, 0f, 0f, b, 0f, 0f, 0f, 0f, 0f, 1f, 0f)))
                 n.setRenderEffect(RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm), RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)))
             }
+            renderer?.createRenderRequest()?.setWaitForPresent(false)?.syncAndDraw()
+            shotSheet = sheet != null
             frames++
-            seeThrough(pane, sheet)
-            // 시트 유리만 매 프레임 다시 그린다. 버튼 유리는 녹화본(RenderNode)을 가리키기만 해서 다시 그릴 필요가 없다
-            // (버튼까지 다시 그리면 화면이 쉬지 않고 계속 그려진다)
-            sheet.foreground?.invalidateSelf()
+            if (sheet != null) seeThrough(paneOf(sheet), sheet)
         } catch (t: Throwable) {
             capturing = false
             lastError = "capture: $t"
@@ -284,7 +426,14 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     }
 }
 
-private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null, private val area: RectF? = null) : Drawable() {
+@Volatile private var shots = 0L
+
+private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null, target: View? = null) : Drawable() {
+    /** 버튼: 색이 칠해져 있던 안쪽 칸. 매번 그 칸의 지금 자리와 크기에 맞춰 그린다 (모양이 바뀌면 따라간다) */
+    private val target = target?.let { WeakReference(it) }
+    private val tloc = IntArray(2)
+    private val shader: android.graphics.RuntimeShader? = if (Build.VERSION.SDK_INT >= 33) try { android.graphics.RuntimeShader(GLASS_SHADER) } catch (t: Throwable) { lastError = "shader: $t"; null } else null
+    private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val view = WeakReference(view)
     private val path = Path()
     private val rect = RectF()
@@ -333,40 +482,77 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
     }
 
     override fun draw(canvas: Canvas) {
-        if (capturing || !glassOn) return
+        // 찍는 중에도 그린다: 유리는 그림(Bitmap)만 읽어서 고리가 생기지 않고,
+        // 여기서 빼면 그때 다시 그려진 칸의 그림 목록에서 유리가 빠진 채로 화면에 쓰인다
+        if (!glassOn) return
         val v = view.get() ?: return
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
         rect.set(b)
-        area?.let { rect.set(it) }
+        val t = target?.get()
+        var rr = radii
+        if (t != null) {
+            if (!t.isAttachedToWindow || t.width <= 0) return
+            t.getLocationInWindow(tloc)
+            v.getLocationInWindow(loc)
+            val l = (tloc[0] - loc[0]).toFloat()
+            val tp = (tloc[1] - loc[1]).toFloat()
+            rect.set(l, tp, l + t.width, tp + t.height)
+            val cap = Math.min(t.width, t.height) / 2f
+            if (radii[0] > cap) rr = FloatArray(8) { cap }
+        }
         val bw = rect.width()
         val bh = rect.height()
+        // 굴절 셰이더 (안드로이드 13+): 찍어 둔 뒤 화면을 물방울처럼 휘고 반사를 얹는다
+        val ctl = controllers[v.rootView]
+        val bgShader = ctl?.shotShader
+        val sh = shader
+        if (sh != null && bgShader != null && canvas.isHardwareAccelerated) {
+            v.getLocationInWindow(loc)
+            v.rootView.getLocationInWindow(rootLoc)
+            val o = optics
+            sh.setInputShader("bg", bgShader)
+            sh.setFloatUniform("size", bw, bh)
+            sh.setFloatUniform("radius", rr[0])
+            sh.setFloatUniform("origin", (loc[0] - rootLoc[0]) + rect.left, (loc[1] - rootLoc[1]) + rect.top)
+            sh.setFloatUniform("inv", 1f / ctl.scale)
+            sh.setFloatUniform("dens", v.resources.displayMetrics.density)
+            sh.setFloatUniform("optics", o.thickness, o.ior, o.dispersion, 0f)
+            sh.setFloatUniform("surface", o.edgeStrength, o.frost)
+            if (tint != null) {
+                val a = (Color.alpha(tint) / 255f) * (0.22f + o.alpha)
+                sh.setFloatUniform("tint", Color.red(tint) / 255f, Color.green(tint) / 255f, Color.blue(tint) / 255f, a.coerceIn(0f, 0.85f))
+            } else {
+                sh.setFloatUniform("tint", 16f / 255f, 18f / 255f, 24f / 255f, o.alpha)
+            }
+            sh.setFloatUniform("touch", tx - rect.left, ty - rect.top, press)
+            shaderPaint.shader = sh
+            canvas.save()
+            canvas.translate(rect.left, rect.top)
+            canvas.drawRect(0f, 0f, bw, bh, shaderPaint)
+            canvas.restore()
+            // 가장 바깥 얇은 테두리
+            rim.strokeWidth = dp(v, 1f)
+            rim.shader = LinearGradient(rect.left, rect.top, rect.left + bw * 0.6f, rect.top + Math.min(bh, dp(v, 220f)),
+                intArrayOf(Color.argb((150 + 80 * press).toInt(), 255, 255, 255), Color.argb((40 + 60 * press).toInt(), 255, 255, 255), Color.argb((20 + 30 * press).toInt(), 255, 255, 255)), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
+            val ins = rim.strokeWidth / 2
+            rect.inset(ins, ins)
+            path.reset()
+            path.addRoundRect(rect, rr, Path.Direction.CW)
+            canvas.drawPath(path, rim)
+            return
+        }
         path.reset()
-        path.addRoundRect(rect, radii, Path.Direction.CW)
+        path.addRoundRect(rect, rr, Path.Direction.CW)
         val o = optics
         canvas.save()
         canvas.clipPath(path)
-        // 1. 흐린 뒤 화면
-        val ctl = controllers[v.rootView]
-        val n = ctl?.node
+        // 셰이더를 못 쓰면 (안드로이드 12 이하, 아직 찍은 그림이 없을 때): 색 막과 빛만
         if (tint != null) {
-            // 버튼은 흐린 뒤 화면(RenderNode)을 그리지 않는다: 버튼은 시트 녹화본 안에도 들어가서,
-            // 녹화본이 자기 자신을 그리는 고리가 생기면 RenderThread 가 무한히 들어가다 죽는다.
-            // 대신 버튼 색을 반투명하게 깔아 뒤가 비치게 하고, 그 위에 서리 낀 흰 막을 아주 옅게
             fill.color = Color.argb((Color.alpha(tint) * (0.18f + o.alpha)).toInt().coerceIn(0, 255), Color.red(tint), Color.green(tint), Color.blue(tint))
             canvas.drawRect(rect, fill)
             fill.color = Color.argb(14, 255, 255, 255)
-        } else if (n != null && canvas.isHardwareAccelerated && ctl.w > 0) {
-            v.getLocationInWindow(loc)
-            v.rootView.getLocationInWindow(rootLoc)
-            canvas.save()
-            canvas.translate(-(loc[0] - rootLoc[0]).toFloat(), -(loc[1] - rootLoc[1]).toFloat())
-            canvas.scale(ctl.scale, ctl.scale)
-            canvas.drawRenderNode(n)
-            canvas.restore()
-            fill.color = Color.argb((o.alpha * 255).toInt(), 16, 18, 24)
         } else {
-            // 흐림을 못 쓰면 진하게 (글자가 읽히게)
             fill.color = Color.argb(235, 16, 18, 24)
         }
         // 2. 색 한 겹
@@ -392,7 +578,7 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
         val inset = rim.strokeWidth / 2
         rect.inset(inset, inset)
         path.reset()
-        path.addRoundRect(rect, radii, Path.Direction.CW)
+        path.addRoundRect(rect, rr, Path.Direction.CW)
         canvas.drawPath(path, rim)
     }
 
@@ -510,16 +696,11 @@ private fun probe(v: View, tries: Int) {
                 return@postDelayed
             }
             val (color, rad) = bestS!!
-            t.getLocationInWindow(gl)
-            v.getLocationInWindow(pl)
-            val left = (gl[0] - pl[0]).toFloat()
-            val top = (gl[1] - pl[1]).toFloat()
-            val area = RectF(left, top, left + t.width, top + t.height)
             val rr = Math.min(rad, Math.min(t.width, t.height) / 2f)
             fade(t.background!!, 0f)
             seen.add(t.background!!)
             t.invalidate()
-            install(v, GlassDrawable(v, FloatArray(8) { rr }, color, area), false)
+            install(v, GlassDrawable(v, FloatArray(8) { rr }, color, t), false)
             buttonsFound++
         } catch (e: Throwable) {
             lastError = "probe: $e"
@@ -595,7 +776,7 @@ val liquidGlassPlugin = plugin {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
                 glassOn = o.optBoolean("enabled", true)
                 optics = MATERIALS[o.optString("material")] ?: MATERIALS.getValue("regular")
-                contentAlpha = when (o.optString("material")) { "clear" -> 0.2f; "frosted" -> 0.45f; else -> 0.3f }
+                contentAlpha = when (o.optString("material")) { "clear" -> 0.12f; "frosted" -> 0.32f; else -> 0.2f }
                 synchronized(glassViews) { for (v in glassViews) v.post { v.invalidate() } }
                 true
             } catch (t: Throwable) {
@@ -610,6 +791,7 @@ val liquidGlassPlugin = plugin {
                 .put("views", synchronized(glassViews) { glassViews.count { it.isAttachedToWindow } })
                 .put("frames", frames)
                 .put("faded", faded)
+                .put("shots", shots)
                 .put("buttons", buttonsFound)
                 .put("probes", probesSeen)
                 .put("probed", probesRun)
@@ -629,6 +811,7 @@ val liquidGlassPlugin = plugin {
         unhooks.clear()
         for ((root, c) in controllers) try {
             root.viewTreeObserver.removeOnPreDrawListener(c)
+            c.release()
         } catch (_: Throwable) {
         }
         controllers.clear()
