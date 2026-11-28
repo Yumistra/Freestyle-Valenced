@@ -122,10 +122,10 @@ half4 main(float2 xy) {
     col = mix(col, tint.rgb, tint.a);
     // 누른 자리에 모이는 빛
     if (touch.z > 0.001) {
-        float rr = max(mh * 1.6, 40.0 * dens);
+        float rr = clamp(mh * 1.4, 24.0 * dens, 90.0 * dens);
         float k = exp(-dot(xy - touch.xy, xy - touch.xy) / (rr * rr));
-        col += k * 0.28 * touch.z;
-        col += band * 0.25 * touch.z;
+        col += k * 0.14 * touch.z;
+        col += band * 0.15 * touch.z;
     }
     return half4(half3(col) * half(mask), half(mask));
 }
@@ -149,6 +149,8 @@ private val gl = IntArray(2)
 private var nativeIdKey = 0
 /** 지금 손가락이 누르고 있는 유리 */
 private var held: WeakReference<View>? = null
+private var downX = 0f
+private var downY = 0f
 
 private fun dp(v: View, x: Float) = x * v.resources.displayMetrics.density
 
@@ -849,12 +851,28 @@ val liquidGlassPlugin = plugin {
                             val g = best ?: return
                             g.getLocationOnScreen(gl)
                             held = WeakReference(g)
-                            (g.foreground as? GlassDrawable)?.touch(true, e.rawX - gl[0], e.rawY - gl[1])
+                            downX = e.rawX
+                            downY = e.rawY
+                            val x0 = e.rawX - gl[0]
+                            val y0 = e.rawY - gl[1]
+                            if (synchronized(glassViews) { g in sheetGlass }) (g.foreground as? GlassDrawable)?.touch(true, x0, y0)
+                            // 버튼은 잠깐 기다렸다가 (끌려고 누른 거면 그새 움직여서 취소된다)
+                            else g.postDelayed({
+                                if (held?.get() === g) (g.foreground as? GlassDrawable)?.let { it.touch(true, it.tx.takeIf { _ -> it.held } ?: x0, it.ty.takeIf { _ -> it.held } ?: y0) }
+                            }, 90L)
                         }
                         android.view.MotionEvent.ACTION_MOVE -> {
                             val g = held?.get() ?: return
                             g.getLocationOnScreen(gl)
-                            (g.foreground as? GlassDrawable)?.follow(e.rawX - gl[0], e.rawY - gl[1])
+                            val d = g.foreground as? GlassDrawable ?: return
+                            // 버튼 위에서 손가락이 움직이면 목록을 끄는 중이다: 빛을 끈다 (끌 때마다 번쩍이지 않게)
+                            val slop = android.view.ViewConfiguration.get(g.context).scaledTouchSlop
+                            if (synchronized(glassViews) { g !in sheetGlass } && Math.hypot((e.rawX - downX).toDouble(), (e.rawY - downY).toDouble()) > slop) {
+                                held = null
+                                d.touch(false, e.rawX - gl[0], e.rawY - gl[1])
+                                return
+                            }
+                            d.follow(e.rawX - gl[0], e.rawY - gl[1])
                         }
                         android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                             val g = held?.get() ?: return
