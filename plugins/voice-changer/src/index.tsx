@@ -70,9 +70,11 @@ function SettingsPage() {
                 <Text variant="text-sm/medium" color="text-muted">
                     {st.reads
                         ? `Mic is being changed: ${st.processed ?? 0} of ${st.reads} reads, ${st.rate ?? '?'} Hz, ${st.channels ?? '?'} ch, format ${st.format ?? '?'}`
-                        : st.hooked
-                          ? 'Ready. Join a voice channel and talk to test it.'
-                          : 'The mic hook is not on.'}
+                        : st.hooked && !st.javaInputForced
+                          ? 'Restart Discord once so the mic goes through the voice changer, then join a voice channel and talk.'
+                          : st.hooked
+                            ? 'Ready. Join a voice channel and talk to test it.'
+                            : 'The mic hook is not on.'}
                 </Text>
                 {st.error ? (
                     <Text variant="text-xs/medium" color="text-danger">

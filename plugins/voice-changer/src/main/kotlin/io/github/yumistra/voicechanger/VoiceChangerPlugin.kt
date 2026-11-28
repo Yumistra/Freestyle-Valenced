@@ -31,6 +31,9 @@ import java.util.WeakHashMap
 @Volatile private var channels = 0
 @Volatile private var format = 0
 @Volatile private var lastError: String? = null
+@Volatile private var javaInputHook = false
+/** 디스코드가 실제로 물어봐서 자바 입력으로 바꿨는지 (음성 엔진이 만들어질 때) */
+@Volatile private var javaInputForced = false
 
 // ── 소리 처리 ──────────────────────────────────────────────────────────
 
@@ -298,6 +301,23 @@ val voiceChangerPlugin = plugin {
         } catch (t: Throwable) {
             lastError = "hook: $t"
         }
+        // 디스코드는 보통 마이크를 OpenSL ES (네이티브) 로 읽어서 위의 AudioRecord.read 를 거치지 않는다.
+        // WebRTC 는 "저지연 입력을 지원하지 않는 폰" 이면 마이크만 자바 AudioRecord 로 읽는다
+        // (kAndroidJavaInputAndOpenSLESOutputAudio). 그래서 지원하지 않는다고 답한다.
+        // 디스코드가 음성 엔진을 만들 때 한 번 묻기 때문에, 플러그인을 켠 뒤 디스코드를 다시 켜야 적용된다
+        try {
+            val mgr = Class.forName("org.webrtc.audio.WebRtcAudioManager", false, classLoader)
+            val u = XposedBridge.hookAllMethods(mgr, "isLowLatencyInputSupported", object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    javaInputForced = true
+                    param.result = false
+                }
+            })
+            unhooks = unhooks + u
+            javaInputHook = u.isNotEmpty()
+        } catch (t: Throwable) {
+            lastError = "java input: $t"
+        }
 
         registerNativeMethod("${manifest.id}.set") { args ->
             val v = (args.getOrNull(0) as? String)?.takeIf { it in setOf("off", "girl", "deep", "baby", "mommy", "bad") } ?: "off"
@@ -310,6 +330,8 @@ val voiceChangerPlugin = plugin {
                 .put("voice", voice)
                 .put("hooked", hooked)
                 .put("hooks", unhooks.size)
+                .put("javaInputHook", javaInputHook)
+                .put("javaInputForced", javaInputForced)
                 .put("reads", reads)
                 .put("processed", processed)
                 .put("rate", rate)
