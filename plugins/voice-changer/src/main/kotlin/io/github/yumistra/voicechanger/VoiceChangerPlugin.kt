@@ -18,6 +18,7 @@ import java.util.WeakHashMap
  * 디스코드(WebRTC JavaAudioDeviceModule)는 마이크를 android.media.AudioRecord.read 로 읽는다.
  * read 가 끝난 직후, 디스코드가 그 소리를 쓰기 전에 버퍼 안의 소리를 그 자리에서 바꾼다.
  *  - girl / baby: 목소리를 높인다 (+ 저음을 깎는다)
+ *  - mommy: 조금 높이고 따뜻하고 부드럽게
  *  - deep: 목소리를 낮춘다 (+ 저음을 키운다)
  *  - bad: 싸구려 마이크처럼 저음, 고음을 깎고 중간만 남겨 크게 키우고 찢어지게 (BAD VOICE)
  */
@@ -138,12 +139,15 @@ private class Chain(val kind: String, sr: Int) {
         "girl" -> PitchShifter(sr, 1.45f)
         "deep" -> PitchShifter(sr, 0.72f)
         "baby" -> PitchShifter(sr, 1.85f)
+        "mommy" -> PitchShifter(sr, 1.22f)
         else -> null
     }
     private val filters: Array<Biquad> = when (kind) {
         "girl" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 160f), Biquad(Biquad.PEAK, sr.toFloat(), 3000f, 1f, 3f))
         "deep" -> arrayOf(Biquad(Biquad.LOW_SHELF, sr.toFloat(), 220f, 0.707f, 6f), Biquad(Biquad.LP, sr.toFloat(), 7000f))
         "baby" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 260f), Biquad(Biquad.LP, sr.toFloat(), 6500f))
+        // 엄마 목소리: 조금만 높이고, 따뜻하게(400 Hz 언저리), 부드럽게(높은 쪽을 살짝 깎는다)
+        "mommy" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 120f), Biquad(Biquad.PEAK, sr.toFloat(), 420f, 0.9f, 3f), Biquad(Biquad.PEAK, sr.toFloat(), 3500f, 1f, -2f), Biquad(Biquad.LP, sr.toFloat(), 7500f))
         // 싸구려 마이크: 400 Hz 아래와 1.8 kHz 위를 가파르게 깎고 1 kHz 언저리를 키운다
         "bad" -> arrayOf(
             Biquad(Biquad.HP, sr.toFloat(), 420f), Biquad(Biquad.HP, sr.toFloat(), 420f),
@@ -296,7 +300,7 @@ val voiceChangerPlugin = plugin {
         }
 
         registerNativeMethod("${manifest.id}.set") { args ->
-            val v = (args.getOrNull(0) as? String)?.takeIf { it in setOf("off", "girl", "deep", "baby", "bad") } ?: "off"
+            val v = (args.getOrNull(0) as? String)?.takeIf { it in setOf("off", "girl", "deep", "baby", "mommy", "bad") } ?: "off"
             voice = v
             synchronized(states) { states.clear() }
             true

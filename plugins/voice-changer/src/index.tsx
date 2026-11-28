@@ -19,6 +19,7 @@ const VOICES: Array<{ id: string; label: string; icon: string }> = [
     { id: 'girl', label: 'Girl voice', icon: 'StarIcon' },
     { id: 'deep', label: 'Deep man voice', icon: 'ShieldIcon' },
     { id: 'baby', label: 'Baby voice', icon: 'HeartIcon' },
+    { id: 'mommy', label: 'Mommy voice', icon: 'HeartIcon' },
     { id: 'bad', label: 'BAD VOICE (loud, cheap mic)', icon: 'WarningIcon' },
 ]
 

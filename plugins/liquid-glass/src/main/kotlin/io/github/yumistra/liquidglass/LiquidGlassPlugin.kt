@@ -58,6 +58,10 @@ private val MATERIALS = mapOf(
 @Volatile private var capturing = false
 private val glassViews: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
 private val controllers = WeakHashMap<View, Controller>()
+/** 유리 창 → 그 창의 유리 칸 (누름 반응) */
+private val panes = WeakHashMap<View, View>()
+private val pl = IntArray(2)
+private val gl = IntArray(2)
 private var nativeIdKey = 0
 
 private fun dp(v: View, x: Float) = x * v.resources.displayMetrics.density
@@ -103,6 +107,9 @@ private fun drawBehind(c: Canvas, root: View, pane: View) {
             val ch = g.getChildAt(k)
             if (ch === next) break
             if (ch.visibility != View.VISIBLE || ch.alpha <= 0f) continue
+            // 창 뒤를 어둡게 덮는 막 (backdrop): 화면을 거의 다 덮는 빈 칸. 이걸 빼야 유리 너머가 밝게 비친다
+            if (ch is ViewGroup && ch.childCount == 0 && ch.width >= root.width * 0.9f && ch.height >= root.height * 0.5f) continue
+            if (ch !is ViewGroup && ch.background != null && ch.width >= root.width * 0.9f && ch.height >= root.height * 0.5f) continue
             val sc = c.save()
             place(c, g, ch)
             if (ch.alpha < 1f) c.saveLayerAlpha(0f, 0f, ch.width.toFloat(), ch.height.toFloat(), (ch.alpha * 255).toInt())
@@ -121,6 +128,33 @@ private fun place(c: Canvas, parent: ViewGroup, ch: View) {
     c.translate((ch.left - parent.scrollX).toFloat(), (ch.top - parent.scrollY).toFloat())
     val m = ch.matrix
     if (!m.isIdentity) c.concat(m)
+}
+
+/**
+ * 유리 창 안의 넓은 배경 (창 바탕, 카드, 줄) 을 반투명하게 해서 유리가 비치게 한다.
+ * 버튼, 아이콘 같은 작은 것은 그대로. 한 번 바꾼 배경은 다시 바꾸지 않는다 (0.5초에 한 번만 훑는다)
+ */
+private val seen: MutableSet<Drawable> = Collections.newSetFromMap(WeakHashMap())
+private val lastScan = WeakHashMap<View, Long>()
+@Volatile private var contentAlpha = 0.45f
+private fun seeThrough(pane: View, glass: View) {
+    val now = System.currentTimeMillis()
+    if (now - (lastScan[pane] ?: 0L) < 500) return
+    lastScan[pane] = now
+    val minW = pane.width * 0.6f
+    fun walk(v: View, depth: Int) {
+        if (depth > 40 || v === glass) return
+        val bg = v.background
+        if (bg != null && v !== pane && v.width >= minW && bg !in seen) {
+            seen.add(bg)
+            try {
+                bg.mutate().alpha = (contentAlpha * 255).toInt()
+            } catch (_: Throwable) {
+            }
+        }
+        if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i), depth + 1)
+    }
+    walk(pane, 0)
 }
 
 /** 창(루트 뷰) 하나에 하나: 그리기 직전에 뒤 화면을 녹화한다 */
@@ -148,6 +182,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
             }
             // 맨 위(가장 나중에 그려지는) 유리 창 하나 아래까지만 그린다
             val pane = paneOf(live.last())
+            for (v in live) panes[paneOf(v)] = v
             val c = n.beginRecording(sw, sh)
             capturing = true
             try {
@@ -167,6 +202,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 n.setRenderEffect(RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm), RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)))
             }
             frames++
+            seeThrough(pane, live.last())
             for (v in live) v.foreground?.invalidateSelf()
         } catch (t: Throwable) {
             capturing = false
@@ -185,6 +221,34 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val loc = IntArray(2)
     private val rootLoc = IntArray(2)
+    private val touchPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 누르고 있는 정도 (0~1) 와 누른 곳. 누르면 그 자리에 빛이 모이고 테두리가 밝아진다 (liquid 의 반응) */
+    var press = 0f
+    var tx = 0f
+    var ty = 0f
+    private var anim: android.animation.ValueAnimator? = null
+
+    fun touch(down: Boolean, x: Float, y: Float) {
+        tx = x
+        ty = y
+        val from = press
+        val to = if (down) 1f else 0f
+        if (down && from >= 1f) {
+            invalidateSelf()
+            return
+        }
+        anim?.cancel()
+        anim = android.animation.ValueAnimator.ofFloat(from, to).apply {
+            duration = if (down) 160L else 420L
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener {
+                press = it.animatedValue as Float
+                invalidateSelf()
+            }
+            start()
+        }
+    }
 
     override fun draw(canvas: Canvas) {
         if (capturing || !glassOn) return
@@ -218,13 +282,19 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
         // 3. 안쪽 빛 (edge lensing): 가장자리 안쪽의 옅은 흰 띠
         val g = dp(v, 16f)
         glow.strokeWidth = g
-        glow.color = Color.argb((0.05f * 255).toInt(), 255, 255, 255)
+        glow.color = Color.argb(((0.05f + 0.06f * press) * 255).toInt(), 255, 255, 255)
         canvas.drawPath(path, glow)
+        // 누른 곳에 모이는 빛
+        if (press > 0.01f) {
+            val rad = dp(v, 140f) * (0.7f + 0.3f * press)
+            touchPaint.shader = android.graphics.RadialGradient(tx, ty, rad, intArrayOf(Color.argb((0.22f * press * 255).toInt(), 255, 255, 255), Color.argb(0, 255, 255, 255)), null, Shader.TileMode.CLAMP)
+            canvas.drawCircle(tx, ty, rad, touchPaint)
+        }
         canvas.restore()
         // 4. 빛 받는 쪽 테두리 (rim): 왼쪽 위에서 비치는 빛, 오른쪽 아래로 사라진다
         rim.strokeWidth = dp(v, 1.2f)
         rim.shader = LinearGradient(rect.left, rect.top, rect.left + rect.width() * 0.6f, rect.top + Math.min(rect.height(), dp(v, 220f)),
-            intArrayOf(Color.argb(217, 255, 255, 255), Color.argb(60, 255, 255, 255), Color.argb(0, 255, 255, 255)), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
+            intArrayOf(Color.argb((217 + 38 * press).toInt(), 255, 255, 255), Color.argb((60 + 80 * press).toInt(), 255, 255, 255), Color.argb((40 * press).toInt(), 255, 255, 255)), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
         val inset = rim.strokeWidth / 2
         rect.inset(inset, inset)
         path.reset()
@@ -283,6 +353,26 @@ val liquidGlassPlugin = plugin {
                     }
                 }
             })
+            // 유리 창을 누르면 반응 (창 전체가 받는 터치를 본다, 가로채지 않는다)
+            unhooks += XposedHelpers.findAndHookMethod(ViewGroup::class.java, "dispatchTouchEvent", android.view.MotionEvent::class.java, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!glassOn || panes.isEmpty()) return
+                    val g = panes[param.thisObject as View] ?: return
+                    val d = g.foreground as? GlassDrawable ?: return
+                    val e = param.args[0] as android.view.MotionEvent
+                    // 창 좌표 → 유리 칸 좌표
+                    val pane = param.thisObject as View
+                    pane.getLocationInWindow(pl)
+                    g.getLocationInWindow(gl)
+                    val x = e.x + pl[0] - gl[0]
+                    val y = e.y + pl[1] - gl[1]
+                    when (e.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> d.touch(true, x, y)
+                        android.view.MotionEvent.ACTION_MOVE -> if (d.press > 0f) { d.tx = x; d.ty = y; d.invalidateSelf() }
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> d.touch(false, x, y)
+                    }
+                }
+            })
         } catch (t: Throwable) {
             lastError = "hook: $t"
         }
@@ -292,6 +382,7 @@ val liquidGlassPlugin = plugin {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
                 glassOn = o.optBoolean("enabled", true)
                 optics = MATERIALS[o.optString("material")] ?: MATERIALS.getValue("regular")
+                contentAlpha = when (o.optString("material")) { "clear" -> 0.3f; "frosted" -> 0.65f; else -> 0.45f }
                 synchronized(glassViews) { for (v in glassViews) v.post { v.invalidate() } }
                 true
             } catch (t: Throwable) {
