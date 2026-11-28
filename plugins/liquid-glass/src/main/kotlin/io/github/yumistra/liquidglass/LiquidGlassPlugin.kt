@@ -330,6 +330,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     private var renderer: android.graphics.HardwareRenderer? = null
     private var reader: android.media.ImageReader? = null
     private var held: android.media.Image? = null
+    private var held2: android.media.Image? = null
     /** 가장 최근에 찍힌 뒤 화면 (1/4 크기) */
     @Volatile var shot: android.graphics.Bitmap? = null
     @Volatile var shotShader: android.graphics.BitmapShader? = null
@@ -340,7 +341,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
 
     private fun setup(sw: Int, sh: Int) {
         release()
-        val rd = android.media.ImageReader.newInstance(sw, sh, PixelFormat.RGBA_8888, 3,
+        val rd = android.media.ImageReader.newInstance(sw, sh, PixelFormat.RGBA_8888, 5,
             android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
         rd.setOnImageAvailableListener({ r ->
             try {
@@ -352,7 +353,10 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                     img.close()
                     return@setOnImageAvailableListener
                 }
-                held?.close()
+                // 바로 전 그림은 아직 화면에 그려지는 중일 수 있어서 하나 더 늦게 돌려준다
+                // (일찍 돌려주면 그 자리에 다음 그림이 그려지는 도중의 것이 유리에 비쳐 번쩍인다)
+                held2?.close()
+                held2 = held
                 held = img
                 shot = bmp
                 shotShader = android.graphics.BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
@@ -376,6 +380,8 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
         try { renderer?.destroy() } catch (_: Throwable) {}
         try { reader?.close() } catch (_: Throwable) {}
         try { held?.close() } catch (_: Throwable) {}
+        try { held2?.close() } catch (_: Throwable) {}
+        held2 = null
         renderer = null
         reader = null
         held = null
@@ -398,6 +404,25 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
             for (pv in ps.take(60)) try { recheck(pv) } catch (_: Throwable) {}
         }
         if (live.isEmpty()) return true
+        // RN 이 버튼 배경을 새로 만들면 (누름, 켜고 끄기 애니메이션) 그 프레임에 바로 다시 투명하게.
+        // 0.6초 뒤에 하면 그사이 원래 색이 보였다 사라지며 번쩍인다
+        for (v in live) {
+            val d = v.foreground as? GlassDrawable ?: continue
+            val t = d.target ?: continue
+            val bg = t.background ?: continue
+            if (bg !== d.fadedBg) {
+                d.fadedBg = bg
+                try {
+                    unfade(bg)
+                    val smp = sampleBg(t)
+                    if (smp != null) {
+                        d.tint = smp.first
+                        d.off = false
+                    } else d.off = true
+                } catch (_: Throwable) {}
+                fade(bg, 0f)
+            }
+        }
         try {
             val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
             for (v in live) if (v !== sheet) seeThrough(paneOf(v), v)
@@ -459,6 +484,8 @@ private class GlassDrawable(view: View, private var radii: FloatArray, @Volatile
     val target: View? get() = targetRef?.get()
     /** 버튼 색이 빠졌을 때 (고른 채널에서 다른 채널로 바뀌었을 때 등) 유리도 끈다 */
     @Volatile var off = false
+    /** 마지막으로 투명하게 만든 버튼 배경 */
+    var fadedBg: Drawable? = null
     /**
      * 유리 한 장을 따로 된 그림 칸(RenderNode)에 그린다. 뒤 화면을 찍을 때 이 칸만 잠깐 투명하게 해서
      * 찍은 그림에 유리가 다시 들어가지 않게 한다 (들어가면 프레임마다 밝기, 채도가 쌓여 색이 터진다)
