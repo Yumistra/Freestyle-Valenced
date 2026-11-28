@@ -58,18 +58,33 @@ function patchSheets(cleanup: (...f: Array<() => void>) => void) {
  * 모든 Pressable 맨 뒤에 빈 칸(nativeID "ogui-glass-probe")만 넣고, 네이티브가 화면에 그려진 배경을 보고
  * 둥글고 색이 칠해진 버튼이면 유리로 바꾼다
  */
-const pressInner: any = (Pressable as any)?.type ?? Pressable
 let jsProbes = 0
 let patchState = 'not patched'
 
+/**
+ * Pressable 의 그리는 함수가 있는 곳: RN 버전에 따라
+ *  - memo(forwardRef(fn)) 이면 forwardRef 의 render
+ *  - memo(fn) (새 RN, ref 를 props 로 받는다) 이면 memo 의 type
+ */
+function pressTarget(): [any, string] | null {
+    const P: any = Pressable
+    if (typeof P?.type?.render === 'function') return [P.type, 'render']
+    if (typeof P?.render === 'function') return [P, 'render']
+    if (typeof P?.type === 'function') return [P, 'type']
+    if (typeof P?.type?.type === 'function') return [P.type, 'type']
+    return null
+}
+
 function patchButtons(cleanup: (...f: Array<() => void>) => void) {
-    if (typeof pressInner?.render !== 'function') {
-        patchState = 'Pressable render not found'
+    const t = pressTarget()
+    if (!t) {
+        const P: any = Pressable
+        patchState = `Pressable not found (${typeof P}, type ${typeof P?.type}, $$typeof ${String(P?.$$typeof)})`
         return
     }
-    patchState = 'patched'
+    patchState = `patched ${t[1]}`
     cleanup(
-        instead(pressInner, 'render', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+        instead(t[0], t[1], function (this: unknown, args: any[], orig: (...a: any[]) => any) {
             const props = args[0]
             const s = settings()
             if (!props || !s.enabled || !s.buttons) return orig.apply(this, args)
