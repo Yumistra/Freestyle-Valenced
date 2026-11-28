@@ -147,8 +147,10 @@ private val lastScan = WeakHashMap<View, Long>()
 @Volatile private var surfaceKinds = ""
 private fun fade(bg: Drawable, a: Float) {
     val want = (a * 255).toInt()
+    // mutate() 는 쓰지 않는다: RN 배경(LayerDrawable)을 mutate 하면 안쪽 그림이 두 주인을 갖게 돼서
+    // 그리는 스레드(RenderThread)가 죽는다. 뷰마다 따로 만든 배경이라 그대로 바꿔도 된다
     try {
-        bg.mutate().alpha = want
+        bg.alpha = want
     } catch (_: Throwable) {
     }
     // RN 배경처럼 alpha 를 무시하는 것은 색 필터로 알파를 곱한다 (결과 = 원래 색 × a)
@@ -245,12 +247,11 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 h = sh
             }
             // 시트가 열려 있으면 시트 아래를, 아니면 버튼 하나 아래를 녹화한다 (한 창에 한 장만 찍는다)
+            // 녹화는 시트 아래만 한다 (버튼은 녹화본을 쓰지 않는다)
             val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
-            val now = System.currentTimeMillis()
-            // 버튼만 있을 때는 화면이 바뀌는 동안에도 초당 30번까지만 찍는다 (배터리)
-            if (sheet == null && now - lastCapture < 33) return true
-            lastCapture = now
-            val pane = paneOf(sheet ?: live.maxByOrNull { it.width * it.height }!!)
+            for (v in live) if (v !== sheet) seeThrough(paneOf(v), v)
+            if (sheet == null) return true
+            val pane = paneOf(sheet)
             for (v in live) panes[paneOf(v)] = v
             val c = n.beginRecording(sw, sh)
             capturing = true
@@ -271,10 +272,10 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 n.setRenderEffect(RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm), RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)))
             }
             frames++
-            for (v in live) seeThrough(paneOf(v), v)
+            seeThrough(pane, sheet)
             // 시트 유리만 매 프레임 다시 그린다. 버튼 유리는 녹화본(RenderNode)을 가리키기만 해서 다시 그릴 필요가 없다
             // (버튼까지 다시 그리면 화면이 쉬지 않고 계속 그려진다)
-            if (sheet != null) sheet.foreground?.invalidateSelf()
+            sheet.foreground?.invalidateSelf()
         } catch (t: Throwable) {
             capturing = false
             lastError = "capture: $t"
@@ -348,7 +349,14 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
         // 1. 흐린 뒤 화면
         val ctl = controllers[v.rootView]
         val n = ctl?.node
-        if (n != null && canvas.isHardwareAccelerated && ctl.w > 0) {
+        if (tint != null) {
+            // 버튼은 흐린 뒤 화면(RenderNode)을 그리지 않는다: 버튼은 시트 녹화본 안에도 들어가서,
+            // 녹화본이 자기 자신을 그리는 고리가 생기면 RenderThread 가 무한히 들어가다 죽는다.
+            // 대신 버튼 색을 반투명하게 깔아 뒤가 비치게 하고, 그 위에 서리 낀 흰 막을 아주 옅게
+            fill.color = Color.argb((Color.alpha(tint) * (0.18f + o.alpha)).toInt().coerceIn(0, 255), Color.red(tint), Color.green(tint), Color.blue(tint))
+            canvas.drawRect(rect, fill)
+            fill.color = Color.argb(14, 255, 255, 255)
+        } else if (n != null && canvas.isHardwareAccelerated && ctl.w > 0) {
             v.getLocationInWindow(loc)
             v.rootView.getLocationInWindow(rootLoc)
             canvas.save()
@@ -356,11 +364,7 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
             canvas.scale(ctl.scale, ctl.scale)
             canvas.drawRenderNode(n)
             canvas.restore()
-            // 버튼은 원래 색(파란 버튼, 빨간 버튼)을 옅게 남겨 무슨 버튼인지 알 수 있게
-            fill.color = if (tint != null) Color.argb((Color.alpha(tint) * (0.25f + o.alpha)).toInt().coerceIn(0, 255), Color.red(tint), Color.green(tint), Color.blue(tint))
-                else Color.argb((o.alpha * 255).toInt(), 16, 18, 24)
-        } else if (tint != null) {
-            fill.color = tint
+            fill.color = Color.argb((o.alpha * 255).toInt(), 16, 18, 24)
         } else {
             // 흐림을 못 쓰면 진하게 (글자가 읽히게)
             fill.color = Color.argb(235, 16, 18, 24)
