@@ -59,9 +59,15 @@ function patchSheets(cleanup: (...f: Array<() => void>) => void) {
  * 둥글고 색이 칠해진 버튼이면 유리로 바꾼다
  */
 const pressInner: any = (Pressable as any)?.type ?? Pressable
+let jsProbes = 0
+let patchState = 'not patched'
 
 function patchButtons(cleanup: (...f: Array<() => void>) => void) {
-    if (typeof pressInner?.render !== 'function') return
+    if (typeof pressInner?.render !== 'function') {
+        patchState = 'Pressable render not found'
+        return
+    }
+    patchState = 'patched'
     cleanup(
         instead(pressInner, 'render', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
             const props = args[0]
@@ -75,6 +81,7 @@ function patchButtons(cleanup: (...f: Array<() => void>) => void) {
                     collapsable: false,
                     style: StyleSheet.absoluteFill,
                 })
+                jsProbes++
                 const kids = props.children
                 const children = typeof kids === 'function' ? (st: any) => [probe, kids(st)] : [probe, kids]
                 return orig.apply(this, [{ ...props, children }, ...args.slice(1)])
@@ -131,7 +138,7 @@ function SettingsPage() {
                         size="sm"
                         variant="secondary"
                         text="Copy test log"
-                        onPress={() => Clipboard.setString(`Liquid Glass\n${JSON.stringify(st, null, 1)}`)}
+                        onPress={() => Clipboard.setString(`Liquid Glass\n${JSON.stringify({ ...st, js: { patchState, jsProbes } }, null, 1)}`)}
                     />
                 ) : null}
                 {st.error ? (

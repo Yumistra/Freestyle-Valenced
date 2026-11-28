@@ -400,6 +400,7 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
 /** nativeID 가 붙은 칸에 유리를 단다 */
 private fun attach(v: View, id: String) {
     if (id.startsWith("ogui-glass-probe")) {
+        probesSeen++
         probe(v, 0)
         return
     }
@@ -436,6 +437,8 @@ private fun install(v: View, d: GlassDrawable, sheet: Boolean) {
 }
 
 @Volatile private var buttonsFound = 0
+@Volatile private var probesSeen = 0
+@Volatile private var probesRun = 0
 
 /** 배경을 작게 그려 가운데 색과 모서리 둥글기를 잰다. 둥글고 색이 있으면 (색, 둥글기 px) */
 private fun sampleBg(t: View): Pair<Int, Float>? {
@@ -458,6 +461,8 @@ private fun sampleBg(t: View): Pair<Int, Float>? {
         val lim = Math.min(w, h) / 2
         while (d < lim && Color.alpha(bmp.getPixel(d, d)) < Color.alpha(mid) / 2) d++
         if (d == 0) return null // 각진 칸 (타일, 목록) 은 버튼이 아니다
+        // 네 모서리가 다 둥글어야 버튼 (목록 묶음의 첫 줄, 끝 줄은 한쪽만 둥글다)
+        if (Color.alpha(bmp.getPixel(w - 1, h - 1)) >= Color.alpha(mid) / 2 || Color.alpha(bmp.getPixel(w - 1, 0)) >= Color.alpha(mid) / 2 || Color.alpha(bmp.getPixel(0, h - 1)) >= Color.alpha(mid) / 2) return null
         return mid to (d * s / (1f - 0.7071f))
     } finally {
         bmp.recycle()
@@ -478,8 +483,9 @@ private fun probe(v: View, tries: Int) {
                 if (tries < 5) probe(v, tries + 1)
                 return@postDelayed
             }
-            val dm = v.resources.displayMetrics
-            if (pane.width >= dm.widthPixels * 0.9f || pane.height > dp(v, 160f)) return@postDelayed
+            probesRun++
+            // 화면 폭만 한 버튼도 있다 (모서리가 네 군데 다 둥근지로 목록 줄과 가른다). 너무 높은 것은 카드
+            if (pane.height > dp(v, 160f)) return@postDelayed
             var best: View? = null
             var bestS: Pair<Int, Float>? = null
             fun walk(x: View, d: Int) {
@@ -601,6 +607,8 @@ val liquidGlassPlugin = plugin {
                 .put("frames", frames)
                 .put("faded", faded)
                 .put("buttons", buttonsFound)
+                .put("probes", probesSeen)
+                .put("probed", probesRun)
                 .put("surfaces", surfaceKinds)
                 .put("tree", tree)
                 .put("hooks", unhooks.size)
