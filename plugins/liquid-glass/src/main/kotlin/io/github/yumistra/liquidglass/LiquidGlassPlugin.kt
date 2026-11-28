@@ -225,6 +225,12 @@ private val lastScan = WeakHashMap<View, Long>()
 @Volatile private var contentAlpha = 0.45f
 /** 비침 처리한 배경 수, 창 바탕으로 본 배경의 종류 (테스트 로그용) */
 @Volatile private var faded = 0
+private val filtered: MutableSet<Drawable> = Collections.newSetFromMap(WeakHashMap())
+/** 투명하게 만든 배경을 원래대로 (버튼 색이 바뀌었는지 다시 볼 때) */
+private fun unfade(bg: Drawable) {
+    try { bg.alpha = 255 } catch (_: Throwable) {}
+    if (filtered.remove(bg)) try { bg.colorFilter = null } catch (_: Throwable) {}
+}
 @Volatile private var surfaceKinds = ""
 private fun fade(bg: Drawable, a: Float) {
     val want = (a * 255).toInt()
@@ -238,6 +244,7 @@ private fun fade(bg: Drawable, a: Float) {
     val took = try { bg.alpha == want } catch (_: Throwable) { false }
     if (!took) try {
         bg.colorFilter = android.graphics.PorterDuffColorFilter(Color.argb(want, 0, 0, 0), android.graphics.PorterDuff.Mode.DST_IN)
+        filtered.add(bg)
     } catch (_: Throwable) {
     }
     faded++
@@ -317,6 +324,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     var h = 0
     var effectKey: Optics? = null
     var lastCapture = 0L
+    var lastRecheck = 0L
     private var renderer: android.graphics.HardwareRenderer? = null
     private var reader: android.media.ImageReader? = null
     private var held: android.media.Image? = null
@@ -380,11 +388,19 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
             return true
         }
         val live = synchronized(glassViews) { glassViews.filter { it.isAttachedToWindow && it.rootView === r && it.isShown && it.width > 0 } }
+        val now0 = System.currentTimeMillis()
+        // 버튼 색이 바뀌었는지 (고른 채널이 바뀌면 그 줄에 색이 옮겨 간다) 0.6초마다 화면에 보이는 버튼만 다시 본다
+        if (now0 - lastRecheck > 600) {
+            lastRecheck = now0
+            val ps = synchronized(probes) { probes.filter { it.isAttachedToWindow && it.rootView === r && it.isShown } }
+            for (pv in ps.take(60)) try { recheck(pv) } catch (_: Throwable) {}
+        }
         if (live.isEmpty()) return true
         try {
             val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
             for (v in live) if (v !== sheet) seeThrough(paneOf(v), v)
             val now = System.currentTimeMillis()
+
             // 시트가 없으면 화면이 바뀌는 동안에도 초당 20번까지만 (배터리)
             if (sheet == null && now - lastCapture < 50) return true
             lastCapture = now
@@ -414,7 +430,14 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 cm.postConcat(ColorMatrix(floatArrayOf(b, 0f, 0f, 0f, 0f, 0f, b, 0f, 0f, 0f, 0f, 0f, b, 0f, 0f, 0f, 0f, 0f, 1f, 0f)))
                 n.setRenderEffect(RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm), RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)))
             }
-            renderer?.createRenderRequest()?.setWaitForPresent(false)?.syncAndDraw()
+            // 찍는 동안만 유리 칸을 투명하게 (syncAndDraw 는 값을 넘겨받을 때까지 기다리니, 끝나면 바로 되돌려도 된다)
+            val layers = live.mapNotNull { (it.foreground as? GlassDrawable)?.layer }
+            for (l in layers) l.setAlpha(0f)
+            try {
+                renderer?.createRenderRequest()?.setWaitForPresent(false)?.syncAndDraw()
+            } finally {
+                for (l in layers) l.setAlpha(1f)
+            }
             shotSheet = sheet != null
             frames++
             if (sheet != null) seeThrough(paneOf(sheet), sheet)
@@ -428,9 +451,25 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
 
 @Volatile private var shots = 0L
 
-private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null, target: View? = null) : Drawable() {
+private class GlassDrawable(view: View, private var radii: FloatArray, @Volatile var tint: Int? = null, target: View? = null) : Drawable() {
     /** 버튼: 색이 칠해져 있던 안쪽 칸. 매번 그 칸의 지금 자리와 크기에 맞춰 그린다 (모양이 바뀌면 따라간다) */
-    private val target = target?.let { WeakReference(it) }
+    private var targetRef = target?.let { WeakReference(it) }
+    val target: View? get() = targetRef?.get()
+    /** 버튼 색이 빠졌을 때 (고른 채널에서 다른 채널로 바뀌었을 때 등) 유리도 끈다 */
+    @Volatile var off = false
+    /**
+     * 유리 한 장을 따로 된 그림 칸(RenderNode)에 그린다. 뒤 화면을 찍을 때 이 칸만 잠깐 투명하게 해서
+     * 찍은 그림에 유리가 다시 들어가지 않게 한다 (들어가면 프레임마다 밝기, 채도가 쌓여 색이 터진다)
+     */
+    val layer: RenderNode? = if (Build.VERSION.SDK_INT >= 29) RenderNode("ogui-glass") else null
+
+    fun retarget(t: View, color: Int, r: Float) {
+        targetRef = WeakReference(t)
+        tint = color
+        radii = FloatArray(8) { r }
+        off = false
+        invalidateSelf()
+    }
     private val tloc = IntArray(2)
     private val shader: android.graphics.RuntimeShader? = if (Build.VERSION.SDK_INT >= 33) try { android.graphics.RuntimeShader(GLASS_SHADER) } catch (t: Throwable) { lastError = "shader: $t"; null } else null
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -488,8 +527,9 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
         val v = view.get() ?: return
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
+        if (off) return
         rect.set(b)
-        val t = target?.get()
+        val t = target
         var rr = radii
         if (t != null) {
             if (!t.isAttachedToWindow || t.width <= 0) return
@@ -527,10 +567,16 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
             }
             sh.setFloatUniform("touch", tx - rect.left, ty - rect.top, press)
             shaderPaint.shader = sh
-            canvas.save()
-            canvas.translate(rect.left, rect.top)
-            canvas.drawRect(0f, 0f, bw, bh, shaderPaint)
-            canvas.restore()
+            val ly = layer
+            val outer = canvas
+            val cv: Canvas = if (ly != null) {
+                ly.setPosition(0, 0, b.width(), b.height())
+                ly.beginRecording(b.width(), b.height())
+            } else canvas
+            cv.save()
+            cv.translate(rect.left, rect.top)
+            cv.drawRect(0f, 0f, bw, bh, shaderPaint)
+            cv.restore()
             // 가장 바깥 얇은 테두리
             rim.strokeWidth = dp(v, 1f)
             rim.shader = LinearGradient(rect.left, rect.top, rect.left + bw * 0.6f, rect.top + Math.min(bh, dp(v, 220f)),
@@ -539,7 +585,11 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
             rect.inset(ins, ins)
             path.reset()
             path.addRoundRect(rect, rr, Path.Direction.CW)
-            canvas.drawPath(path, rim)
+            cv.drawPath(path, rim)
+            if (ly != null) {
+                ly.endRecording()
+                outer.drawRenderNode(ly)
+            }
             return
         }
         path.reset()
@@ -605,6 +655,16 @@ private fun attach(v: View, id: String) {
     install(v, GlassDrawable(v, r, tint), !id.startsWith("ogui-glass-btn"))
 }
 
+private fun ensureController(v: View) {
+    if (!v.isAttachedToWindow) return
+    val root = v.rootView
+    if (controllers[root] == null) {
+        val c = Controller(root)
+        controllers[root] = c
+        root.viewTreeObserver.addOnPreDrawListener(c)
+    }
+}
+
 private fun install(v: View, d: GlassDrawable, sheet: Boolean) {
     v.foreground = d
     v.setWillNotDraw(false)
@@ -612,13 +672,8 @@ private fun install(v: View, d: GlassDrawable, sheet: Boolean) {
         glassViews.add(v)
         if (sheet) sheetGlass.add(v)
     }
-    val hook = { root: View ->
-        if (controllers[root] == null) {
-            val c = Controller(root)
-            controllers[root] = c
-            root.viewTreeObserver.addOnPreDrawListener(c)
-        }
-    }
+    ensureController(v)
+    val hook = { root: View -> ensureController(root) }
     if (v.isAttachedToWindow) hook(v.rootView)
     v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(x: View) = hook(x.rootView)
@@ -664,7 +719,75 @@ private fun sampleBg(t: View): Pair<Int, Float>? {
  * 그 Pressable 이나 안쪽에 크기가 비슷하고 색칠된 둥근 배경이 있으면 그 배경을 투명하게 하고, 그 자리에 유리를 단다.
  * (디스코드 기본 버튼은 색이 Pressable 이 아니라 안쪽 칸에 칠해져 있다)
  */
+/** 버튼 표시(probe) 칸들. 처음엔 색이 없다가 나중에 칠해지는 버튼(고른 채널 줄 등)도 있어서 계속 다시 본다 */
+private val probes: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
+
+/** 이 표시 칸의 버튼에서 색칠된 둥근 배경 찾기: (그 칸, 색, 둥글기) */
+private fun findButtonBg(v: View): Triple<View, Int, Float>? {
+    val pane = v.parent as? ViewGroup ?: return null
+    if (pane.width <= 0 || pane.height <= 0) return null
+    // 화면 폭만 한 버튼도 있다 (모서리가 네 군데 다 둥근지로 목록 줄과 가른다). 너무 높은 것은 카드
+    if (pane.height > dp(v, 160f)) return null
+    var best: View? = null
+    var bestS: Pair<Int, Float>? = null
+    fun walk(x: View, d: Int) {
+        if (d > 4 || x === v) return
+        if (x.background != null && x.width >= pane.width * 0.6f && x.height >= pane.height * 0.6f &&
+            (best == null || x.width * x.height > best!!.width * best!!.height)) {
+            val smp = sampleBg(x)
+            if (smp != null) {
+                best = x
+                bestS = smp
+            }
+        }
+        if (x is ViewGroup) for (i in 0 until x.childCount) walk(x.getChildAt(i), d + 1)
+    }
+    walk(pane, 0)
+    val t = best ?: return null
+    val (c, r) = bestS!!
+    return Triple(t, c, Math.min(r, Math.min(t.width, t.height) / 2f))
+}
+
+/**
+ * 버튼 상태 다시 보기: 유리가 있으면 그 버튼의 지금 색을 다시 재서 (투명해졌으면 유리를 끄고, 색이 바뀌었으면 바꾼다),
+ * 유리가 없으면 그새 색이 칠해졌는지 본다
+ */
+private fun recheck(v: View) {
+    if (!v.isAttachedToWindow || !v.isShown) return
+    val d = v.foreground as? GlassDrawable
+    if (d != null) {
+        val t = d.target ?: return
+        val bg = t.background
+        if (bg != null) unfade(bg)
+        val smp = if (bg != null && t.isAttachedToWindow) sampleBg(t) else null
+        if (smp == null) {
+            if (!d.off) { d.off = true; d.invalidateSelf() }
+            // 지금 배경이 투명한지 아직 다른 칸에 칠해졌는지 모르니, 이 버튼 안을 다시 찾는다
+            val f = findButtonBg(v)
+            if (f != null) {
+                d.retarget(f.first, f.second, f.third)
+                fade(f.first.background!!, 0f)
+                f.first.invalidate()
+            }
+            return
+        }
+        d.tint = smp.first
+        d.off = false
+        fade(bg!!, 0f)
+        t.invalidate()
+        d.invalidateSelf()
+        return
+    }
+    val f = findButtonBg(v) ?: return
+    fade(f.first.background!!, 0f)
+    seen.add(f.first.background!!)
+    f.first.invalidate()
+    install(v, GlassDrawable(v, FloatArray(8) { f.third }, f.second, f.first), false)
+    buttonsFound++
+}
+
 private fun probe(v: View, tries: Int) {
+    probes.add(v)
     v.postDelayed({
         try {
             if (!glassOn || !v.isAttachedToWindow || v.foreground is GlassDrawable) return@postDelayed
@@ -674,34 +797,8 @@ private fun probe(v: View, tries: Int) {
                 return@postDelayed
             }
             probesRun++
-            // 화면 폭만 한 버튼도 있다 (모서리가 네 군데 다 둥근지로 목록 줄과 가른다). 너무 높은 것은 카드
-            if (pane.height > dp(v, 160f)) return@postDelayed
-            var best: View? = null
-            var bestS: Pair<Int, Float>? = null
-            fun walk(x: View, d: Int) {
-                if (d > 4 || x === v) return
-                if (x.background != null && x.width >= pane.width * 0.6f && x.height >= pane.height * 0.6f &&
-                    (best == null || x.width * x.height > best!!.width * best!!.height)) {
-                    val smp = sampleBg(x)
-                    if (smp != null) {
-                        best = x
-                        bestS = smp
-                    }
-                }
-                if (x is ViewGroup) for (i in 0 until x.childCount) walk(x.getChildAt(i), d + 1)
-            }
-            walk(pane, 0)
-            val t = best ?: run {
-                if (tries < 2) probe(v, tries + 1)
-                return@postDelayed
-            }
-            val (color, rad) = bestS!!
-            val rr = Math.min(rad, Math.min(t.width, t.height) / 2f)
-            fade(t.background!!, 0f)
-            seen.add(t.background!!)
-            t.invalidate()
-            install(v, GlassDrawable(v, FloatArray(8) { rr }, color, t), false)
-            buttonsFound++
+            ensureController(v)
+            recheck(v)
         } catch (e: Throwable) {
             lastError = "probe: $e"
         }
