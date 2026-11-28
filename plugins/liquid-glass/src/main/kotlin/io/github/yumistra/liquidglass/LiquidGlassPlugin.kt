@@ -283,7 +283,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     }
 }
 
-private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null) : Drawable() {
+private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null, private val area: RectF? = null) : Drawable() {
     private val view = WeakReference(view)
     private val path = Path()
     private val rect = RectF()
@@ -337,6 +337,9 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
         rect.set(b)
+        area?.let { rect.set(it) }
+        val bw = rect.width()
+        val bh = rect.height()
         path.reset()
         path.addRoundRect(rect, radii, Path.Direction.CW)
         val o = optics
@@ -367,13 +370,13 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
         // 3. 안쪽 빛 (edge lensing): 가장자리 안쪽의 옅은 흰 띠
         // 한 줄짜리 띠는 안쪽에 테두리가 하나 더 있는 것처럼 보여서, 넓이를 달리한 옅은 띠를 겹쳐 안쪽으로 부드럽게 사라지게 한다
         for (k in 1..4) {
-            glow.strokeWidth = Math.min(dp(v, 6f * k), Math.min(b.width(), b.height()) * 0.08f * k)
+            glow.strokeWidth = Math.min(dp(v, 6f * k), Math.min(bw, bh) * 0.08f * k)
             glow.color = Color.argb(((0.012f + 0.02f * press) * 255).toInt().coerceAtLeast(1), 255, 255, 255)
             canvas.drawPath(path, glow)
         }
         // 누른 곳에 모이는 빛
         if (press > 0.01f) {
-            val rad = Math.min(dp(v, 140f), Math.max(b.width(), b.height()) * 0.8f) * (0.7f + 0.3f * press)
+            val rad = Math.min(dp(v, 140f), Math.max(bw, bh) * 0.8f) * (0.7f + 0.3f * press)
             touchPaint.shader = android.graphics.RadialGradient(tx, ty, rad, intArrayOf(Color.argb((0.22f * press * 255).toInt(), 255, 255, 255), Color.argb(0, 255, 255, 255)), null, Shader.TileMode.CLAMP)
             canvas.drawCircle(tx, ty, rad, touchPaint)
         }
@@ -396,6 +399,10 @@ private class GlassDrawable(view: View, private val radii: FloatArray, private v
 
 /** nativeID 가 붙은 칸에 유리를 단다 */
 private fun attach(v: View, id: String) {
+    if (id.startsWith("ogui-glass-probe")) {
+        probe(v, 0)
+        return
+    }
     val tint = id.substringAfter(";c=", "").toLongOrNull()?.toInt()
     val parts = id.substringAfter(':', "").substringBefore(';').split(',').mapNotNull { it.trim().toFloatOrNull() }
     val r = FloatArray(8)
@@ -404,11 +411,15 @@ private fun attach(v: View, id: String) {
         r[i * 2] = x
         r[i * 2 + 1] = x
     }
-    v.foreground = GlassDrawable(v, r, tint)
+    install(v, GlassDrawable(v, r, tint), !id.startsWith("ogui-glass-btn"))
+}
+
+private fun install(v: View, d: GlassDrawable, sheet: Boolean) {
+    v.foreground = d
     v.setWillNotDraw(false)
     synchronized(glassViews) {
         glassViews.add(v)
-        if (!id.startsWith("ogui-glass-btn")) sheetGlass.add(v)
+        if (sheet) sheetGlass.add(v)
     }
     val hook = { root: View ->
         if (controllers[root] == null) {
@@ -422,6 +433,88 @@ private fun attach(v: View, id: String) {
         override fun onViewAttachedToWindow(x: View) = hook(x.rootView)
         override fun onViewDetachedFromWindow(x: View) {}
     })
+}
+
+@Volatile private var buttonsFound = 0
+
+/** 배경을 작게 그려 가운데 색과 모서리 둥글기를 잰다. 둥글고 색이 있으면 (색, 둥글기 px) */
+private fun sampleBg(t: View): Pair<Int, Float>? {
+    val bg = t.background ?: return null
+    val s = 4
+    val w = Math.max(2, t.width / s)
+    val h = Math.max(2, t.height / s)
+    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+    try {
+        val c = Canvas(bmp)
+        c.scale(1f / s, 1f / s)
+        val old = bg.copyBounds()
+        if (old.isEmpty) bg.setBounds(0, 0, t.width, t.height)
+        bg.draw(c)
+        if (old.isEmpty) bg.bounds = old
+        val mid = bmp.getPixel(w / 2, h / 2)
+        if (Color.alpha(mid) < 40) return null
+        // 왼쪽 위 모서리에서 대각선으로 들어가며 색이 반쯤 찰 때까지
+        var d = 0
+        val lim = Math.min(w, h) / 2
+        while (d < lim && Color.alpha(bmp.getPixel(d, d)) < Color.alpha(mid) / 2) d++
+        if (d == 0) return null // 각진 칸 (타일, 목록) 은 버튼이 아니다
+        return mid to (d * s / (1f - 0.7071f))
+    } finally {
+        bmp.recycle()
+    }
+}
+
+/**
+ * 버튼 찾기: JS 가 모든 Pressable 안에 빈 칸(probe)을 넣는다.
+ * 그 Pressable 이나 안쪽에 크기가 비슷하고 색칠된 둥근 배경이 있으면 그 배경을 투명하게 하고, 그 자리에 유리를 단다.
+ * (디스코드 기본 버튼은 색이 Pressable 이 아니라 안쪽 칸에 칠해져 있다)
+ */
+private fun probe(v: View, tries: Int) {
+    v.postDelayed({
+        try {
+            if (!glassOn || !v.isAttachedToWindow || v.foreground is GlassDrawable) return@postDelayed
+            val pane = v.parent as? ViewGroup ?: return@postDelayed
+            if (pane.width <= 0 || pane.height <= 0) {
+                if (tries < 5) probe(v, tries + 1)
+                return@postDelayed
+            }
+            val dm = v.resources.displayMetrics
+            if (pane.width >= dm.widthPixels * 0.9f || pane.height > dp(v, 160f)) return@postDelayed
+            var best: View? = null
+            var bestS: Pair<Int, Float>? = null
+            fun walk(x: View, d: Int) {
+                if (d > 4 || x === v) return
+                if (x.background != null && x.width >= pane.width * 0.6f && x.height >= pane.height * 0.6f &&
+                    (best == null || x.width * x.height > best!!.width * best!!.height)) {
+                    val smp = sampleBg(x)
+                    if (smp != null) {
+                        best = x
+                        bestS = smp
+                    }
+                }
+                if (x is ViewGroup) for (i in 0 until x.childCount) walk(x.getChildAt(i), d + 1)
+            }
+            walk(pane, 0)
+            val t = best ?: run {
+                if (tries < 2) probe(v, tries + 1)
+                return@postDelayed
+            }
+            val (color, rad) = bestS!!
+            t.getLocationInWindow(gl)
+            v.getLocationInWindow(pl)
+            val left = (gl[0] - pl[0]).toFloat()
+            val top = (gl[1] - pl[1]).toFloat()
+            val area = RectF(left, top, left + t.width, top + t.height)
+            val rr = Math.min(rad, Math.min(t.width, t.height) / 2f)
+            fade(t.background!!, 0f)
+            seen.add(t.background!!)
+            t.invalidate()
+            install(v, GlassDrawable(v, FloatArray(8) { rr }, color, area), false)
+            buttonsFound++
+        } catch (e: Throwable) {
+            lastError = "probe: $e"
+        }
+    }, if (tries == 0) 120L else 400L)
 }
 
 val liquidGlassPlugin = plugin {
@@ -507,6 +600,7 @@ val liquidGlassPlugin = plugin {
                 .put("views", synchronized(glassViews) { glassViews.count { it.isAttachedToWindow } })
                 .put("frames", frames)
                 .put("faded", faded)
+                .put("buttons", buttonsFound)
                 .put("surfaces", surfaceKinds)
                 .put("tree", tree)
                 .put("hooks", unhooks.size)

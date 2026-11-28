@@ -5,7 +5,7 @@ import { instead } from '@valenced/patcher'
 import { Design } from '@valenced/discord/design'
 import { callNativeMethod } from '@valenced/modules/native'
 import { createElement, useEffect, useState } from 'react'
-import { Dimensions, Pressable, processColor, ScrollView, StyleSheet, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 /**
  * Liquid Glass (test): OpenGlass UI (moekoelueker/open-glass-ui) 의 "liquid" 재질을 디스코드에 입힌다.
@@ -54,39 +54,11 @@ function patchSheets(cleanup: (...f: Array<() => void>) => void) {
 
 /**
  * 버튼을 유리로: 디스코드의 버튼은 거의 다 RN Pressable 이다 (기본 버튼, 이모지 동그라미, 둥근 아이콘 버튼).
- * 둥근 모서리에 색이 칠해진 Pressable 이면 그 색을 빼고, 맨 뒤에 유리 칸(nativeID "ogui-glass-btn:둥글기")을 깐다.
- * 목록 한 줄처럼 화면 폭만 한 것과 모서리가 각진 것은 그대로
+ * 색이 Pressable 이 아니라 안쪽 칸에 칠해진 버튼이 많아서 여기서는 판단하지 않는다.
+ * 모든 Pressable 맨 뒤에 빈 칸(nativeID "ogui-glass-probe")만 넣고, 네이티브가 화면에 그려진 배경을 보고
+ * 둥글고 색이 칠해진 버튼이면 유리로 바꾼다
  */
 const pressInner: any = (Pressable as any)?.type ?? Pressable
-
-const isClear = (c: any) => c == null || c === 'transparent' || (typeof c === 'string' && /^rgba\(.*,\s*0(\.0+)?\s*\)$/.test(c)) || (typeof c === 'string' && /^#[0-9a-f]{6}00$/i.test(c))
-
-function radiusOf(f: any): number {
-    const r = [f.borderRadius, f.borderTopLeftRadius, f.borderTopRightRadius, f.borderBottomLeftRadius, f.borderBottomRightRadius].filter((x: any) => typeof x === 'number')
-    return r.length ? Math.max(...r) : 0
-}
-
-function glassStyle(base: any) {
-    const f: any = StyleSheet.flatten(base) ?? {}
-    if (isClear(f.backgroundColor)) return null
-    const r = radiusOf(f)
-    if (r < 6) return null
-    const w = typeof f.width === 'number' ? f.width : 0
-    if (w >= Dimensions.get('window').width * 0.9) return null
-    if (f.position === 'absolute' && f.top === 0 && f.bottom === 0 && f.left === 0 && f.right === 0) return null
-    const tl = f.borderTopLeftRadius ?? r
-    const tr = f.borderTopRightRadius ?? r
-    const br = f.borderBottomRightRadius ?? r
-    const bl = f.borderBottomLeftRadius ?? r
-    let c: any = null
-    try {
-        c = processColor(f.backgroundColor)
-    } catch {}
-    return {
-        id: `ogui-glass-btn:${tl},${tr},${br},${bl}${typeof c === 'number' ? `;c=${c >>> 0}` : ''}`,
-        radius: { borderTopLeftRadius: tl, borderTopRightRadius: tr, borderBottomRightRadius: br, borderBottomLeftRadius: bl },
-    }
-}
 
 function patchButtons(cleanup: (...f: Array<() => void>) => void) {
     if (typeof pressInner?.render !== 'function') return
@@ -96,21 +68,16 @@ function patchButtons(cleanup: (...f: Array<() => void>) => void) {
             const s = settings()
             if (!props || !s.enabled || !s.buttons) return orig.apply(this, args)
             try {
-                const fnStyle = typeof props.style === 'function'
-                const g = glassStyle(fnStyle ? props.style({ pressed: false, hovered: false }) : props.style)
-                if (!g) return orig.apply(this, args)
-                const clear = { backgroundColor: 'transparent' }
-                const style = fnStyle ? (st: any) => [props.style(st), clear] : [props.style, clear]
-                const pane = createElement(View, {
-                    key: 'ogui-glass',
+                const probe = createElement(View, {
+                    key: 'ogui-glass-probe',
                     pointerEvents: 'none',
-                    nativeID: g.id,
+                    nativeID: 'ogui-glass-probe',
                     collapsable: false,
-                    style: [StyleSheet.absoluteFill, g.radius, { backgroundColor: 'transparent', overflow: 'hidden' }],
+                    style: StyleSheet.absoluteFill,
                 })
                 const kids = props.children
-                const children = typeof kids === 'function' ? (st: any) => [pane, kids(st)] : [pane, kids]
-                return orig.apply(this, [{ ...props, style, children }, ...args.slice(1)])
+                const children = typeof kids === 'function' ? (st: any) => [probe, kids(st)] : [probe, kids]
+                return orig.apply(this, [{ ...props, children }, ...args.slice(1)])
             } catch {
                 return orig.apply(this, args)
             }
@@ -157,7 +124,7 @@ function SettingsPage() {
             <View style={{ gap: 4 }}>
                 <Text variant="heading-sm/bold">Test status</Text>
                 <Text variant="text-sm/medium" color="text-muted">
-                    {`Android ${st.sdk ?? '?'}, blur ${st.blur ? 'on' : 'off (Android 12+ needed)'}, ${st.views ?? 0} glass view(s), ${st.frames ?? 0} backdrop frame(s), ${st.faded ?? 0} background(s) see-through${st.surfaces ? `, surfaces: ${st.surfaces}` : ''}`}
+                    {`Android ${st.sdk ?? '?'}, blur ${st.blur ? 'on' : 'off (Android 12+ needed)'}, ${st.views ?? 0} glass view(s), ${st.frames ?? 0} backdrop frame(s), ${st.faded ?? 0} background(s) see-through, ${st.buttons ?? 0} glass button(s)${st.surfaces ? `, surfaces: ${st.surfaces}` : ''}`}
                 </Text>
                 {Button ? (
                     <Button

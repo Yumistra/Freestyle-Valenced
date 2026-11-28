@@ -151,16 +151,17 @@ private class Chain(val kind: String, sr: Int) {
         "baby" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 260f), Biquad(Biquad.LP, sr.toFloat(), 6500f))
         // 엄마 목소리: 조금만 높이고, 따뜻하게(400 Hz 언저리), 부드럽게(높은 쪽을 살짝 깎는다)
         "mommy" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 120f), Biquad(Biquad.PEAK, sr.toFloat(), 420f, 0.9f, 3f), Biquad(Biquad.PEAK, sr.toFloat(), 3500f, 1f, -2f), Biquad(Biquad.LP, sr.toFloat(), 7500f))
-        // 싸구려 마이크: 전화기 대역(300 Hz ~ 3.4 kHz) 만 남긴다. 이 대역에 말소리가 다 들어 있어서 찢어져도 말은 들린다.
-        // 1 kHz(코맹맹이)와 2.8 kHz(자음이 또렷해지는 곳)를 키운다
-        "bad" -> arrayOf(
-            Biquad(Biquad.HP, sr.toFloat(), 300f), Biquad(Biquad.HP, sr.toFloat(), 300f),
-            Biquad(Biquad.LP, sr.toFloat(), 3400f), Biquad(Biquad.LP, sr.toFloat(), 3400f),
-            Biquad(Biquad.PEAK, sr.toFloat(), 1000f, 1.0f, 5f),
-            Biquad(Biquad.PEAK, sr.toFloat(), 2800f, 1.2f, 4f),
-        )
+        // BAD VOICE (받은 샘플 소리 분석): 낮은 소리가 가장 크고 높은 소리로 갈수록 고르게 줄어드는, 저음이 터지는 찢어진 마이크.
+        // 찢기 전에는 아주 낮은 웅웅거림만 깎는다 (말소리는 다 남겨서 찢어져도 말이 들린다)
+        "bad" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 80f))
         else -> emptyArray()
     }
+    /** 찢은 뒤에 저음을 키우고 높은 쪽을 부드럽게 (샘플의 소리 모양) */
+    private val post: Array<Biquad> = if (kind == "bad") arrayOf(
+        Biquad(Biquad.LOW_SHELF, sr.toFloat(), 250f, 0.707f, 6f),
+        Biquad(Biquad.PEAK, sr.toFloat(), 500f, 0.8f, 4f),
+        Biquad(Biquad.LP, sr.toFloat(), 7000f),
+    ) else emptyArray()
     private var hold = 0f
     private var holdLeft = 0
     private var env = 0f
@@ -173,15 +174,11 @@ private class Chain(val kind: String, sr: Int) {
             val ax = Math.abs(x)
             env = if (ax > env) env + (ax - env) * 0.02f else env * 0.9995f
             val gate = Math.min(1f, Math.max(0f, (env - 0.006f) / 0.015f))
-            // 아주 세게 키워서 찢어지게: 거의 모든 소리가 최대 크기로 눌려서 시끄럽다
-            x = Math.tanh((x * 28f).toDouble()).toFloat() * 0.97f
-            // 살짝 거친 디지털 느낌 (말을 가리지 않을 만큼만)
-            if (holdLeft <= 0) {
-                hold = Math.round(x * 96f) / 96f
-                holdLeft = 2
-            }
-            holdLeft--
-            x = hold * gate
+            // 아주 세게 키워서 찢어지게 (거의 모든 소리가 최대 크기로 눌린다)
+            x = Math.tanh((x * 18f).toDouble()).toFloat()
+            for (f in post) x = f.run(x)
+            // 저음을 키워서 넘친 것을 다시 부드럽게 눌러 시끄럽지만 깨지지는 않게
+            x = Math.tanh(x.toDouble()).toFloat() * 0.85f * gate
         }
         return x
     }
