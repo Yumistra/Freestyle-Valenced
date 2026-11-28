@@ -87,7 +87,7 @@ function SettingsPage() {
             <View style={{ gap: 4 }}>
                 <Text variant="heading-sm/bold">Test status</Text>
                 <Text variant="text-sm/medium" color="text-muted">
-                    {`Android ${st.sdk ?? '?'}, blur ${st.blur ? 'on' : 'off (Android 12+ needed)'}, ${st.views ?? 0} glass view(s), ${st.frames ?? 0} backdrop frame(s)`}
+                    {`Android ${st.sdk ?? '?'}, blur ${st.blur ? 'on' : 'off (Android 12+ needed)'}, ${st.views ?? 0} glass view(s), ${st.frames ?? 0} backdrop frame(s), ${st.faded ?? 0} background(s) see-through${st.surfaces ? `, surfaces: ${st.surfaces}` : ''}`}
                 </Text>
                 {st.error ? (
                     <Text variant="text-xs/medium" color="text-danger">

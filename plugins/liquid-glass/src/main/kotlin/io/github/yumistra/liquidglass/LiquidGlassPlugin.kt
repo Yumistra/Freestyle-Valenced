@@ -137,6 +137,29 @@ private fun place(c: Canvas, parent: ViewGroup, ch: View) {
 private val seen: MutableSet<Drawable> = Collections.newSetFromMap(WeakHashMap())
 private val lastScan = WeakHashMap<View, Long>()
 @Volatile private var contentAlpha = 0.45f
+/** 비침 처리한 배경 수, 창 바탕으로 본 배경의 종류 (테스트 로그용) */
+@Volatile private var faded = 0
+@Volatile private var surfaceKinds = ""
+private fun fade(bg: Drawable, a: Float) {
+    val want = (a * 255).toInt()
+    try {
+        bg.mutate().alpha = want
+    } catch (_: Throwable) {
+    }
+    // RN 배경처럼 alpha 를 무시하는 것은 색 필터로 알파를 곱한다 (결과 = 원래 색 × a)
+    val took = try { bg.alpha == want } catch (_: Throwable) { false }
+    if (!took) try {
+        bg.colorFilter = android.graphics.PorterDuffColorFilter(Color.argb(want, 0, 0, 0), android.graphics.PorterDuff.Mode.DST_IN)
+    } catch (_: Throwable) {
+    }
+    faded++
+}
+
+/**
+ * 유리 창 안의 배경을 비치게 한다.
+ * 창을 거의 다 덮는 바탕 (디스코드 시트의 바탕 판, 여러 겹일 수 있다) 은 아예 투명하게, 그보다 작은 넓은 카드와 줄은 반투명하게.
+ * 겹겹이 반투명이면 겹칠수록 다시 진해져서 유리가 안 보인다. 버튼, 아이콘 같은 작은 것은 그대로
+ */
 private fun seeThrough(pane: View, glass: View) {
     val now = System.currentTimeMillis()
     if (now - (lastScan[pane] ?: 0L) < 500) return
@@ -147,10 +170,10 @@ private fun seeThrough(pane: View, glass: View) {
         val bg = v.background
         if (bg != null && v !== pane && v.width >= minW && bg !in seen) {
             seen.add(bg)
-            try {
-                bg.mutate().alpha = (contentAlpha * 255).toInt()
-            } catch (_: Throwable) {
-            }
+            val surface = v.width >= pane.width * 0.9f && v.height >= pane.height * 0.6f
+            if (surface && surfaceKinds.length < 200) surfaceKinds += (if (surfaceKinds.isEmpty()) "" else ", ") + bg.javaClass.simpleName
+            fade(bg, if (surface) 0f else contentAlpha)
+            v.invalidate()
         }
         if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i), depth + 1)
     }
@@ -229,7 +252,17 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
     var ty = 0f
     private var anim: android.animation.ValueAnimator? = null
 
+    /** 손가락이 유리 위에 있는 동안 true */
+    var held = false
+
+    fun follow(x: Float, y: Float) {
+        tx = x
+        ty = y
+        invalidateSelf()
+    }
+
     fun touch(down: Boolean, x: Float, y: Float) {
+        held = down
         tx = x
         ty = y
         val from = press
@@ -353,23 +386,24 @@ val liquidGlassPlugin = plugin {
                     }
                 }
             })
-            // 유리 창을 누르면 반응 (창 전체가 받는 터치를 본다, 가로채지 않는다)
+            // 손가락을 따라 빛이 움직인다: 창의 맨 위 뷰(DecorView)가 받는 모든 터치를 본다 (가로채지 않는다).
+            // 시트 안의 스크롤이나 버튼이 터치를 가져가도 맨 위에서는 계속 보인다
             unhooks += XposedHelpers.findAndHookMethod(ViewGroup::class.java, "dispatchTouchEvent", android.view.MotionEvent::class.java, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!glassOn || panes.isEmpty()) return
-                    val g = panes[param.thisObject as View] ?: return
-                    val d = g.foreground as? GlassDrawable ?: return
+                    if (!glassOn) return
+                    val root = param.thisObject as View
+                    if (root.parent is View) return
                     val e = param.args[0] as android.view.MotionEvent
-                    // 창 좌표 → 유리 칸 좌표
-                    val pane = param.thisObject as View
-                    pane.getLocationInWindow(pl)
-                    g.getLocationInWindow(gl)
-                    val x = e.x + pl[0] - gl[0]
-                    val y = e.y + pl[1] - gl[1]
+                    val g = synchronized(glassViews) { glassViews.lastOrNull { it.isAttachedToWindow && it.rootView === root && it.isShown && it.width > 0 } } ?: return
+                    val d = g.foreground as? GlassDrawable ?: return
+                    g.getLocationOnScreen(gl)
+                    val x = e.rawX - gl[0]
+                    val y = e.rawY - gl[1]
                     when (e.actionMasked) {
-                        android.view.MotionEvent.ACTION_DOWN -> d.touch(true, x, y)
-                        android.view.MotionEvent.ACTION_MOVE -> if (d.press > 0f) { d.tx = x; d.ty = y; d.invalidateSelf() }
-                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> d.touch(false, x, y)
+                        android.view.MotionEvent.ACTION_DOWN ->
+                            if (x >= 0 && y >= 0 && x <= g.width && y <= g.height) d.touch(true, x, y)
+                        android.view.MotionEvent.ACTION_MOVE -> if (d.held) d.follow(x, y)
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> if (d.held) d.touch(false, x, y)
                     }
                 }
             })
@@ -396,6 +430,8 @@ val liquidGlassPlugin = plugin {
                 .put("blur", Build.VERSION.SDK_INT >= 31)
                 .put("views", synchronized(glassViews) { glassViews.count { it.isAttachedToWindow } })
                 .put("frames", frames)
+                .put("faded", faded)
+                .put("surfaces", surfaceKinds)
                 .put("hooks", unhooks.size)
                 .put("error", lastError ?: JSONObject.NULL)
                 .toString()
