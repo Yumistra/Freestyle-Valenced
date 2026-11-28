@@ -44,9 +44,10 @@ private class Optics(val blur: Float, val saturation: Float, val brightness: Flo
 
 /** OpenGlass liquid 재질, 어두운 테마 값 */
 private val MATERIALS = mapOf(
-    "clear" to Optics(3f, 1.9f, 0.46f, 0.22f),
-    "regular" to Optics(14f, 1.85f, 0.56f, 0.36f),
-    "frosted" to Optics(30f, 1.7f, 0.56f, 0.55f),
+    // 밝기를 1 아래로 두면 어두운 디스코드 화면이 거의 검게 돼서 유리가 비치지 않는다 (OpenGlass 값은 밝은 화면 기준)
+    "clear" to Optics(3f, 1.6f, 1.1f, 0.08f),
+    "regular" to Optics(14f, 1.6f, 1.12f, 0.18f),
+    "frosted" to Optics(30f, 1.5f, 1.12f, 0.3f),
 )
 
 @Volatile private var glassOn = true
@@ -160,10 +161,45 @@ private fun fade(bg: Drawable, a: Float) {
  * 창을 거의 다 덮는 바탕 (디스코드 시트의 바탕 판, 여러 겹일 수 있다) 은 아예 투명하게, 그보다 작은 넓은 카드와 줄은 반투명하게.
  * 겹겹이 반투명이면 겹칠수록 다시 진해져서 유리가 안 보인다. 버튼, 아이콘 같은 작은 것은 그대로
  */
+@Volatile private var tree = ""
+private fun describe(v: View): String {
+    val bg = v.background
+    return "${v.javaClass.simpleName} ${v.width}x${v.height} a${"%.2f".format(v.alpha)}" +
+        (if (v is ViewGroup) " kids${v.childCount}" else "") +
+        (if (bg != null) " bg=${bg.javaClass.simpleName}/${try { bg.alpha } catch (_: Throwable) { -1 }}" else "") +
+        (if (v.foreground is GlassDrawable) " GLASS" else "")
+}
+
+/** 테스트 로그: 루트에서 유리 창까지, 그리고 창 안에서 배경이 있는 칸 */
+private fun dumpTree(root: View, pane: View) {
+    val sb = StringBuilder()
+    val chain = ArrayList<View>()
+    var v: View? = pane
+    while (v != null) { chain.add(0, v); if (v === root) break; v = v.parent as? View }
+    sb.append("root ${root.width}x${root.height}\n")
+    for (i in chain.indices) {
+        val g = chain[i]
+        sb.append("  ".repeat(Math.min(i, 12))).append(if (g === pane) "PANE " else "> ").append(describe(g)).append('\n')
+        if (g is ViewGroup && g !== pane && i + 1 < chain.size) for (k in 0 until g.childCount) {
+            val ch = g.getChildAt(k)
+            if (ch === chain[i + 1]) break
+            sb.append("  ".repeat(Math.min(i, 12))).append("  behind: ").append(describe(ch)).append('\n')
+        }
+    }
+    fun walk(x: View, d: Int) {
+        if (d > 30 || sb.length > 6000) return
+        if (x !== pane && (x.background != null || x.foreground is GlassDrawable)) sb.append("    ".repeat(1)).append("in pane d$d: ").append(describe(x)).append('\n')
+        if (x is ViewGroup) for (k in 0 until x.childCount) walk(x.getChildAt(k), d + 1)
+    }
+    walk(pane, 0)
+    tree = sb.toString()
+}
+
 private fun seeThrough(pane: View, glass: View) {
     val now = System.currentTimeMillis()
     if (now - (lastScan[pane] ?: 0L) < 500) return
     lastScan[pane] = now
+    try { dumpTree(pane.rootView, pane) } catch (t: Throwable) { tree = "dump: $t" }
     val minW = pane.width * 0.6f
     fun walk(v: View, depth: Int) {
         if (depth > 40 || v === glass) return
@@ -313,10 +349,12 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
         // 2. 색 한 겹
         canvas.drawRect(rect, fill)
         // 3. 안쪽 빛 (edge lensing): 가장자리 안쪽의 옅은 흰 띠
-        val g = dp(v, 16f)
-        glow.strokeWidth = g
-        glow.color = Color.argb(((0.05f + 0.06f * press) * 255).toInt(), 255, 255, 255)
-        canvas.drawPath(path, glow)
+        // 한 줄짜리 띠는 안쪽에 테두리가 하나 더 있는 것처럼 보여서, 넓이를 달리한 옅은 띠를 겹쳐 안쪽으로 부드럽게 사라지게 한다
+        for (k in 1..4) {
+            glow.strokeWidth = dp(v, 6f * k)
+            glow.color = Color.argb(((0.012f + 0.02f * press) * 255).toInt().coerceAtLeast(1), 255, 255, 255)
+            canvas.drawPath(path, glow)
+        }
         // 누른 곳에 모이는 빛
         if (press > 0.01f) {
             val rad = dp(v, 140f) * (0.7f + 0.3f * press)
@@ -416,7 +454,7 @@ val liquidGlassPlugin = plugin {
                 val o = JSONObject(args.getOrNull(0) as? String ?: "{}")
                 glassOn = o.optBoolean("enabled", true)
                 optics = MATERIALS[o.optString("material")] ?: MATERIALS.getValue("regular")
-                contentAlpha = when (o.optString("material")) { "clear" -> 0.3f; "frosted" -> 0.65f; else -> 0.45f }
+                contentAlpha = when (o.optString("material")) { "clear" -> 0.2f; "frosted" -> 0.45f; else -> 0.3f }
                 synchronized(glassViews) { for (v in glassViews) v.post { v.invalidate() } }
                 true
             } catch (t: Throwable) {
@@ -432,6 +470,7 @@ val liquidGlassPlugin = plugin {
                 .put("frames", frames)
                 .put("faded", faded)
                 .put("surfaces", surfaceKinds)
+                .put("tree", tree)
                 .put("hooks", unhooks.size)
                 .put("error", lastError ?: JSONObject.NULL)
                 .toString()

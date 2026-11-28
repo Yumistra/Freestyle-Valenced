@@ -1,3 +1,4 @@
+import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { BottomSheet } from '@valenced/externals/gorhom'
 import { beforeJSX } from '@valenced/react/jsx-runtime'
 import { Design } from '@valenced/discord/design'
@@ -52,7 +53,7 @@ function patchSheets(cleanup: (...f: Array<() => void>) => void) {
 function SettingsPage() {
     storage?.use?.()
     const s = settings()
-    const { TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, Text } = Design as any
+    const { TableRowGroup, TableSwitchRow, TableRadioGroup, TableRadioRow, Text, Button } = Design as any
     const [st, setSt] = useState<any>({})
     useEffect(() => {
         let alive = true
@@ -89,6 +90,14 @@ function SettingsPage() {
                 <Text variant="text-sm/medium" color="text-muted">
                     {`Android ${st.sdk ?? '?'}, blur ${st.blur ? 'on' : 'off (Android 12+ needed)'}, ${st.views ?? 0} glass view(s), ${st.frames ?? 0} backdrop frame(s), ${st.faded ?? 0} background(s) see-through${st.surfaces ? `, surfaces: ${st.surfaces}` : ''}`}
                 </Text>
+                {Button ? (
+                    <Button
+                        size="sm"
+                        variant="secondary"
+                        text="Copy test log"
+                        onPress={() => Clipboard.setString(`Liquid Glass\n${JSON.stringify(st, null, 1)}`)}
+                    />
+                ) : null}
                 {st.error ? (
                     <Text variant="text-xs/medium" color="text-danger">
                         {String(st.error)}
