@@ -1,10 +1,11 @@
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { BottomSheet } from '@valenced/externals/gorhom'
 import { beforeJSX } from '@valenced/react/jsx-runtime'
+import { instead } from '@valenced/patcher'
 import { Design } from '@valenced/discord/design'
 import { callNativeMethod } from '@valenced/modules/native'
 import { createElement, useEffect, useState } from 'react'
-import { ScrollView, StyleSheet, View } from 'react-native'
+import { Dimensions, Pressable, processColor, ScrollView, StyleSheet, View } from 'react-native'
 
 /**
  * Liquid Glass (test): OpenGlass UI (moekoelueker/open-glass-ui) 의 "liquid" 재질을 디스코드에 입힌다.
@@ -21,8 +22,9 @@ interface Settings {
     enabled: boolean
     material: Material
     sheets: boolean
+    buttons: boolean
 }
-const DEFAULTS: Settings = { enabled: true, material: 'regular', sheets: true }
+const DEFAULTS: Settings = { enabled: true, material: 'regular', sheets: true, buttons: true }
 
 let storage: any
 const settings = (): Settings => ({ ...DEFAULTS, ...(storage?.cache ?? {}) })
@@ -48,6 +50,72 @@ function patchSheets(cleanup: (...f: Array<() => void>) => void) {
                 return [args[0], { ...args[1], backgroundComponent: GlassSheetBackground, backgroundStyle: { backgroundColor: 'transparent' } }, ...args.slice(2)] as any
             }) as any,
         )
+}
+
+/**
+ * 버튼을 유리로: 디스코드의 버튼은 거의 다 RN Pressable 이다 (기본 버튼, 이모지 동그라미, 둥근 아이콘 버튼).
+ * 둥근 모서리에 색이 칠해진 Pressable 이면 그 색을 빼고, 맨 뒤에 유리 칸(nativeID "ogui-glass-btn:둥글기")을 깐다.
+ * 목록 한 줄처럼 화면 폭만 한 것과 모서리가 각진 것은 그대로
+ */
+const pressInner: any = (Pressable as any)?.type ?? Pressable
+
+const isClear = (c: any) => c == null || c === 'transparent' || (typeof c === 'string' && /^rgba\(.*,\s*0(\.0+)?\s*\)$/.test(c)) || (typeof c === 'string' && /^#[0-9a-f]{6}00$/i.test(c))
+
+function radiusOf(f: any): number {
+    const r = [f.borderRadius, f.borderTopLeftRadius, f.borderTopRightRadius, f.borderBottomLeftRadius, f.borderBottomRightRadius].filter((x: any) => typeof x === 'number')
+    return r.length ? Math.max(...r) : 0
+}
+
+function glassStyle(base: any) {
+    const f: any = StyleSheet.flatten(base) ?? {}
+    if (isClear(f.backgroundColor)) return null
+    const r = radiusOf(f)
+    if (r < 6) return null
+    const w = typeof f.width === 'number' ? f.width : 0
+    if (w >= Dimensions.get('window').width * 0.9) return null
+    if (f.position === 'absolute' && f.top === 0 && f.bottom === 0 && f.left === 0 && f.right === 0) return null
+    const tl = f.borderTopLeftRadius ?? r
+    const tr = f.borderTopRightRadius ?? r
+    const br = f.borderBottomRightRadius ?? r
+    const bl = f.borderBottomLeftRadius ?? r
+    let c: any = null
+    try {
+        c = processColor(f.backgroundColor)
+    } catch {}
+    return {
+        id: `ogui-glass-btn:${tl},${tr},${br},${bl}${typeof c === 'number' ? `;c=${c >>> 0}` : ''}`,
+        radius: { borderTopLeftRadius: tl, borderTopRightRadius: tr, borderBottomRightRadius: br, borderBottomLeftRadius: bl },
+    }
+}
+
+function patchButtons(cleanup: (...f: Array<() => void>) => void) {
+    if (typeof pressInner?.render !== 'function') return
+    cleanup(
+        instead(pressInner, 'render', function (this: unknown, args: any[], orig: (...a: any[]) => any) {
+            const props = args[0]
+            const s = settings()
+            if (!props || !s.enabled || !s.buttons) return orig.apply(this, args)
+            try {
+                const fnStyle = typeof props.style === 'function'
+                const g = glassStyle(fnStyle ? props.style({ pressed: false, hovered: false }) : props.style)
+                if (!g) return orig.apply(this, args)
+                const clear = { backgroundColor: 'transparent' }
+                const style = fnStyle ? (st: any) => [props.style(st), clear] : [props.style, clear]
+                const pane = createElement(View, {
+                    key: 'ogui-glass',
+                    pointerEvents: 'none',
+                    nativeID: g.id,
+                    collapsable: false,
+                    style: [StyleSheet.absoluteFill, g.radius, { backgroundColor: 'transparent', overflow: 'hidden' }],
+                })
+                const kids = props.children
+                const children = typeof kids === 'function' ? (st: any) => [pane, kids(st)] : [pane, kids]
+                return orig.apply(this, [{ ...props, style, children }, ...args.slice(1)])
+            } catch {
+                return orig.apply(this, args)
+            }
+        }) as any,
+    )
 }
 
 function SettingsPage() {
@@ -77,6 +145,7 @@ function SettingsPage() {
             <TableRowGroup>
                 <TableSwitchRow label="Liquid glass" value={s.enabled} onValueChange={(v: boolean) => set({ enabled: v })} />
                 <TableSwitchRow label="Sheets (menus, profiles)" value={s.sheets} onValueChange={(v: boolean) => set({ sheets: v })} />
+                <TableSwitchRow label="Buttons" subLabel="Rounded buttons, emoji circles, icon buttons" value={s.buttons} onValueChange={(v: boolean) => set({ buttons: v })} />
             </TableRowGroup>
             {TableRadioGroup && TableRadioRow ? (
                 <TableRadioGroup title="Glass" value={s.material} onChange={(v: Material) => set({ material: v })}>
@@ -113,6 +182,7 @@ export default plugin({
     start({ cleanup, jsonStorage }: any) {
         storage = jsonStorage
         patchSheets(cleanup)
+        patchButtons(cleanup)
         sendConfig()
         const again = [1500, 5000].map(ms => setTimeout(sendConfig, ms))
         cleanup(() => again.forEach(clearTimeout))

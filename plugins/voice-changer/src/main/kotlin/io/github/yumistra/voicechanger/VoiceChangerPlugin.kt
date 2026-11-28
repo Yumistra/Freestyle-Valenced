@@ -151,11 +151,13 @@ private class Chain(val kind: String, sr: Int) {
         "baby" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 260f), Biquad(Biquad.LP, sr.toFloat(), 6500f))
         // 엄마 목소리: 조금만 높이고, 따뜻하게(400 Hz 언저리), 부드럽게(높은 쪽을 살짝 깎는다)
         "mommy" -> arrayOf(Biquad(Biquad.HP, sr.toFloat(), 120f), Biquad(Biquad.PEAK, sr.toFloat(), 420f, 0.9f, 3f), Biquad(Biquad.PEAK, sr.toFloat(), 3500f, 1f, -2f), Biquad(Biquad.LP, sr.toFloat(), 7500f))
-        // 싸구려 마이크: 400 Hz 아래와 1.8 kHz 위를 가파르게 깎고 1 kHz 언저리를 키운다
+        // 싸구려 마이크: 전화기 대역(300 Hz ~ 3.4 kHz) 만 남긴다. 이 대역에 말소리가 다 들어 있어서 찢어져도 말은 들린다.
+        // 1 kHz(코맹맹이)와 2.8 kHz(자음이 또렷해지는 곳)를 키운다
         "bad" -> arrayOf(
-            Biquad(Biquad.HP, sr.toFloat(), 420f), Biquad(Biquad.HP, sr.toFloat(), 420f),
-            Biquad(Biquad.LP, sr.toFloat(), 1800f), Biquad(Biquad.LP, sr.toFloat(), 1800f),
-            Biquad(Biquad.PEAK, sr.toFloat(), 900f, 1.2f, 6f),
+            Biquad(Biquad.HP, sr.toFloat(), 300f), Biquad(Biquad.HP, sr.toFloat(), 300f),
+            Biquad(Biquad.LP, sr.toFloat(), 3400f), Biquad(Biquad.LP, sr.toFloat(), 3400f),
+            Biquad(Biquad.PEAK, sr.toFloat(), 1000f, 1.0f, 5f),
+            Biquad(Biquad.PEAK, sr.toFloat(), 2800f, 1.2f, 4f),
         )
         else -> emptyArray()
     }
@@ -167,16 +169,16 @@ private class Chain(val kind: String, sr: Int) {
         var x = pitch?.run(x0) ?: x0
         for (f in filters) x = f.run(x)
         if (kind == "bad") {
-            // 말할 때만 찢어지게: 조용할 때 키우면 잡음만 지지직 커진다 (노이즈 게이트)
+            // 말할 때만 키운다: 조용할 때 키우면 잡음만 커진다 (노이즈 게이트)
             val ax = Math.abs(x)
             env = if (ax > env) env + (ax - env) * 0.02f else env * 0.9995f
-            val gate = Math.min(1f, Math.max(0f, (env - 0.008f) / 0.02f))
-            // 크게 키우고 찢어지게 (부드러운 클리핑)
-            x = Math.tanh((x * 7f).toDouble()).toFloat() * 0.8f
-            // 샘플을 잠깐씩 붙잡아 거친 디지털 소리 (16 kHz 쯤으로 떨어뜨린 느낌)
+            val gate = Math.min(1f, Math.max(0f, (env - 0.006f) / 0.015f))
+            // 아주 세게 키워서 찢어지게: 거의 모든 소리가 최대 크기로 눌려서 시끄럽다
+            x = Math.tanh((x * 28f).toDouble()).toFloat() * 0.97f
+            // 살짝 거친 디지털 느낌 (말을 가리지 않을 만큼만)
             if (holdLeft <= 0) {
-                hold = Math.round(x * 48f) / 48f
-                holdLeft = 3
+                hold = Math.round(x * 96f) / 96f
+                holdLeft = 2
             }
             holdLeft--
             x = hold * gate

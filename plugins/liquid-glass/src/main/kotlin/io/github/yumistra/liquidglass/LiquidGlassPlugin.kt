@@ -58,12 +58,16 @@ private val MATERIALS = mapOf(
 /** 녹화 중에는 유리를 그리지 않는다 (유리가 자기 녹화본을 그리지 않게) */
 @Volatile private var capturing = false
 private val glassViews: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
+/** 아래 창(시트) 유리. 나머지는 버튼 유리 */
+private val sheetGlass: MutableSet<View> = Collections.newSetFromMap(WeakHashMap())
 private val controllers = WeakHashMap<View, Controller>()
 /** 유리 창 → 그 창의 유리 칸 (누름 반응) */
 private val panes = WeakHashMap<View, View>()
 private val pl = IntArray(2)
 private val gl = IntArray(2)
 private var nativeIdKey = 0
+/** 지금 손가락이 누르고 있는 유리 */
+private var held: WeakReference<View>? = null
 
 private fun dp(v: View, x: Float) = x * v.resources.displayMetrics.density
 
@@ -199,7 +203,7 @@ private fun seeThrough(pane: View, glass: View) {
     val now = System.currentTimeMillis()
     if (now - (lastScan[pane] ?: 0L) < 500) return
     lastScan[pane] = now
-    try { dumpTree(pane.rootView, pane) } catch (t: Throwable) { tree = "dump: $t" }
+    if (synchronized(glassViews) { glass in sheetGlass }) try { dumpTree(pane.rootView, pane) } catch (t: Throwable) { tree = "dump: $t" }
     val minW = pane.width * 0.6f
     fun walk(v: View, depth: Int) {
         if (depth > 40 || v === glass) return
@@ -224,6 +228,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     var w = 0
     var h = 0
     var effectKey: Optics? = null
+    var lastCapture = 0L
 
     override fun onPreDraw(): Boolean {
         val r = root.get() ?: return true
@@ -239,8 +244,13 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 w = sw
                 h = sh
             }
-            // 맨 위(가장 나중에 그려지는) 유리 창 하나 아래까지만 그린다
-            val pane = paneOf(live.last())
+            // 시트가 열려 있으면 시트 아래를, 아니면 버튼 하나 아래를 녹화한다 (한 창에 한 장만 찍는다)
+            val sheet = synchronized(glassViews) { live.lastOrNull { it in sheetGlass } }
+            val now = System.currentTimeMillis()
+            // 버튼만 있을 때는 화면이 바뀌는 동안에도 초당 30번까지만 찍는다 (배터리)
+            if (sheet == null && now - lastCapture < 33) return true
+            lastCapture = now
+            val pane = paneOf(sheet ?: live.maxByOrNull { it.width * it.height }!!)
             for (v in live) panes[paneOf(v)] = v
             val c = n.beginRecording(sw, sh)
             capturing = true
@@ -261,8 +271,10 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
                 n.setRenderEffect(RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm), RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)))
             }
             frames++
-            seeThrough(pane, live.last())
-            for (v in live) v.foreground?.invalidateSelf()
+            for (v in live) seeThrough(paneOf(v), v)
+            // 시트 유리만 매 프레임 다시 그린다. 버튼 유리는 녹화본(RenderNode)을 가리키기만 해서 다시 그릴 필요가 없다
+            // (버튼까지 다시 그리면 화면이 쉬지 않고 계속 그려진다)
+            if (sheet != null) sheet.foreground?.invalidateSelf()
         } catch (t: Throwable) {
             capturing = false
             lastError = "capture: $t"
@@ -271,7 +283,7 @@ private class Controller(root: View) : ViewTreeObserver.OnPreDrawListener {
     }
 }
 
-private class GlassDrawable(view: View, private val radii: FloatArray) : Drawable() {
+private class GlassDrawable(view: View, private val radii: FloatArray, private val tint: Int? = null) : Drawable() {
     private val view = WeakReference(view)
     private val path = Path()
     private val rect = RectF()
@@ -341,7 +353,11 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
             canvas.scale(ctl.scale, ctl.scale)
             canvas.drawRenderNode(n)
             canvas.restore()
-            fill.color = Color.argb((o.alpha * 255).toInt(), 16, 18, 24)
+            // 버튼은 원래 색(파란 버튼, 빨간 버튼)을 옅게 남겨 무슨 버튼인지 알 수 있게
+            fill.color = if (tint != null) Color.argb((Color.alpha(tint) * (0.25f + o.alpha)).toInt().coerceIn(0, 255), Color.red(tint), Color.green(tint), Color.blue(tint))
+                else Color.argb((o.alpha * 255).toInt(), 16, 18, 24)
+        } else if (tint != null) {
+            fill.color = tint
         } else {
             // 흐림을 못 쓰면 진하게 (글자가 읽히게)
             fill.color = Color.argb(235, 16, 18, 24)
@@ -351,13 +367,13 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
         // 3. 안쪽 빛 (edge lensing): 가장자리 안쪽의 옅은 흰 띠
         // 한 줄짜리 띠는 안쪽에 테두리가 하나 더 있는 것처럼 보여서, 넓이를 달리한 옅은 띠를 겹쳐 안쪽으로 부드럽게 사라지게 한다
         for (k in 1..4) {
-            glow.strokeWidth = dp(v, 6f * k)
+            glow.strokeWidth = Math.min(dp(v, 6f * k), Math.min(b.width(), b.height()) * 0.08f * k)
             glow.color = Color.argb(((0.012f + 0.02f * press) * 255).toInt().coerceAtLeast(1), 255, 255, 255)
             canvas.drawPath(path, glow)
         }
         // 누른 곳에 모이는 빛
         if (press > 0.01f) {
-            val rad = dp(v, 140f) * (0.7f + 0.3f * press)
+            val rad = Math.min(dp(v, 140f), Math.max(b.width(), b.height()) * 0.8f) * (0.7f + 0.3f * press)
             touchPaint.shader = android.graphics.RadialGradient(tx, ty, rad, intArrayOf(Color.argb((0.22f * press * 255).toInt(), 255, 255, 255), Color.argb(0, 255, 255, 255)), null, Shader.TileMode.CLAMP)
             canvas.drawCircle(tx, ty, rad, touchPaint)
         }
@@ -380,16 +396,20 @@ private class GlassDrawable(view: View, private val radii: FloatArray) : Drawabl
 
 /** nativeID 가 붙은 칸에 유리를 단다 */
 private fun attach(v: View, id: String) {
-    val parts = id.substringAfter(':', "").split(',').mapNotNull { it.trim().toFloatOrNull() }
+    val tint = id.substringAfter(";c=", "").toLongOrNull()?.toInt()
+    val parts = id.substringAfter(':', "").substringBefore(';').split(',').mapNotNull { it.trim().toFloatOrNull() }
     val r = FloatArray(8)
     for (i in 0 until 4) {
         val x = dp(v, parts.getOrNull(i) ?: parts.firstOrNull() ?: 0f)
         r[i * 2] = x
         r[i * 2 + 1] = x
     }
-    v.foreground = GlassDrawable(v, r)
+    v.foreground = GlassDrawable(v, r, tint)
     v.setWillNotDraw(false)
-    synchronized(glassViews) { glassViews.add(v) }
+    synchronized(glassViews) {
+        glassViews.add(v)
+        if (!id.startsWith("ogui-glass-btn")) sheetGlass.add(v)
+    }
     val hook = { root: View ->
         if (controllers[root] == null) {
             val c = Controller(root)
@@ -432,16 +452,34 @@ val liquidGlassPlugin = plugin {
                     val root = param.thisObject as View
                     if (root.parent is View) return
                     val e = param.args[0] as android.view.MotionEvent
-                    val g = synchronized(glassViews) { glassViews.lastOrNull { it.isAttachedToWindow && it.rootView === root && it.isShown && it.width > 0 } } ?: return
-                    val d = g.foreground as? GlassDrawable ?: return
-                    g.getLocationOnScreen(gl)
-                    val x = e.rawX - gl[0]
-                    val y = e.rawY - gl[1]
                     when (e.actionMasked) {
-                        android.view.MotionEvent.ACTION_DOWN ->
-                            if (x >= 0 && y >= 0 && x <= g.width && y <= g.height) d.touch(true, x, y)
-                        android.view.MotionEvent.ACTION_MOVE -> if (d.held) d.follow(x, y)
-                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> if (d.held) d.touch(false, x, y)
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            // 손가락 아래의 유리 중 가장 작은 것 (시트 위의 버튼이면 버튼)
+                            var best: View? = null
+                            val live = synchronized(glassViews) { glassViews.filter { it.isAttachedToWindow && it.rootView === root && it.isShown && it.width > 0 } }
+                            for (g in live) {
+                                g.getLocationOnScreen(gl)
+                                val x = e.rawX - gl[0]
+                                val y = e.rawY - gl[1]
+                                if (x < 0 || y < 0 || x > g.width || y > g.height) continue
+                                if (best == null || g.width * g.height < best.width * best.height) best = g
+                            }
+                            val g = best ?: return
+                            g.getLocationOnScreen(gl)
+                            held = WeakReference(g)
+                            (g.foreground as? GlassDrawable)?.touch(true, e.rawX - gl[0], e.rawY - gl[1])
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            val g = held?.get() ?: return
+                            g.getLocationOnScreen(gl)
+                            (g.foreground as? GlassDrawable)?.follow(e.rawX - gl[0], e.rawY - gl[1])
+                        }
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                            val g = held?.get() ?: return
+                            held = null
+                            g.getLocationOnScreen(gl)
+                            (g.foreground as? GlassDrawable)?.touch(false, e.rawX - gl[0], e.rawY - gl[1])
+                        }
                     }
                 }
             })

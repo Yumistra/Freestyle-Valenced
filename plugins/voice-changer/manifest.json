@@ -5,7 +5,7 @@
 	"description": "Change how your mic sounds in voice channels.",
 	"author": "Yumistra",
 	"icon": "MicrophoneIcon",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"dependencies": {
 		"valenced.api": {},
 		"discord": {}
